@@ -1,0 +1,13 @@
+{
+  "name": "@renovi/api-client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cliente TS gerado a partir do OpenAPI (orval). Placeholder na fundação.",
+  "scripts": {
+    "generate": "orval"
+  },
+  "devDependencies": {
+    "orval": "^7.3.0"
+  }
+}

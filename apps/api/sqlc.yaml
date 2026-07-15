@@ -1,0 +1,23 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    # Lê apenas as migrations "up" como schema (evita que os DROP das "down"
+    # apaguem as tabelas para o sqlc).
+    schema: "internal/db/migrations/*.up.sql"
+    queries: "internal/db/queries"
+    gen:
+      go:
+        package: "gen"
+        out: "internal/db/gen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+        # Overrides: por padrão o sqlc+pgx usa pgtype.UUID / pgtype.Timestamptz.
+        # Preferimos tipos "limpos" (google/uuid.UUID e time.Time) para o domínio.
+        # jsonb -> []byte é o default e serve bem.
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "timestamptz"
+            go_type: "time.Time"

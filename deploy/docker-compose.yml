@@ -1,0 +1,70 @@
+# Infraestrutura LOCAL de desenvolvimento/teste.
+#
+# Sobe os três bancos do ecossistema (SPEC §2.1):
+#   - pg-care     : Postgres renovi_care (nosso banco, escrita/leitura)
+#   - pg-gestao   : Postgres Gestão 2.0 (mock, SOMENTE LEITURA no produto)
+#   - mysql-legacy: MySQL legado (mock da escala/slots)
+#
+# A API e o worker rodam localmente via `go run` (ver Makefile). Para produção,
+# use um compose separado com os serviços api + caddy (ver deploy/README.md).
+#
+# Uso: `make up`  /  `make down`
+services:
+  pg-care:
+    image: postgres:16-alpine
+    container_name: renovi-pg-care
+    environment:
+      POSTGRES_USER: renovi
+      POSTGRES_PASSWORD: renovi
+      POSTGRES_DB: renovi_care
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_care_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U renovi -d renovi_care"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  pg-gestao:
+    image: postgres:16-alpine
+    container_name: renovi-pg-gestao
+    environment:
+      POSTGRES_USER: renovi
+      POSTGRES_PASSWORD: renovi
+      POSTGRES_DB: gestao
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_gestao_data:/var/lib/postgresql/data
+      - ./pg-gestao/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U renovi -d gestao"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mysql-legacy:
+    image: mysql:8.0
+    container_name: renovi-mysql-legacy
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: renovi_legacy
+      MYSQL_USER: renovi
+      MYSQL_PASSWORD: renovi
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_legacy_data:/var/lib/mysql
+      - ./mysql-legacy/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prenovi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pg_care_data:
+  pg_gestao_data:
+  mysql_legacy_data:

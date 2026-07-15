@@ -1,0 +1,26 @@
+{
+  "code": "saude-mental",
+  "version": 1,
+  "name": "Linha de Cuidado — Saúde Mental",
+  "status": "ACTIVE",
+  "items": [
+    {
+      "code": "consulta-psicologia",
+      "type": "APPOINTMENT",
+      "specialty": "PSICOLOGIA",
+      "title": "Consulta de Psicologia",
+      "recurrence_rule": { "freq": "WEEKLY", "interval": 1, "quota": 1 },
+      "availability_window": { "offset_days_from_start": 0, "duration_days": null },
+      "dependencies": []
+    },
+    {
+      "code": "avaliacao-psiquiatrica",
+      "type": "APPOINTMENT",
+      "specialty": "PSIQUIATRIA",
+      "title": "Avaliação Psiquiátrica",
+      "recurrence_rule": { "freq": "MONTHLY", "interval": 1, "quota": 1 },
+      "availability_window": { "offset_days_from_start": 0, "duration_days": null },
+      "dependencies": []
+    }
+  ]
+}

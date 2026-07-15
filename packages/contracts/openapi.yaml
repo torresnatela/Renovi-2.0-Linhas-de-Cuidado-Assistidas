@@ -1,0 +1,115 @@
+openapi: 3.0.3
+info:
+  title: Renovi 2.0 — Plataforma do Paciente (API)
+  description: >
+    Contrato da API do renovi-care. Esta é a FONTE DA VERDADE: altere aqui
+    primeiro, rode `make generate` e só então implemente (fluxo API-first,
+    ver docs/DESENVOLVIMENTO.md). No MVP inicial (fundação) apenas /healthz e
+    /me estão contratados; as demais rotas do SPEC entram nas fases seguintes
+    sem breaking change (versionamento /api/v1).
+  version: 0.1.0
+servers:
+  - url: /api/v1
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Liveness — o processo está de pé.
+      security: []
+      responses:
+        "200":
+          description: Serviço vivo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: Readiness — dependências (banco) acessíveis.
+      security: []
+      responses:
+        "200":
+          description: Pronto para receber tráfego.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: "Não pronto (ex.: banco indisponível)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  # Rotas de negócio (/me, /me/eligibility, /slots, /appointments, /auth/*) entram
+  # nas fases seguintes JUNTO com sua implementação e o middleware de auth — o
+  # contrato só descreve o que já existe (ver docs/PROGRESSO.md).
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status, service, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        service:
+          type: string
+        version:
+          type: string
+        time:
+          type: string
+          format: date-time
+    # ---- Vocabulário do domínio (motor de elegibilidade, ver docs/ARQUITETURA.md).
+    # Contratado desde já para o front; a implementação entra em fase seguinte. ----
+    ItemVerdict:
+      type: object
+      required: [item_code, status, reasons]
+      properties:
+        item_code:
+          type: string
+        status:
+          type: string
+          enum: [AVAILABLE, BLOCKED, QUOTA_EXHAUSTED, NOT_YET_OPEN, OVERDUE]
+        reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/Reason"
+        next_available_at:
+          type: string
+          format: date-time
+          nullable: true
+    Reason:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: >
+            Código máquina-legível que o front traduz em frase. Ex.:
+            QUOTA_EXHAUSTED_WEEKLY, MISSING_PREREQ:aval-psiquiatrica.
+        detail:
+          type: string
+    Problem:
+      description: Erro no formato RFC 7807 (problem+json).
+      type: object
+      required: [title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+  responses: {}
+security:
+  - bearerAuth: []

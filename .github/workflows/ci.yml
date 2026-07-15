@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancela runs antigos do mesmo ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    env:
+      # sqlc >= 1.31 exige Go 1.26; permite baixar o toolchain automaticamente.
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Lint (gofmt + vet)
+        run: make lint
+
+      - name: Generate check (código gerado atualizado?)
+        run: make generate-check
+
+      - name: Unit tests
+        run: make test
+
+      - name: Build
+        run: make build
+
+  api-integration:
+    name: Backend — integração (testcontainers)
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - name: Integration tests
+        run: make test-integration
+
+  web:
+    name: Front (React)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

@@ -1,0 +1,13 @@
+# Config do oapi-codegen. Na fundação geramos apenas os MODELS (tipos) a partir
+# do OpenAPI, para provar o pipeline contrato -> Go tipado sem acoplar todos os
+# handlers ainda. Quando as rotas do MVP entrarem, habilite o strict-server:
+#   generate:
+#     strict-server: true
+#     chi-server: true
+#     models: true
+package: api
+output: internal/http/api/models.gen.go
+generate:
+  models: true
+output-options:
+  skip-prune: true
