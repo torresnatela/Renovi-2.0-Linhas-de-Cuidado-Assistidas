@@ -178,8 +178,13 @@ type AppointmentList struct {
 
 // CreateAppointmentRequest defines model for CreateAppointmentRequest.
 type CreateAppointmentRequest struct {
-	// SlotId O horário escolhido. Sozinho basta: profissional e especialidade saem do próprio slot no legado.
+	// SlotId O horário escolhido. Ele já determina o PROFISSIONAL (slot -> shift -> profissional), então o profissional não vem no corpo: mandar de novo o que o servidor já sabe criaria uma segunda verdade para conferir.
 	SlotId string `json:"slot_id"`
+
+	// SpecialtyId A especialidade escolhida no primeiro passo.
+	// Precisa vir, e não é redundante: o vínculo profissional-especialidade é MUITOS-PARA-MUITOS no legado (tb_professionals_specialities), e há profissional com 2 e até 3 especialidades — o slot não diz para qual delas a consulta é. Sem este campo teríamos que adivinhar, e a especialidade errada iria parar no `appointment_specialty` da DAV e na tela do paciente.
+	// Tem que ser uma especialidade que o profissional do slot realmente atende; senão, 400.
+	SpecialtyId string `json:"specialty_id"`
 }
 
 // HealthStatus defines model for HealthStatus.

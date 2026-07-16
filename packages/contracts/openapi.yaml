@@ -299,9 +299,10 @@ paths:
         Toda tela que dispare isto PRECISA avisar — spinner mudo faz o usuário
         recarregar no meio.
 
-        O corpo leva SÓ o `slot_id`: o profissional e a especialidade saem do
-        próprio slot (slot -> shift -> profissional). Mandar de novo o que o
-        servidor já sabe criaria uma segunda verdade para conferir.
+        O corpo leva `slot_id` + `specialty_id`. O profissional NÃO vem: o slot já
+        o determina (slot -> shift -> profissional). A especialidade vem porque o
+        slot NÃO a determina — o vínculo profissional-especialidade é
+        muitos-para-muitos no legado e há quem atenda três.
 
         ATENÇÃO ao 502/504, que aqui é diferente do cadastro: o
         `POST /appointment` da DAV **não aceita id nosso** (400 "property id
@@ -819,14 +820,31 @@ components:
             $ref: "#/components/schemas/Slot"
     CreateAppointmentRequest:
       type: object
-      required: [slot_id]
+      required: [slot_id, specialty_id]
       properties:
         slot_id:
           type: string
           description: >
-            O horário escolhido. Sozinho basta: profissional e especialidade saem
-            do próprio slot no legado.
+            O horário escolhido. Ele já determina o PROFISSIONAL
+            (slot -> shift -> profissional), então o profissional não vem no
+            corpo: mandar de novo o que o servidor já sabe criaria uma segunda
+            verdade para conferir.
           example: 50100000-0000-4000-8000-000000000001
+        specialty_id:
+          type: string
+          description: >
+            A especialidade escolhida no primeiro passo.
+
+            Precisa vir, e não é redundante: o vínculo profissional-especialidade
+            é MUITOS-PARA-MUITOS no legado (tb_professionals_specialities), e há
+            profissional com 2 e até 3 especialidades — o slot não diz para qual
+            delas a consulta é. Sem este campo teríamos que adivinhar, e a
+            especialidade errada iria parar no `appointment_specialty` da DAV e na
+            tela do paciente.
+
+            Tem que ser uma especialidade que o profissional do slot realmente
+            atende; senão, 400.
+          example: 11111111-1111-4111-8111-111111111111
     Appointment:
       description: >
         A consulta como o paciente a vê. Enxuta pelo mesmo motivo de `Account`:
