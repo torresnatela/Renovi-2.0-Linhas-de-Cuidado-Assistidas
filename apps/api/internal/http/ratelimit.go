@@ -22,13 +22,17 @@ import (
 //   - Estado em memória: com mais de uma instância, cada uma tem sua própria
 //     conta. Para o piloto (instância única) serve; se escalar horizontalmente,
 //     isto precisa ir para o Redis.
+//   - O mapa tem TETO. O reaper sozinho não bastava: ele passa a cada minuto, e
+//     entre duas passadas um atacante rotacionando IP crescia a memória sem
+//     limite.
 //   - Por IP: NAT corporativo faz muitos colaboradores compartilharem um IP.
 //     Por isso o burst é generoso — a trava é contra script, não contra gente.
 func rateLimitByIP(burst int, perSecond float64) func(http.Handler) http.Handler {
 	l := &ipLimiter{
-		limiters: make(map[string]*visitor),
-		burst:    burst,
-		rate:     rate.Limit(perSecond),
+		limiters:   make(map[string]*visitor),
+		burst:      burst,
+		rate:       rate.Limit(perSecond),
+		maxEntries: maxTrackedIPs,
 	}
 	go l.reapForever()
 
@@ -49,11 +53,17 @@ type visitor struct {
 	lastSeen time.Time
 }
 
+// maxTrackedIPs é o teto de IPs vigiados ao mesmo tempo. ~64k entradas de
+// algumas dezenas de bytes: caro o bastante para não passar despercebido, barato
+// o bastante para não ser o gargalo.
+const maxTrackedIPs = 65536
+
 type ipLimiter struct {
-	mu       sync.Mutex
-	limiters map[string]*visitor
-	burst    int
-	rate     rate.Limit
+	mu         sync.Mutex
+	limiters   map[string]*visitor
+	burst      int
+	rate       rate.Limit
+	maxEntries int
 }
 
 func (l *ipLimiter) allow(ip string) bool {
@@ -62,6 +72,11 @@ func (l *ipLimiter) allow(ip string) bool {
 
 	v, ok := l.limiters[ip]
 	if !ok {
+		// No teto, descarta o mais antigo para abrir espaço. Preferimos perder a
+		// memória de um IP ocioso a estourar a memória do processo.
+		if l.maxEntries > 0 && len(l.limiters) >= l.maxEntries {
+			l.evictOldestLocked()
+		}
 		v = &visitor{limiter: rate.NewLimiter(l.rate, l.burst)}
 		l.limiters[ip] = v
 	}
@@ -69,8 +84,23 @@ func (l *ipLimiter) allow(ip string) bool {
 	return v.limiter.Allow()
 }
 
-// reapForever descarta IPs ociosos. Sem isto o mapa cresce sem teto e vira um
-// vetor de exaustão de memória — basta o atacante variar o IP de origem.
+// evictOldestLocked remove a entrada vista há mais tempo. Exige l.mu.
+func (l *ipLimiter) evictOldestLocked() {
+	var oldestIP string
+	var oldest time.Time
+	for ip, v := range l.limiters {
+		if oldestIP == "" || v.lastSeen.Before(oldest) {
+			oldestIP, oldest = ip, v.lastSeen
+		}
+	}
+	if oldestIP != "" {
+		delete(l.limiters, oldestIP)
+	}
+}
+
+// reapForever descarta IPs ociosos, para o mapa não segurar memória de quem já
+// foi embora. O teto (evictOldestLocked) é que impede o crescimento sem limite;
+// este laço só recupera espaço no caso normal.
 func (l *ipLimiter) reapForever() {
 	for range time.Tick(time.Minute) {
 		l.mu.Lock()

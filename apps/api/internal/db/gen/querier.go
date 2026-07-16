@@ -34,7 +34,11 @@ type Querier interface {
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
 	// Ativa a conta. O CHECK active_exige_vinculo_dav (migration 0002) recusa esta
 	// linha se dav_person_id vier nulo — a regra está no banco, não só aqui.
-	LinkAccountToDav(ctx context.Context, arg LinkAccountToDavParams) error
+	//
+	// O filtro por status é a trava: sem ele, um vínculo atrasado regravaria
+	// dav_person_id numa conta já ACTIVE. Devolve o nº de linhas para quem chama
+	// perceber que não aplicou, em vez de auditar um vínculo que não aconteceu.
+	LinkAccountToDav(ctx context.Context, arg LinkAccountToDavParams) (int64, error)
 	ListExampleWidgets(ctx context.Context) ([]ExampleWidget, error)
 	// Reaproveita a linha de uma tentativa que morreu antes da DAV confirmar.
 	// O filtro por status é a trava: uma conta ACTIVE nunca pode ser sobrescrita por

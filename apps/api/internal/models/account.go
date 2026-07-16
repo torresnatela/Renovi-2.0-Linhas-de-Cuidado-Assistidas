@@ -252,7 +252,13 @@ func (s *AccountStore) resolveDAV(ctx context.Context, accountID uuid.UUID, v va
 
 	switch {
 	case err == nil:
-		return davID, originFor(davID, accountID), nil
+		// Criação confirmada é SEMPRE CREATED, mesmo que a DAV tenha devolvido um
+		// id diferente do nosso. Usar originFor aqui marcaria a criação como
+		// ATTACHED no dia em que ela parasse de honrar o id do integrador — e
+		// ATTACHED na trilha significa "ligou-se ao prontuário de um terceiro",
+		// que é justamente o evento que o ADR-013 manda revisar. Mentir aí
+		// envenenaria a auditoria de forma silenciosa.
+		return davID, originCreated, nil
 
 	case errors.Is(err, dav.ErrDuplicateEmail):
 		return "", "", ErrEmailTakenAtDAV
@@ -324,10 +330,17 @@ func (s *AccountStore) commitLink(ctx context.Context, accountID uuid.UUID, davP
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := s.q.WithTx(tx)
 
-	if err := q.LinkAccountToDav(ctx, gen.LinkAccountToDavParams{
+	n, err := q.LinkAccountToDav(ctx, gen.LinkAccountToDavParams{
 		ID: accountID, DavPersonID: text(davPersonID), DavLinkOrigin: text(origin),
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("gravar vínculo: %w", err)
+	}
+	// Zero linhas = a conta deixou de estar PENDING_DAV enquanto falávamos com a
+	// DAV (outra requisição a ativou). Parar aqui evita auditar um vínculo que
+	// não aconteceu — a trilha só registra o que o banco de fato aplicou.
+	if n == 0 {
+		return ErrAlreadyRegistered
 	}
 
 	auditID, err := uuid.NewV7()

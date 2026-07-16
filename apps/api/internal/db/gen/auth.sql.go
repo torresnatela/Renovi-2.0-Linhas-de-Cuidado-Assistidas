@@ -215,11 +215,11 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 	return err
 }
 
-const linkAccountToDav = `-- name: LinkAccountToDav :exec
+const linkAccountToDav = `-- name: LinkAccountToDav :execrows
 UPDATE patient_account
 SET status = 'ACTIVE', dav_person_id = $2, dav_link_origin = $3,
     dav_linked_at = now(), updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND status = 'PENDING_DAV'
 `
 
 type LinkAccountToDavParams struct {
@@ -230,9 +230,16 @@ type LinkAccountToDavParams struct {
 
 // Ativa a conta. O CHECK active_exige_vinculo_dav (migration 0002) recusa esta
 // linha se dav_person_id vier nulo — a regra está no banco, não só aqui.
-func (q *Queries) LinkAccountToDav(ctx context.Context, arg LinkAccountToDavParams) error {
-	_, err := q.db.Exec(ctx, linkAccountToDav, arg.ID, arg.DavPersonID, arg.DavLinkOrigin)
-	return err
+//
+// O filtro por status é a trava: sem ele, um vínculo atrasado regravaria
+// dav_person_id numa conta já ACTIVE. Devolve o nº de linhas para quem chama
+// perceber que não aplicou, em vez de auditar um vínculo que não aconteceu.
+func (q *Queries) LinkAccountToDav(ctx context.Context, arg LinkAccountToDavParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkAccountToDav, arg.ID, arg.DavPersonID, arg.DavLinkOrigin)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const refreshPendingAccount = `-- name: RefreshPendingAccount :one

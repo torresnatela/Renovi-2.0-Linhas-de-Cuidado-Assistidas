@@ -89,7 +89,8 @@ implementava — era placeholder, não decisão. Precisávamos escolher de fato.
 os dados de saúde e a teleconsulta). A DAV é lenta e instável: medimos `GET` entre
 0,5s e 6,3s, e `POST` batendo no teto de **29s do AWS API Gateway** na frente dela.
 **Decisão:** `Register` roda em três passos — (1) TX curta reservando o CPF com a
-conta em `PENDING_DAV`; (2) chamada à DAV **fora de transação**, com retry; (3) TX
+conta em `PENDING_DAV`; (2) chamada à DAV **fora de transação** (com retry apenas
+nas LEITURAS — ver ADR-011b); (3) TX
 curta gravando o vínculo e ativando a conta.
 **Consequência:**
 - "Só cadastra se tiver tudo certo lá" vale porque **`PENDING_DAV` não autentica** —

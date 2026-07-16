@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -325,4 +326,23 @@ func TestRegister_MaxAgeCasaComOTTL(t *testing.T) {
 	require.Len(t, rec.Result().Cookies(), 1)
 	assert.Equal(t, int((90 * time.Minute).Seconds()), rec.Result().Cookies()[0].MaxAge,
 		fmt.Sprintf("cookie e sessão precisam expirar juntos"))
+}
+
+// Banco fora não é "sua sessão expirou". Devolver 401 aqui deslogaria todo mundo
+// durante um incidente e esconderia a causa — o usuário tentaria logar de novo e
+// falharia sem entender.
+func TestRequireSession_FalhaDeInfraEh503NaoEh401(t *testing.T) {
+	s := &fakeSessions{validErr: errors.New("dial tcp: connection refused")}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: "renovi_session", Value: "tok"})
+	rec := httptest.NewRecorder()
+
+	chamou := false
+	controllers.RequireSession(s)(http.HandlerFunc(
+		func(http.ResponseWriter, *http.Request) { chamou = true },
+	)).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.False(t, chamou)
 }

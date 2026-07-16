@@ -115,6 +115,11 @@ func TestVerify_HashMalformado(t *testing.T) {
 		{"parâmetros não numéricos", "$argon2id$v=19$m=abc,t=2,p=1$c2FsdA$aGFzaA"},
 		{"salt não é base64", "$argon2id$v=19$m=19456,t=2,p=1$!!!$aGFzaA"},
 		{"versão não numérica", "$argon2id$v=xx$m=19456,t=2,p=1$c2FsdA$aGFzaA"},
+		// Os três abaixo fazem argon2.IDKey entrar em PÂNICO se chegarem até ele:
+		// ele valida rounds>=1 e parallelism>=1 com panic, não com erro.
+		{"t=0 faz o argon2 entrar em pânico", "$argon2id$v=19$m=19456,t=0,p=1$c2FsdGRlMTZieXRlcw$aGFzaGRlMzJieXRlc2FxdWlvazEyMzQ1"},
+		{"p=0 faz o argon2 entrar em pânico", "$argon2id$v=19$m=19456,t=2,p=0$c2FsdGRlMTZieXRlcw$aGFzaGRlMzJieXRlc2FxdWlvazEyMzQ1"},
+		{"memória absurda viraria alocação de GB", "$argon2id$v=19$m=99999999,t=2,p=1$c2FsdGRlMTZieXRlcw$aGFzaGRlMzJieXRlc2FxdWlvazEyMzQ1"},
 	}
 
 	for _, tt := range tests {

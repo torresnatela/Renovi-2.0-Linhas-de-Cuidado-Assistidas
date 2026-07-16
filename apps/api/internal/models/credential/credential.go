@@ -133,6 +133,16 @@ func decode(encoded string) (params, []byte, []byte, error) {
 		return zero, nil, nil, fmt.Errorf("%w: parâmetros ilegíveis", ErrMalformedHash)
 	}
 
+	// Faixa segura ANTES de chamar o argon2. Ele valida `time >= 1` e
+	// `threads >= 1` com PÂNICO, não com erro — um hash corrompido no banco
+	// derrubaria a goroutine do request em vez de virar um 500 limpo. O teto de
+	// memória evita que um `m=99999999` vire uma alocação de ~95 GiB.
+	const maxMemory = 1 << 20 // 1 GiB em KiB
+	if p.time < 1 || p.threads < 1 || p.memory < 8 || p.memory > maxMemory {
+		return zero, nil, nil, fmt.Errorf("%w: parâmetros fora da faixa segura (m=%d,t=%d,p=%d)",
+			ErrMalformedHash, p.memory, p.time, p.threads)
+	}
+
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return zero, nil, nil, fmt.Errorf("%w: salt não é base64", ErrMalformedHash)

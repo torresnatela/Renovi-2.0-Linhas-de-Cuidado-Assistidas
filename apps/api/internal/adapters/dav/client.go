@@ -7,7 +7,9 @@
 //
 //  1. O lookup por CPF devolve 204 (não 404) quando não acha.
 //  2. A DAV aceita um `id` gerado por nós, então o POST é sondável: um 504 não
-//     quer dizer que falhou, e dá para conferir com GET /person/{nosso-id}.
+//     quer dizer que falhou, e dá para conferir com GET /person/{nosso-id}. Por
+//     isso escrita NUNCA se repete aqui (viraria 409 "id already exists") — ela
+//     devolve ErrMaybeApplied e quem chama sonda. Só as leituras repetem.
 //  3. O teto de ~29s é do AWS API Gateway na frente deles. Timeout por
 //     tentativa acima disso é inútil.
 package dav
@@ -100,6 +102,7 @@ type Config struct {
 type Client struct {
 	baseURL     string
 	apiKey      string
+	timeout     time.Duration
 	maxAttempts int
 	baseBackoff time.Duration
 	http        *http.Client
@@ -119,6 +122,7 @@ func New(cfg Config) (*Client, error) {
 	c := &Client{
 		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:      cfg.APIKey,
+		timeout:     cfg.Timeout,
 		maxAttempts: cfg.MaxAttempts,
 		baseBackoff: cfg.BaseBackoff,
 		http:        cfg.HTTPClient,
@@ -130,9 +134,11 @@ func New(cfg Config) (*Client, error) {
 	if c.baseBackoff <= 0 {
 		c.baseBackoff = 200 * time.Millisecond
 	}
+	if c.timeout <= 0 {
+		c.timeout = 30 * time.Second
+	}
 	if c.http == nil {
-		// Timeout por tentativa vem do contexto (ver doOnce), não daqui.
-		c.http = &http.Client{Timeout: cfg.Timeout}
+		c.http = &http.Client{}
 	}
 	if c.logger == nil {
 		c.logger = slog.Default()
@@ -236,7 +242,11 @@ func (c *Client) CreatePerson(ctx context.Context, in CreatePersonInput) (string
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(res.body, &out); err != nil || out.ID == "" {
-		return "", fmt.Errorf("%w: %s respondeu %d sem id utilizável", ErrUnavailable, route, res.status)
+		// 2xx significa que a DAV ACEITOU: a pessoa existe lá, ainda que não
+		// consigamos ler o id. ErrUnavailable faria o cadastro falhar sem
+		// reconciliar — o mesmo erro do 409 que este PR corrigiu. Com
+		// ErrMaybeApplied, o model sonda pelo id que enviamos e conclui.
+		return "", fmt.Errorf("%w: %s respondeu %d sem id utilizável", ErrMaybeApplied, route, res.status)
 	}
 	return out.ID, nil
 }
@@ -319,6 +329,13 @@ func (c *Client) doOnce(ctx context.Context, method, path, route string, body an
 		}
 		buf = bytes.NewReader(raw)
 	}
+
+	// Deadline por TENTATIVA aqui, e não em http.Client.Timeout: com um
+	// HTTPClient injetado (testes, instrumentação), o Timeout do config era
+	// silenciosamente ignorado e a chamada só parava quando o contexto pai
+	// caísse — ou seja, nunca, na prática.
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, buf)
 	if err != nil {

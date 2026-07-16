@@ -390,3 +390,21 @@ func TestRegister_SondaIndisponivel_DeixaPendente(t *testing.T) {
 	require.ErrorIs(t, err, models.ErrDAVUnavailable)
 	require.Equal(t, "PENDING_DAV", readDB(t, pool, cpfValido).status)
 }
+
+// Se a DAV honrar nosso id, ótimo — mas se ela devolver um id PRÓPRIO, a criação
+// continua sendo uma criação. Marcá-la como ATTACHED gravaria na trilha de
+// auditoria que este paciente se ligou ao prontuário de um terceiro, que é
+// exatamente o evento que o ADR-013 manda revisar. Um POST confirmado é sempre
+// CREATED, independente do id que volte.
+func TestRegister_CriacaoComIDEscolhidoPelaDAVAindaEhCREATED(t *testing.T) {
+	f := &fakeDAV{findResult: nil, createID: "id-que-a-dav-escolheu"}
+	store, pool := newStore(t, f)
+
+	_, err := store.Register(context.Background(), validInput())
+	require.NoError(t, err)
+
+	s := readDB(t, pool, cpfValido)
+	require.Equal(t, "id-que-a-dav-escolheu", *s.davPersonID)
+	require.Equal(t, "CREATED", *s.origin, "nós criamos: não é anexação de prontuário alheio")
+	require.Equal(t, "CREATED", *s.auditOrigin)
+}

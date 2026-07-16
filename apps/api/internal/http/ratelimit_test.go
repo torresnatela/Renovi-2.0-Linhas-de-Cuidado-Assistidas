@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,4 +55,21 @@ func TestRateLimit_RespondeProblemJSON(t *testing.T) {
 
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	assert.Contains(t, rec.Header().Get("Content-Type"), "application/problem+json")
+}
+
+// O reaper roda a cada minuto; entre duas passadas, nada segurava o mapa. Um
+// atacante rotacionando IP de origem crescia a memória sem teto — exatamente o
+// que o comentário do reaper alegava impedir.
+func TestRateLimit_MapaTemTeto(t *testing.T) {
+	const teto = 50
+	l := &ipLimiter{limiters: make(map[string]*visitor), burst: 1, rate: 1, maxEntries: teto}
+
+	for i := 0; i < teto*4; i++ {
+		l.allow(fmt.Sprintf("198.51.100.%d:%d", i%256, i))
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	assert.LessOrEqual(t, len(l.limiters), teto, "o mapa cresceu além do teto")
+	assert.NotEmpty(t, l.limiters, "o mapa não pode zerar: perderia a trava de quem está atacando")
 }

@@ -17,5 +17,5 @@ O CI (`make generate-check`) falha se o código gerado não estiver atualizado n
 
 Hoje estão contratados `/healthz`, `/readyz`, `/auth/*` e `/me`, além do
 vocabulário de domínio (`ItemVerdict`, `Reason`, `Problem`). As rotas do MVP
-(`/me/eligibility`, `/slots`, `/appointments`, `/auth/*`) entram nas fases seguintes
+(`/me/eligibility`, `/slots`, `/appointments`) entram nas fases seguintes
 sob o mesmo `/api/v1`, sem breaking change.

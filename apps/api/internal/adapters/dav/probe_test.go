@@ -108,6 +108,13 @@ func newProbeClient(t *testing.T) *probeClient {
 			"RENOVI_DAV_BASE_URL=https://api.v2.hom.doutoraovivo.com.br")
 	}
 
+	// A sondagem CRIA pessoas. Contra produção isso é poluir a base real de
+	// pacientes — um aviso no Makefile não impede ninguém de errar o .env.
+	if !strings.Contains(base, ".hom.") {
+		t.Fatalf("RENOVI_DAV_BASE_URL=%q não parece ser homologação. A sondagem CRIA "+
+			"pessoas: recuso rodar fora de um host com '.hom.'.", base)
+	}
+
 	c := &probeClient{
 		baseURL: strings.TrimRight(base, "/"),
 		apiKey:  key,
@@ -232,10 +239,32 @@ func (c *probeClient) do(t *testing.T, method, path string, body any) probeRespo
 // createdIDs guarda o que criamos para limpar no fim.
 var createdIDs sync.Map
 
+// createPerson cria uma pessoa e garante que ela seja limpável mesmo quando não
+// sabemos se foi criada.
+//
+// Pré-atribui um id e o registra ANTES do POST. Motivo: a própria sondagem provou
+// que um POST pode estourar os 29s do gateway e criar a pessoa assim mesmo — e o
+// `do` aborta o teste em erro de transporte. Registrar só depois do 2xx deixaria
+// pessoas órfãs na homologação a cada timeout, justamente no caso mais comum de
+// falha.
 func (c *probeClient) createPerson(t *testing.T, payload map[string]any) probeResponse {
 	t.Helper()
+
+	if _, temID := payload["id"]; !temID {
+		id, err := uuid.NewV7()
+		if err != nil {
+			t.Fatalf("gerar uuid v7: %v", err)
+		}
+		payload["id"] = id.String()
+	}
+	// Registra antes de enviar: o candidato pode virar pessoa mesmo se a resposta
+	// nunca chegar.
+	createdIDs.Store(payload["id"].(string), struct{}{})
+
 	r := c.do(t, http.MethodPost, "/person", payload)
-	if r.status >= 200 && r.status < 300 {
+
+	// Se a DAV devolver um id diferente do nosso, limpe os dois.
+	if r.outcome() == accepted {
 		var out struct {
 			ID string `json:"id"`
 		}
@@ -795,16 +824,28 @@ func cleanup(t *testing.T, c *probeClient) {
 		return true
 	})
 
-	deleted := 0
+	// Os ids são pré-registrados antes do POST, então parte deles pode nunca ter
+	// virado pessoa (payload recusado). Não dá para separar "não existia" de
+	// "falhou" pelo status do DELETE: a DAV devolve 500 para id inexistente, não
+	// 404 (medido). Então perguntamos antes — o GET tem semântica confiável e já
+	// sondada: 204 = não existe (achado #1).
+	deleted, inexistentes := 0, 0
 	for _, id := range ids {
-		r := c.do(t, http.MethodDelete, "/person/"+id+"?soft=true", nil)
-		if r.status >= 200 && r.status < 300 {
-			deleted++
-		} else {
-			t.Logf("limpeza: DELETE /person/%s devolveu %d", id, r.status)
+		if g := c.do(t, http.MethodGet, "/person/"+id, nil); g.status == http.StatusNoContent {
+			inexistentes++
+			continue
 		}
+
+		r := c.do(t, http.MethodDelete, "/person/"+id+"?soft=true", nil)
+		if r.outcome() == accepted {
+			deleted++
+			continue
+		}
+		t.Errorf("limpeza FALHOU para /person/%s: HTTP %d — a pessoa existe e ficou "+
+			"órfã na homologação. Remova à mão.", id, r.status)
 	}
-	t.Logf("limpeza: %d/%d pessoas de sondagem removidas", deleted, len(ids))
+	t.Logf("limpeza: %d removidas, %d nunca chegaram a existir, de %d candidatos",
+		deleted, inexistentes, len(ids))
 }
 
 func jsonOf(v any) string {

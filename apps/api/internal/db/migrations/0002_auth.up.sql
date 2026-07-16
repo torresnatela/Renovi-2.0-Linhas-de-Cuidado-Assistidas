@@ -96,9 +96,14 @@ CREATE INDEX ix_session_expires ON session (expires_at) WHERE revoked_at IS NULL
 -- CPF de terceiro permite anexar o prontuário alheio. Quando a verificação por
 -- WhatsApp/e-mail entrar, esta tabela é o que permite revisar RETROATIVAMENTE
 -- quem anexou o quê, e de onde. Sem ela, o histórico se perde.
+-- RESTRICT, não CASCADE: apagar a conta NÃO pode apagar a trilha. Com CASCADE,
+-- quem anexou o prontuário de um terceiro sumiria da auditoria bastando excluir a
+-- própria conta — destruindo exatamente a evidência que o ADR-013 promete revisar.
+-- Nada exclui conta hoje; o RESTRICT força a decisão a ser explícita quando
+-- alguém implementar exclusão (inclusive por pedido de LGPD).
 CREATE TABLE dav_link_audit (
     id            UUID PRIMARY KEY,
-    account_id    UUID NOT NULL REFERENCES patient_account (id) ON DELETE CASCADE,
+    account_id    UUID NOT NULL REFERENCES patient_account (id) ON DELETE RESTRICT,
     dav_person_id TEXT NOT NULL,
     origin        TEXT NOT NULL CHECK (origin IN ('CREATED', 'ATTACHED')),
     request_ip    INET,

@@ -39,6 +39,11 @@ type AuthController struct {
 	// CookieSecure vem da config. False só em desenvolvimento sem TLS.
 	CookieSecure bool
 	SessionTTL   time.Duration
+	// RegisterDeadline é quanto o handler de cadastro pode escrever. Precisa
+	// cobrir o orçamento da DAV (config.DAVBudget); zero cai num default.
+	// Deriva da config em vez de ser um número solto: quando os dois divergiram,
+	// a última tentativa passou a ser cortada no meio, silenciosamente.
+	RegisterDeadline time.Duration
 }
 
 type ctxKey int
@@ -56,9 +61,14 @@ func (c AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	// tentativas. O RENOVI_HTTP_WRITE_TIMEOUT do servidor é 15s, então sem
 	// estender o prazo AQUI a resposta seria cortada no meio e o usuário veria
 	// uma falha intermitente e inexplicável num cadastro que deu certo.
-	if rc := http.NewResponseController(w); rc != nil {
-		_ = rc.SetWriteDeadline(time.Now().Add(90 * time.Second))
+	deadline := c.RegisterDeadline
+	if deadline <= 0 {
+		deadline = 90 * time.Second
 	}
+	// NewResponseController nunca devolve nil. Se o ResponseWriter não suportar
+	// deadline (ex.: httptest.Recorder), o erro é irrelevante: nesse caso não há
+	// conexão para cortar.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(deadline))
 
 	acc, err := c.Accounts.Register(r.Context(), models.RegisterInput{
 		FullName:  body.FullName,
@@ -177,8 +187,14 @@ func RequireSession(sessions Sessions) func(http.Handler) http.Handler {
 
 			acc, err := sessions.Validate(r.Context(), ck.Value)
 			if err != nil {
+				// Falha de INFRA (banco fora) não é veredito sobre a sessão.
+				// Devolver 401 aqui deslogaria todo mundo durante um incidente e
+				// esconderia a causa atrás de "sua sessão expirou".
 				if !errors.Is(err, models.ErrNoSession) {
 					slog.ErrorContext(r.Context(), "sessão: erro ao validar", "error", err)
+					WriteProblem(w, http.StatusServiceUnavailable, "serviço indisponível",
+						"tente novamente em instantes")
+					return
 				}
 				WriteProblem(w, http.StatusUnauthorized, "sessão expirada", "faça login novamente")
 				return

@@ -131,7 +131,7 @@ type RegisterRequest struct {
 	Address   Address            `json:"address"`
 	BirthDate openapi_types.Date `json:"birth_date"`
 
-	// Cpf Com ou sem formatação. O dígito verificador é conferido.
+	// Cpf Com ou sem formatação. O dígito verificador é conferido pela API.
 	Cpf      string              `json:"cpf"`
 	Email    openapi_types.Email `json:"email"`
 	FullName string              `json:"full_name"`
@@ -139,7 +139,7 @@ type RegisterRequest struct {
 	// Password Mínimo de 12 caracteres. Não exigimos maiúscula/símbolo: regras de composição empurram para "Senha1!" e a OWASP as desaconselha.
 	Password string `json:"password"`
 
-	// Phone Celular com DDD, só dígitos.
+	// Phone Celular com DDD, só dígitos (10 ou 11).
 	Phone string `json:"phone"`
 }
 

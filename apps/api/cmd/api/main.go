@@ -128,6 +128,9 @@ func newAuthController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logge
 		Sessions:     models.NewSessionStore(pool, cfg.SessionTTL),
 		CookieSecure: cfg.SessionCookieSecure,
 		SessionTTL:   cfg.SessionTTL,
+		// Precisa cobrir o orçamento da DAV com folga, senão o servidor corta a
+		// resposta de um cadastro que deu certo.
+		RegisterDeadline: cfg.DAVBudget() + 30*time.Second,
 	}, nil
 }
 

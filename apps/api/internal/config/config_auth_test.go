@@ -119,3 +119,33 @@ func TestConfig_LogValueRedigeASenhaEAChave(t *testing.T) {
 	assert.Contains(t, logs, "local")
 	assert.Contains(t, logs, "api.v2.hom.doutoraovivo.com.br")
 }
+
+// Um cookie sem Secure fora do dev viaja em claro no primeiro acesso HTTP e
+// entrega a sessão a quem estiver na rede. É erro de configuração, não opção.
+func TestLoad_CookieInseguroProibidoForaDeLocal(t *testing.T) {
+	base := map[string]string{
+		"RENOVI_CARE_DATABASE_URL": "postgres://x/y",
+		"RENOVI_DAV_BASE_URL":      "https://api.v2.doutoraovivo.com.br",
+		"RENOVI_DAV_API_KEY":       chaveDeTeste,
+	}
+	for _, env := range []string{"production", "staging"} {
+		t.Run(env, func(t *testing.T) {
+			for k, v := range base {
+				t.Setenv(k, v)
+			}
+			t.Setenv("RENOVI_ENV", env)
+			t.Setenv("RENOVI_SESSION_COOKIE_SECURE", "false")
+
+			_, err := Load()
+			require.Error(t, err, "%s aceitou cookie sem Secure", env)
+			assert.Contains(t, err.Error(), "RENOVI_SESSION_COOKIE_SECURE")
+		})
+	}
+
+	t.Run("local pode, porque não tem TLS", func(t *testing.T) {
+		t.Setenv("RENOVI_ENV", "local")
+		t.Setenv("RENOVI_SESSION_COOKIE_SECURE", "false")
+		_, err := Load()
+		require.NoError(t, err)
+	})
+}

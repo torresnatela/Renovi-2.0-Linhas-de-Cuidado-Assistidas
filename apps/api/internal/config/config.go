@@ -199,6 +199,12 @@ func (c Config) validate() error {
 			return fmt.Errorf("config: RENOVI_DAV_API_KEY é obrigatório em %s", c.Env)
 		}
 	}
+	// Um cookie de sessão sem Secure fora do dev viaja em claro no primeiro
+	// acesso HTTP e entrega a sessão a quem estiver na rede. Falhar na subida é
+	// melhor que descobrir isso em produção.
+	if c.Env != EnvLocal && !c.SessionCookieSecure {
+		return fmt.Errorf("config: RENOVI_SESSION_COOKIE_SECURE=false é proibido em %s", c.Env)
+	}
 	if c.DAVMaxAttempts < 1 {
 		return fmt.Errorf("config: RENOVI_DAV_MAX_ATTEMPTS deve ser >= 1")
 	}

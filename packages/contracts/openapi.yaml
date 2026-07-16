@@ -208,7 +208,8 @@ components:
           maxLength: 150
         cpf:
           type: string
-          description: Com ou sem formatação. O dígito verificador é conferido.
+          pattern: '^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$'
+          description: Com ou sem formatação. O dígito verificador é conferido pela API.
           example: 948.190.898-46
         birth_date:
           type: string
@@ -220,7 +221,8 @@ components:
           maxLength: 254
         phone:
           type: string
-          description: Celular com DDD, só dígitos.
+          pattern: '^\d{10,11}$'
+          description: Celular com DDD, só dígitos (10 ou 11).
           example: "11912345678"
         password:
           type: string
@@ -238,6 +240,7 @@ components:
       properties:
         zip_code:
           type: string
+          pattern: '^\d{5}-?\d{3}$'
           description: CEP, com ou sem traço.
           example: "06472000"
         street:
@@ -257,8 +260,7 @@ components:
           example: Barueri
         state:
           type: string
-          minLength: 2
-          maxLength: 2
+          pattern: '^[A-Za-z]{2}$'
           description: UF.
           example: SP
         country:

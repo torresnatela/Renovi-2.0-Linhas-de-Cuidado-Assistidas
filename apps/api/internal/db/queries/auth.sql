@@ -36,13 +36,17 @@ SET zip_code = EXCLUDED.zip_code, street = EXCLUDED.street, number = EXCLUDED.nu
     city = EXCLUDED.city, state = EXCLUDED.state, country = EXCLUDED.country,
     updated_at = now();
 
--- name: LinkAccountToDav :exec
+-- name: LinkAccountToDav :execrows
 -- Ativa a conta. O CHECK active_exige_vinculo_dav (migration 0002) recusa esta
 -- linha se dav_person_id vier nulo — a regra está no banco, não só aqui.
+--
+-- O filtro por status é a trava: sem ele, um vínculo atrasado regravaria
+-- dav_person_id numa conta já ACTIVE. Devolve o nº de linhas para quem chama
+-- perceber que não aplicou, em vez de auditar um vínculo que não aconteceu.
 UPDATE patient_account
 SET status = 'ACTIVE', dav_person_id = $2, dav_link_origin = $3,
     dav_linked_at = now(), updated_at = now()
-WHERE id = $1;
+WHERE id = $1 AND status = 'PENDING_DAV';
 
 -- name: InsertDavLinkAudit :exec
 -- Trilha de todo vínculo. É o que permitirá revisar retroativamente quem anexou
