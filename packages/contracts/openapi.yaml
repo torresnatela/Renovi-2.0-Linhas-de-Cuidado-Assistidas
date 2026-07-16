@@ -4,9 +4,9 @@ info:
   description: >
     Contrato da API do renovi-care. Esta é a FONTE DA VERDADE: altere aqui
     primeiro, rode `make generate` e só então implemente (fluxo API-first,
-    ver docs/DESENVOLVIMENTO.md). No MVP inicial (fundação) apenas /healthz e
-    /me estão contratados; as demais rotas do SPEC entram nas fases seguintes
-    sem breaking change (versionamento /api/v1).
+    ver docs/DESENVOLVIMENTO.md). Hoje estão contratados /healthz, /readyz,
+    /auth/* e /me; as demais rotas do SPEC entram nas fases seguintes sem
+    breaking change (versionamento /api/v1).
   version: 0.1.0
 servers:
   - url: /api/v1
@@ -41,16 +41,259 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-  # Rotas de negócio (/me, /me/eligibility, /slots, /appointments, /auth/*) entram
-  # nas fases seguintes JUNTO com sua implementação e o middleware de auth — o
-  # contrato só descreve o que já existe (ver docs/PROGRESSO.md).
+  /auth/register:
+    post:
+      operationId: register
+      summary: Cadastra o paciente e o vincula à Doutor ao Vivo (DAV).
+      description: >
+        Cria a conta e, de forma SÍNCRONA, resolve o vínculo com a DAV: se já
+        existir uma pessoa com o mesmo CPF lá, ela é anexada (é onde vivem os
+        dados de saúde); senão, é criada. A conta só fica utilizável se a DAV
+        confirmar — por isso a chamada é síncrona e pode demorar (a DAV é lenta
+        e o servidor faz retry). Se a DAV não responder, devolvemos 502/504 e a
+        conta fica pendente: o usuário pode simplesmente tentar de novo.
+
+        A resposta NUNCA revela se a pessoa já existia na DAV nem devolve
+        qualquer dado vindo de lá — o CPF sozinho não pode servir de consulta a
+        dados de terceiros.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Conta criada, vinculada à DAV e sessão aberta.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: >
+            Já existe conta para este CPF ou e-mail. A mensagem é genérica de
+            propósito: dizer qual dos dois colidiu permitiria enumerar cadastros.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/DavUnavailable"
+        "504":
+          $ref: "#/components/responses/DavUnavailable"
+  /auth/login:
+    post:
+      operationId: login
+      summary: Abre uma sessão.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Sessão aberta.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: >
+            Credenciais inválidas. Resposta genérica e idêntica para CPF
+            inexistente, senha errada e conta ainda não vinculada à DAV —
+            diferenciá-las entregaria quais CPFs têm conta.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Encerra a sessão atual.
+      responses:
+        "204":
+          description: Sessão encerrada e cookie limpo.
+          headers:
+            Set-Cookie:
+              description: Cookie de sessão expirado.
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me:
+    get:
+      operationId: getMe
+      summary: Dados da conta autenticada.
+      responses:
+        "200":
+          description: A conta do portador da sessão.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  # Rotas de negócio (/me/eligibility, /slots, /appointments) entram nas fases
+  # seguintes JUNTO com sua implementação — o contrato só descreve o que já
+  # existe (ver docs/PROGRESSO.md).
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+    # Sessão opaca em cookie httpOnly, não JWT (ver ADR-010 em docs/DECISOES.md).
+    # Motivo: é revogável na hora (logout, troca de senha, incidente) e o token
+    # nunca fica ao alcance de JavaScript — logo, não vaza por XSS.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: renovi_session
+  headers:
+    SessionCookie:
+      description: >
+        Cookie de sessão: HttpOnly, Secure (fora do ambiente local), SameSite=Lax.
+      schema:
+        type: string
+        example: renovi_session=<opaco>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=43200
+  responses:
+    BadRequest:
+      description: Requisição inválida (campo faltando, CPF inválido, senha fraca).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Sessão ausente, expirada ou revogada.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Tentativas demais. Tente novamente mais tarde.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    DavUnavailable:
+      description: >
+        A DAV não respondeu a tempo (504) ou respondeu com erro (502). O cadastro
+        NÃO foi concluído e a conta não autentica; tentar de novo é seguro — a
+        operação é idempotente pelo CPF.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
   schemas:
+    RegisterRequest:
+      type: object
+      required: [full_name, cpf, birth_date, email, phone, password, address]
+      properties:
+        full_name:
+          type: string
+          minLength: 3
+          maxLength: 150
+        cpf:
+          type: string
+          description: Com ou sem formatação. O dígito verificador é conferido.
+          example: 948.190.898-46
+        birth_date:
+          type: string
+          format: date
+          example: "1976-01-23"
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        phone:
+          type: string
+          description: Celular com DDD, só dígitos.
+          example: "11912345678"
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 256
+          description: >
+            Mínimo de 12 caracteres. Não exigimos maiúscula/símbolo: regras de
+            composição empurram para "Senha1!" e a OWASP as desaconselha.
+        address:
+          $ref: "#/components/schemas/Address"
+    Address:
+      type: object
+      required: [zip_code, street, number, neighborhood, city, state]
+      properties:
+        zip_code:
+          type: string
+          description: CEP, com ou sem traço.
+          example: "06472000"
+        street:
+          type: string
+          example: Avenida Copacabana
+        number:
+          type: string
+          example: "238"
+        complement:
+          type: string
+          example: 4o andar
+        neighborhood:
+          type: string
+          example: Dezoito do Forte
+        city:
+          type: string
+          example: Barueri
+        state:
+          type: string
+          minLength: 2
+          maxLength: 2
+          description: UF.
+          example: SP
+        country:
+          type: string
+          minLength: 2
+          maxLength: 2
+          default: BR
+    LoginRequest:
+      type: object
+      required: [cpf, password]
+      properties:
+        cpf:
+          type: string
+          description: >
+            O CPF é o identificador de login, não o e-mail — é a chave de
+            identidade do paciente e é sempre único.
+          example: 948.190.898-46
+        password:
+          type: string
+          format: password
+    Account:
+      description: >
+        A conta do próprio portador da sessão. Deliberadamente enxuta: não
+        carrega nada vindo da DAV nem o id de lá.
+      type: object
+      required: [id, full_name, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        full_name:
+          type: string
+        email:
+          type: string
+          format: email
     HealthStatus:
       type: object
       required: [status, service, version]
@@ -110,6 +353,5 @@ components:
           type: string
         instance:
           type: string
-  responses: {}
 security:
-  - bearerAuth: []
+  - cookieAuth: []
