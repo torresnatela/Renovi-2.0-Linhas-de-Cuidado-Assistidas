@@ -29,6 +29,9 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("RENOVI_HTTP_ADDR", ":9090")
 	t.Setenv("RENOVI_HTTP_READ_TIMEOUT", "30s")
 	t.Setenv("RENOVI_CARE_DATABASE_URL", "postgres://u:p@db:5432/care")
+	// Produção também exige as credenciais da DAV (ver config_auth_test.go).
+	t.Setenv("RENOVI_DAV_BASE_URL", "https://api.v2.doutoraovivo.com.br")
+	t.Setenv("RENOVI_DAV_API_KEY", "chave-de-producao-ficticia")
 
 	cfg, err := Load()
 	require.NoError(t, err)
