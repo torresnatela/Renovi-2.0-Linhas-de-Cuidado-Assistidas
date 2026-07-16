@@ -889,12 +889,38 @@ components:
         specialty:
           $ref: "#/components/schemas/Specialty"
         professional:
-          $ref: "#/components/schemas/Professional"
+          $ref: "#/components/schemas/AppointmentProfessional"
         join:
           $ref: "#/components/schemas/JoinWindow"
         created_at:
           type: string
           format: date-time
+    AppointmentProfessional:
+      description: >
+        O profissional COMO ELE ERA quando a consulta foi marcada — e por isso é
+        mais enxuto que o `Professional` da escolha.
+
+        O motivo é honestidade: a consulta guarda uma FOTOGRAFIA do legado (nome e
+        especialidade), porque as FKs de lá são ON DELETE CASCADE e o schema é de
+        terceiro — se o profissional for renomeado ou removido, a consulta antiga
+        ainda precisa saber se descrever. Mas não fotografamos o registro no
+        conselho, então prometer o `Professional` inteiro aqui devolveria
+        `council: ""` e a tela mostraria "CRP/ ". Um campo obrigatório vazio é pior
+        que um campo ausente.
+
+        O registro no conselho é o que ajuda a ESCOLHER, e aparece lá (em
+        /specialties/{id}/professionals). Depois de marcada, o que importa é quem e
+        quando.
+      type: object
+      required: [id, full_name]
+      properties:
+        id:
+          type: string
+          example: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        full_name:
+          type: string
+          description: O nome como estava no legado no momento do agendamento.
+          example: Ana Beatriz Moura
     AppointmentList:
       type: object
       required: [items]

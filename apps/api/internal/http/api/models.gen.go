@@ -141,10 +141,12 @@ type Appointment struct {
 	// Repare que "30 minutos" não existe em lugar nenhum deste contrato: o que viaja é `opens_at`, JÁ CALCULADO pelo servidor. O front espera uma hora que recebeu em vez de aplicar uma regra que decorou — então mudar a antecedência é uma linha no servidor, sem deploy do front, e relógio errado no cliente não abre a sala mais cedo.
 	Join JoinWindow `json:"join"`
 
-	// Professional O profissional como o paciente o vê na hora de escolher. Sem contato, sem CPF, sem agenda interna: o que não está aqui não vaza.
-	Professional Professional `json:"professional"`
-	Specialty    Specialty    `json:"specialty"`
-	StartsAt     time.Time    `json:"starts_at"`
+	// Professional O profissional COMO ELE ERA quando a consulta foi marcada — e por isso é mais enxuto que o `Professional` da escolha.
+	// O motivo é honestidade: a consulta guarda uma FOTOGRAFIA do legado (nome e especialidade), porque as FKs de lá são ON DELETE CASCADE e o schema é de terceiro — se o profissional for renomeado ou removido, a consulta antiga ainda precisa saber se descrever. Mas não fotografamos o registro no conselho, então prometer o `Professional` inteiro aqui devolveria `council: ""` e a tela mostraria "CRP/ ". Um campo obrigatório vazio é pior que um campo ausente.
+	// O registro no conselho é o que ajuda a ESCOLHER, e aparece lá (em /specialties/{id}/professionals). Depois de marcada, o que importa é quem e quando.
+	Professional AppointmentProfessional `json:"professional"`
+	Specialty    Specialty               `json:"specialty"`
+	StartsAt     time.Time               `json:"starts_at"`
 
 	// Status O estado que interessa ao PACIENTE, não o estado interno da saga.
 	// - PROCESSING: reservamos o horário e estamos criando a consulta na DAV. - CONFIRMED: existe na DAV e temos o link. É o caso normal. - UNCONFIRMED: a DAV não respondeu e NÃO temos como descobrir se
@@ -174,6 +176,15 @@ type AppointmentStatus string
 // AppointmentList defines model for AppointmentList.
 type AppointmentList struct {
 	Items []Appointment `json:"items"`
+}
+
+// AppointmentProfessional O profissional COMO ELE ERA quando a consulta foi marcada — e por isso é mais enxuto que o `Professional` da escolha.
+// O motivo é honestidade: a consulta guarda uma FOTOGRAFIA do legado (nome e especialidade), porque as FKs de lá são ON DELETE CASCADE e o schema é de terceiro — se o profissional for renomeado ou removido, a consulta antiga ainda precisa saber se descrever. Mas não fotografamos o registro no conselho, então prometer o `Professional` inteiro aqui devolveria `council: ""` e a tela mostraria "CRP/ ". Um campo obrigatório vazio é pior que um campo ausente.
+// O registro no conselho é o que ajuda a ESCOLHER, e aparece lá (em /specialties/{id}/professionals). Depois de marcada, o que importa é quem e quando.
+type AppointmentProfessional struct {
+	// FullName O nome como estava no legado no momento do agendamento.
+	FullName string `json:"full_name"`
+	Id       string `json:"id"`
 }
 
 // CreateAppointmentRequest defines model for CreateAppointmentRequest.

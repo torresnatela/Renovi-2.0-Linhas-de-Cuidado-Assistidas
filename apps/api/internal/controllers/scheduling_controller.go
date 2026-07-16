@@ -367,16 +367,26 @@ type joinWindowDTO struct {
 	Reason   *Reason `json:"reason,omitempty"`
 }
 
+// apptProfessionalDTO é mais enxuto que o professionalDTO de propósito: a
+// consulta guarda uma FOTOGRAFIA do legado (nome), não o registro no conselho.
+// Reusar o professionalDTO aqui devolvia `council: ""` e a tela mostraria
+// "CRP/ " — campo obrigatório vazio é pior que campo ausente. Foi assim que este
+// bug apareceu: rodando a API de verdade, não nos testes.
+type apptProfessionalDTO struct {
+	ID       string `json:"id"`
+	FullName string `json:"full_name"`
+}
+
 type appointmentDTO struct {
-	ID           string          `json:"id"`
-	Status       string          `json:"status"`
-	StartsAt     string          `json:"starts_at"`
-	EndsAt       string          `json:"ends_at"`
-	TimeZone     string          `json:"time_zone"`
-	Specialty    specialtyDTO    `json:"specialty"`
-	Professional professionalDTO `json:"professional"`
-	Join         joinWindowDTO   `json:"join"`
-	CreatedAt    string          `json:"created_at"`
+	ID           string              `json:"id"`
+	Status       string              `json:"status"`
+	StartsAt     string              `json:"starts_at"`
+	EndsAt       string              `json:"ends_at"`
+	TimeZone     string              `json:"time_zone"`
+	Specialty    specialtyDTO        `json:"specialty"`
+	Professional apptProfessionalDTO `json:"professional"`
+	Join         joinWindowDTO       `json:"join"`
+	CreatedAt    string              `json:"created_at"`
 }
 
 type joinTicketDTO struct {
@@ -415,7 +425,7 @@ func (c SchedulingController) toAppointmentDTO(a models.Appointment) appointment
 			ID:   a.SpecialtyID,
 			Name: a.SpecialtyName,
 		},
-		Professional: professionalDTO{
+		Professional: apptProfessionalDTO{
 			ID:       a.ProfessionalID,
 			FullName: a.ProfessionalName,
 		},
