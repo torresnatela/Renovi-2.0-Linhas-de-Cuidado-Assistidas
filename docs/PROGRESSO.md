@@ -3,7 +3,38 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-15 — fundação criada._
+_Última atualização: 2026-07-16 — feature de Autenticação (cadastro + login + vínculo DAV) concluída no backend e no front._
+
+## ✅ Autenticação — cadastro, login e vínculo com a Doutor ao Vivo (CONCLUÍDA)
+
+Primeira feature de negócio. Ver `docs/DAV-API-NOTAS.md` (comportamento real da DAV)
+e ADR-010 a ADR-013 em `docs/DECISOES.md`.
+
+- [x] **Sondagem da API da DAV** (`make dav-probe`) — 10 achados contra a HML, com
+      evidência. Derrubou 3 afirmações do spec publicado deles.
+- [x] Contrato: `/auth/register`, `/auth/login`, `/auth/logout`, `/me`; `bearerAuth` → `cookieAuth`
+- [x] Pacotes puros: `models/cpf` (DV) e `models/credential` (Argon2id)
+- [x] `internal/adapters/dav` — client com retry, mapeamento de erro por `i18n.phrase`
+- [x] Migration `0002_auth` — `patient_account`, `patient_identity` (CPF isolado),
+      `patient_address`, `session`, `dav_link_audit`
+- [x] `models.AccountStore.Register` (2 TX curtas + DAV no meio) e `models.SessionStore`
+- [x] Controllers `/auth/*` + `/me`, `RequireSession`, rate limit por IP, `config.LogValue`
+- [x] Front: `react-router-dom`, telas de cadastro e login, `useSession`, `ProtectedRoute`
+- [x] **Verificado ponta a ponta contra a DAV de homologação**: cadastro real → pessoa
+      criada lá com o nosso UUIDv7 → login → `/me` → logout revoga a sessão.
+
+### ⚠️ Pendências conhecidas desta feature
+
+- [ ] **Fator de posse (WhatsApp/e-mail)** — sem ele o cadastro é confiado e um CPF
+      alheio dá acesso ao prontuário daquela pessoa. **ADR-013, revisar antes do go-live.**
+- [ ] **E-mail único na DAV** (achado #6): casal/família que compartilha e-mail não
+      consegue cadastrar o segundo. Há mensagem própria na UI, mas é decisão de produto.
+- [ ] **Divergência de dados com a DAV**: numa reconciliação (retry após 504), o
+      cadastro de lá fica com os dados da tentativa anterior. Não sincronizamos — no
+      caminho `ATTACHED` isso sobrescreveria dados de terceiro.
+- [ ] Reset de senha; 2FA; lockout progressivo por conta (as colunas
+      `failed_login_count`/`locked_until` já existem, a lógica não).
+- [ ] Rate limit é **em memória**: só serve para instância única. Escalou → Redis.
 
 ## ✅ Sprint 0 — Fundação (CONCLUÍDA)
 

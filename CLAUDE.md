@@ -14,8 +14,10 @@ SPEC v1 (documento de contexto) e em `docs/ARQUITETURA.md`.
 
 | Camada | Escolha |
 |---|---|
-| Backend | Go 1.25 · chi · pgx v5 · **sqlc** · golang-migrate · slog |
-| Arquitetura | **MVC pragmático** (`controllers` → `models` → `db`) + motor de elegibilidade **puro** isolado |
+| Backend | Go 1.25 · chi · pgx v5 · **sqlc** · golang-migrate · slog · Argon2id (x/crypto) |
+| Arquitetura | **MVC pragmático** (`controllers` → `models` → `db`) + motor de elegibilidade **puro** isolado + `internal/adapters/` para sistemas externos |
+| Auth | Sessão **opaca** em cookie httpOnly (ADR-010) — não JWT |
+| Externo | **Doutor ao Vivo** (dados de saúde + teleconsulta) — comportamento real em `docs/DAV-API-NOTAS.md` |
 | Contrato | OpenAPI (`packages/contracts/openapi.yaml`) — **fonte da verdade** · oapi-codegen |
 | Front | React 18 · TypeScript · Vite · Tailwind · TanStack Query · Vitest |
 | Banco próprio | PostgreSQL `renovi_care` |
@@ -41,6 +43,8 @@ make up                # sobe Postgres + mocks (Docker)
 make migrate-up        # aplica migrations no renovi_care
 make test              # testes unitários Go (rápidos)
 make test-integration  # testes de integração (testcontainers; exige Docker)
+make dav-probe         # sonda a API da Doutor ao Vivo (HML) -> docs/DAV-API-NOTAS.md
+                       # CRIA pessoas de teste lá. Fora do CI. Nunca aponte para produção.
 make generate          # regenera código Go (sqlc + oapi-codegen)
 make lint              # gofmt + go vet
 make web-dev           # front em dev (proxy /api -> :8090)
