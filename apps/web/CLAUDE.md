@@ -14,7 +14,7 @@ jornada e elegibilidade) · Vitest + Testing Library. Consumo da API via proxy
 src/
   main.tsx           # bootstrap + QueryClientProvider
   App.tsx            # shell
-  features/<feat>/   # cada tela/feature (ex.: health/, e no MVP: journey/, scheduling/)
+  features/<feat>/   # cada tela/feature (auth/, home/, health/; no MVP: journey/, scheduling/)
   shared/            # api client, helpers, componentes compartilhados
   setupTests.ts      # matchers do Testing Library
 ```
@@ -26,6 +26,11 @@ src/
 - No MVP, o cliente HTTP manual (`shared/api.ts`) é **substituído pelos hooks gerados
   pelo orval** a partir do OpenAPI (`packages/api-client`). Não escreva tipos de API à mão.
 - Tailwind para estilo; sem CSS solto salvo necessidade.
+- **Sessão:** cookie `httpOnly` — o JS NÃO o lê. Todo fetch usa `credentials: 'include'`;
+  nunca guarde token em `localStorage`. Saber quem está logado = perguntar ao servidor (`useSession`).
+- **O cadastro demora de verdade** (é síncrono contra a Doutor ao Vivo, que já levou dezenas
+  de segundos). Toda tela que o dispare precisa dizer isso — spinner mudo faz o usuário
+  recarregar no meio.
 - **Regra de ouro de UX (do motor):** nunca mostre botão só desabilitado — mostre o
   motivo traduzido do `reason` (ex.: "Você já usou sua consulta desta semana").
 
