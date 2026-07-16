@@ -12,11 +12,36 @@ import (
 
 type Querier interface {
 	CreateExampleWidget(ctx context.Context, arg CreateExampleWidgetParams) (ExampleWidget, error)
+	// Queries de autenticação e vínculo com a DAV (ver migration 0002_auth).
+	// O CPF é a chave de identidade: mora em patient_identity (LGPD, ver CLAUDE.md).
+	FindAccountByCPF(ctx context.Context, cpf string) (PatientAccount, error)
+	// "Viva" = não revogada, não expirada E com a conta ainda ACTIVE. O join com o
+	// status é o que faz bloquear uma conta derrubar as sessões dela na hora — o
+	// ganho concreto de sessão opaca sobre JWT (ADR-010).
+	FindLiveSession(ctx context.Context, tokenHash []byte) (FindLiveSessionRow, error)
+	GetAccountByID(ctx context.Context, id uuid.UUID) (PatientAccount, error)
 	// Queries de EXEMPLO para a tabela example_widget (ver migration 0001).
 	// Demonstram o fluxo sqlc: SQL escrito à mão aqui -> `make generate` -> Go tipado
 	// em internal/db/gen. Ao criar as tabelas reais, substitua estas queries.
 	GetExampleWidget(ctx context.Context, id uuid.UUID) (ExampleWidget, error)
+	// Nasce PENDING_DAV: a conta só ativa quando a DAV confirmar o vínculo.
+	InsertAccount(ctx context.Context, arg InsertAccountParams) (PatientAccount, error)
+	// Trilha de todo vínculo. É o que permitirá revisar retroativamente quem anexou
+	// prontuário de quem, quando o fator de posse (WhatsApp/e-mail) existir.
+	InsertDavLinkAudit(ctx context.Context, arg InsertDavLinkAuditParams) error
+	InsertIdentity(ctx context.Context, arg InsertIdentityParams) error
+	// token_hash é o SHA-256 do token opaco. O token em si nunca toca o banco.
+	InsertSession(ctx context.Context, arg InsertSessionParams) error
+	// Ativa a conta. O CHECK active_exige_vinculo_dav (migration 0002) recusa esta
+	// linha se dav_person_id vier nulo — a regra está no banco, não só aqui.
+	LinkAccountToDav(ctx context.Context, arg LinkAccountToDavParams) error
 	ListExampleWidgets(ctx context.Context) ([]ExampleWidget, error)
+	// Reaproveita a linha de uma tentativa que morreu antes da DAV confirmar.
+	// O filtro por status é a trava: uma conta ACTIVE nunca pode ser sobrescrita por
+	// quem apenas conhece o CPF.
+	RefreshPendingAccount(ctx context.Context, arg RefreshPendingAccountParams) (PatientAccount, error)
+	RevokeSessionByTokenHash(ctx context.Context, tokenHash []byte) error
+	UpsertAddress(ctx context.Context, arg UpsertAddressParams) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -5,10 +5,21 @@
 package gen
 
 import (
+	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type DavLinkAudit struct {
+	ID          uuid.UUID   `json:"id"`
+	AccountID   uuid.UUID   `json:"account_id"`
+	DavPersonID string      `json:"dav_person_id"`
+	Origin      string      `json:"origin"`
+	RequestIp   *netip.Addr `json:"request_ip"`
+	CreatedAt   time.Time   `json:"created_at"`
+}
 
 type ExampleWidget struct {
 	ID        uuid.UUID `json:"id"`
@@ -17,4 +28,52 @@ type ExampleWidget struct {
 	Config    []byte    `json:"config"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type PatientAccount struct {
+	ID               uuid.UUID          `json:"id"`
+	FullName         string             `json:"full_name"`
+	Email            string             `json:"email"`
+	Phone            string             `json:"phone"`
+	BirthDate        pgtype.Date        `json:"birth_date"`
+	PasswordHash     string             `json:"password_hash"`
+	Status           string             `json:"status"`
+	DavPersonID      pgtype.Text        `json:"dav_person_id"`
+	DavLinkOrigin    pgtype.Text        `json:"dav_link_origin"`
+	DavLinkedAt      pgtype.Timestamptz `json:"dav_linked_at"`
+	VerifiedAt       pgtype.Timestamptz `json:"verified_at"`
+	FailedLoginCount int32              `json:"failed_login_count"`
+	LockedUntil      pgtype.Timestamptz `json:"locked_until"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+}
+
+type PatientAddress struct {
+	AccountID    uuid.UUID   `json:"account_id"`
+	ZipCode      string      `json:"zip_code"`
+	Street       string      `json:"street"`
+	Number       string      `json:"number"`
+	Complement   pgtype.Text `json:"complement"`
+	Neighborhood string      `json:"neighborhood"`
+	City         string      `json:"city"`
+	State        string      `json:"state"`
+	Country      string      `json:"country"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+}
+
+type PatientIdentity struct {
+	AccountID uuid.UUID `json:"account_id"`
+	Cpf       string    `json:"cpf"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Session struct {
+	ID         uuid.UUID          `json:"id"`
+	AccountID  uuid.UUID          `json:"account_id"`
+	TokenHash  []byte             `json:"token_hash"`
+	ExpiresAt  time.Time          `json:"expires_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	LastSeenAt time.Time          `json:"last_seen_at"`
+	CreatedAt  time.Time          `json:"created_at"`
 }
