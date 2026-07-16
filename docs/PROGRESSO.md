@@ -3,7 +3,55 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-16 — feature de Autenticação (cadastro + login + vínculo DAV) concluída no backend e no front._
+_Última atualização: 2026-07-16 — **backend do Agendamento concluído e verificado ponta a ponta** contra a DAV de homologação. O front ainda não existe._
+
+## ✅ Agendamento — BACKEND CONCLUÍDO (front pendente)
+
+Fluxo: especialidade → profissional → horário → consulta na DAV → link de entrada.
+**Sem** motor de elegibilidade e sem linha de cuidado (decisão de escopo).
+
+- Sondagem da DAV para agendamento (`make dav-probe`) — 9 achados novos (#12 a
+  #20) em `docs/DAV-API-NOTAS.md`. Derrubou mais 3 afirmações do spec deles.
+- `deploy/mysql-legacy/init.sql` com o **schema REAL** do legado (o anterior era
+  inventado e mentia na trava de double-booking).
+- Contrato: `/specialties`, `/specialties/{id}/professionals`,
+  `/professionals/{id}/slots`, `/appointments` (GET/POST), `/appointments/{id}`,
+  `/appointments/{id}/join`.
+- `models/scheduling` — janela de entrada, pacote **puro**, table-driven.
+- `adapters/agenda` — MySQL legado à mão (ADR-018), CAS de reserva, fuso forçado.
+- `adapters/dav` — `CreateAppointment`, uma tentativa, `ErrMaybeApplied`.
+- Migration `0003_scheduling` + saga em `models/appointment.go`.
+- Controllers + rotas atrás de `RequireSession`, com timeout próprio no POST.
+
+**Verificado ponta a ponta** (API real + mock do legado + DAV de homologação):
+cadastro → login → especialidades → profissionais → horários (09:00 do legado
+saindo como `09:00-03:00`) → **agendamento 201 CONFIRMED** → consulta na DAV →
+`POST /join` devolvendo o link, que abre a sala (HTTP 200).
+
+### 🔴 Pendências e riscos conhecidos do agendamento
+
+- **O front NÃO existe.** As telas de agendar/minhas consultas/entrar são o próximo
+  passo. O contrato e a API estão prontos e verificados.
+- **`cmd/worker` continua stub.** A saga já grava a fila de compensação
+  (`FAILED` + `slot_held_at` + `slot_released_at IS NULL`) e a de revisão
+  (`DAV_UNKNOWN`), mas **ninguém as varre ainda**. Enquanto isso, um horário que a
+  compensação não conseguiu devolver fica retido até alguém olhar.
+- **Não há reconciliação possível** (ADR-016): a DAV recusa id nosso no
+  appointment e não tem rota de busca. Um 504 deixa a consulta possivelmente
+  criada e inalcançável. **Chamado a abrir na DAV**, com os `trace` que temos:
+  (1) aceitar id do integrador no `POST /appointment`, (2) o `cancel` devolvendo
+  500, (3) o `GET` devolvendo 500 em vez de 204 para id inexistente.
+- **A DAV de homologação está oscilando muito**: o `POST /appointment` mediu 3,3s
+  e 10,5s de média em sondagens do MESMO dia, com máximo de 17,2s — e no primeiro
+  agendamento real estourou os 29s do gateway. Não é cauda rara.
+- **Profissional criado por POST que estourou parece ficar quebrado na DAV**: todo
+  agendamento com ele como MMD estoura o gateway. Reproduzido duas vezes. Merece
+  entrar no mesmo chamado.
+- **Cancelar consulta ainda não existe** no nosso produto — e nem poderia hoje: o
+  `cancel` da DAV responde 500.
+- **A escrita no legado precisa de acordo com quem o opera** (ADR-014): o médico
+  não vê a consulta na agenda do Renovi legado, só pela DAV.
+
 
 ## ✅ Autenticação — cadastro, login e vínculo com a Doutor ao Vivo (CONCLUÍDA)
 
@@ -50,12 +98,31 @@ e ADR-010 a ADR-013 em `docs/DECISOES.md`.
 - [x] CI **configurado** (lint → generate-check → test → build, para api e web) — workflow escrito; ainda não executado em runner (repo sem remoto/commits)
 - [x] Docs para Claude Code (este PROGRESSO, ARQUITETURA, DESENVOLVIMENTO, DECISOES, CLAUDE.md)
 
-## ⏳ Próximo passo (início do MVP)
+## ⏳ Próximo passo
 
-**1. Implementar o motor de elegibilidade (primeiro código de negócio, TDD).**
-Arquivo: `apps/api/internal/models/eligibility/eligibility.go` (hoje é stub).
-Escreva a suíte table-driven antes: cota semanal (semana ISO), dependências N,
-"cancelou → cota volta", `NOT_YET_OPEN`, `OVERDUE`. Ver SPEC §3.3.
+**1. As telas do agendamento** (`apps/web/src/features/scheduling/`). O contrato
+está fechado e a API verificada ponta a ponta, então o front não depende de mais
+nada: wizard (especialidade → profissional → horário → confirmar), "minhas
+consultas" e o botão de entrar.
+
+Três coisas que a tela NÃO pode errar, e que já custaram decisão:
+- **Avisar que agendar demora.** O POST fala com a DAV: mediu de 3s a 29s. Spinner
+  mudo faz o usuário recarregar no meio — e recarregar aqui é péssimo.
+- **No 502 (`BOOKING_UNCONFIRMED`), NÃO oferecer "tentar de novo".** A consulta
+  pode existir e repetir cria uma segunda de verdade (ADR-016). Mandar para
+  "minhas consultas".
+- **Nunca um botão de entrar desabilitado e mudo**: usar `join.opens_at`, que já
+  vem calculado, para dizer "você poderá entrar a partir das 08:30". "30 minutos"
+  não existe no front, de propósito (ADR-017).
+
+**2. `cmd/worker`** — hoje stub, e a saga já produz as filas que ele deveria varrer
+(compensação e revisão). Sem ele, horário que a compensação não devolveu fica
+retido até alguém olhar.
+
+**3. Motor de elegibilidade** (`models/eligibility`, hoje stub). Ele filtra ANTES
+do agendamento, sem mudar as rotas já contratadas. Escreva a suíte table-driven
+antes: cota semanal (semana ISO), dependências N, "cancelou → cota volta",
+`NOT_YET_OPEN`, `OVERDUE`. Ver SPEC §3.3.
 
 ## 🗺️ Backlog por fase (resumo — detalhe no SPEC §11)
 
@@ -63,8 +130,8 @@ Escreva a suíte table-driven antes: cota semanal (semana ISO), dependências N,
 - [ ] Schema real de domínio (patient_account, care_line_template/item/dependency, enrollment, journey_event, appointment, idempotency_key) — migrations
 - [ ] Motor de elegibilidade implementado + `GET /me/eligibility`
 - [ ] Ativação de conta (token por CPF/e-mail) + Adapter Gestão (leitura)
-- [ ] Adapter Agenda (legado): leitura de slots + escrita da reserva (lock pessimista)
-- [ ] Fluxo de agendamento distribuído (idempotência, reconciliação) + Adapter DAV
+- [x] Adapter Agenda (legado): leitura de slots + reserva por CAS (ADR-015)
+- [x] Fluxo de agendamento distribuído + Adapter DAV — **sem** reconciliação: ela é impossível hoje (ADR-016)
 - [ ] Auto-conclusão (cron) + jornada avançando
 - [ ] `cmd/seed` real (aplica `saude-mental-v1`, valida DAG)
 - [ ] Telas: Ativação/Login, Minha Jornada, Agendar, Minha Consulta
@@ -79,8 +146,8 @@ Escreva a suíte table-driven antes: cota semanal (semana ISO), dependências N,
 
 ## 🔎 Levantamentos pendentes (Sprint 0 técnica — SPEC §9)
 
-- [ ] Schema real do MySQL legado (slots/escala/agenda) + como evita double-booking hoje
-- [ ] Doc e credenciais da API Doutor ao Vivo (cadastro, agendamento, sala, histórico)
+- [x] Schema real do MySQL legado + como evita double-booking hoje (o app legado vira `booked=1`: 84 de 85 consultas ativas na HML)
+- [x] Doc da API Doutor ao Vivo: cadastro, agendamento e sala mapeados (`docs/DAV-API-NOTAS.md`). Falta **histórico**.
 - [ ] Confiabilidade do CPF na tabela de colaboradores da Gestão 2.0
 - [ ] Acesso de rede da VM aos bancos legado e Gestão
 

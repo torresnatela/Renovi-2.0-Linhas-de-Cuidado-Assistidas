@@ -156,3 +156,146 @@ WhatsApp/e-mail vem depois.
 - `patient_account.verified_at` já nasce (NULL): o fator entra sem migration nova.
 - Validamos o dígito verificador do CPF e há rate limit por IP.
 **Revisar antes do go-live.**
+
+---
+
+## ADR-014 — Escrita no legado: só `tb_slots.booked`, e a permissão garante
+
+**Contexto:** o ADR-004 dizia "leitura de slots + escrita **restrita** à tabela de
+agendamento". Ao levantar o schema real (2026-07-16), a premissa caiu: o mock que
+o repo tinha era inventado, e o `tb_appointments` real não tem unique nem FK
+ligando consulta a horário.
+
+**Decisão (do time):** a nossa plataforma escreve **apenas** `tb_slots.booked`.
+Não inserimos em `tb_appointments`. A consulta vive só no `renovi_care`. É mais
+restrito que o ADR-004 — considere aquele trecho **substituído por este**.
+
+E a restrição não é disciplina: o usuário do banco só tem `SELECT` + `UPDATE
+(booked, updatedAt)` em `tb_slots` (ver `deploy/mysql-legacy/init.sql`). Um INSERT
+em `tb_appointments` recebe "ERROR 1142 command denied" — no dev, na hora. Mesmo
+espírito do CHECK `active_exige_vinculo_dav`: a regra que importa mora no banco.
+
+**Consequência — risco aceito:** o médico recebe a consulta **pela DAV** (ele é
+participante MMD e é notificado por lá), mas ela **não aparece na agenda do Renovi
+legado**, que verá apenas um horário ocupado sem dono. Precisa ser combinado com
+quem opera o legado antes do go-live.
+
+**Por que `booked` basta:** medido na HML — o app legado vira `booked=1` ao
+agendar em 84 das 85 consultas ativas, e nenhum horário jamais teve duas consultas
+ativas. Logo é um interlock de verdade, ainda que só por comportamento.
+
+---
+
+## ADR-015 — A reserva do horário é um CAS, não `SELECT … FOR UPDATE`
+
+**Contexto:** o desenho original previa lock pessimista. O schema real não tem
+constraint nenhuma protegendo o horário: `booked` é um flag solto.
+
+**Decisão:** reservar com compare-and-set —
+`UPDATE tb_slots SET booked=1 WHERE id=? AND booked=0` — e decidir por
+`RowsAffected`.
+
+**Consequência:** uma ida ao banco em vez de duas, atômica sob InnoDB, sem janela
+entre ler e decidir e sem lock aberto enquanto pensamos. `FOR UPDATE` só se
+pagaria se precisássemos ler outras colunas **dentro** do lock.
+
+São **duas travas contra adversários diferentes**, e precisamos das duas:
+
+| Trava | Defende contra |
+|---|---|
+| CAS no MySQL | o **app legado** (e nós mesmos, em último caso) |
+| Índice único parcial `ux_appointment_slot_vivo` no Postgres | **dois pacientes nossos** |
+
+A DAV **não** ajuda: ela aceita dois appointments no mesmo horário para o mesmo
+profissional (achado #17). Não há terceira rede. Por isso o teste de concorrência
+(12 goroutines, exatamente 1 vencedor) não é zelo — é o que sustenta a afirmação.
+
+---
+
+## ADR-016 — O agendamento falha FECHADO: no desconhecido, o horário não volta
+
+**Contexto:** o ADR-011b ensinou que escrita na DAV que estoura é "desconhecido",
+não "falhou", e que quem recebe isso **sonda** antes de concluir. No agendamento a
+sondagem **não existe**, e isso foi medido (`make dav-probe`, achados #12/#15/#17/#20):
+
+- `POST /appointment` **recusa id nosso** (400 "property id should not exist") —
+  ela aceita em `/person` e `/professional`, mas não aqui. O id é dela e só chega
+  na resposta.
+- **Não há rota de busca/listagem** de appointment. Sondei a última saída
+  plausível, `GET /professional/{id}/schedule`: devolve disponibilidade, não
+  consultas.
+- `PUT /appointment/{id}/cancel` responde **500**. Não dá nem para desfazer.
+- Ela **aceita sobreposição** para o mesmo profissional.
+
+Ou seja: se a DAV não responde, a consulta pode existir e **nunca saberemos**.
+
+**Decisão:** na dúvida, **segura o horário**. O estado `DAV_UNKNOWN` retém o slot,
+ninguém repete (repetir criaria uma segunda consulta real) e a consulta entra em
+fila de revisão humana. Para o paciente ela aparece como `UNCONFIRMED` — **não é
+escondida**, porque ele pode ter uma consulta de verdade marcada.
+
+Isto está gravado como CHECK (`desconhecido_nao_libera`), não como comentário:
+devolver o horário deixaria outro paciente marcar em cima de uma consulta fantasma,
+e a DAV não barraria. **Perder um horário é problema operacional; double-booking é
+problema clínico.**
+
+**Consequência:** vaza horário quando a DAV oscila, e alguém precisa olhar a fila.
+Aceito — e é o mesmo tipo de resíduo que o legado já produz sozinho (26 consultas
+canceladas na HML ficaram com `booked=1`).
+
+**Isto não é teórico.** No **primeiro agendamento real** deste código, o
+`POST /appointment` morreu em **29,2s** no teto do AWS API Gateway. O horário ficou
+retido, a consulta ficou `DAV_UNKNOWN` e o paciente recebeu 502 dizendo a verdade.
+Exatamente como o ADR-011b nasceu — só que desta vez a armadilha já estava mapeada.
+
+**Chamado a abrir na DAV** (temos o `trace` dos três): aceitar id do integrador no
+`POST /appointment`; o 500 do cancel; e o GET devolvendo 500 em vez de 204.
+
+---
+
+## ADR-017 — O link da sala é capacidade, não dado
+
+**Contexto:** o paciente entra na teleconsulta até 30 min antes. A forma óbvia
+seria devolver a url em `GET /appointments`.
+
+**Decisão:** o payload da consulta leva o **estado** da janela
+(`join.status` + `join.opens_at`); a url sai **só** do `POST /appointments/{id}/join`,
+e só com a janela aberta pelo relógio **do servidor**.
+
+**Consequência:**
+
+- A regra dos 30 minutos deixa de ser decoração: com a url no payload, bastaria
+  abrir o DevTools — ou ter o relógio errado — para entrar a qualquer hora.
+- O cache do cliente não guarda N links de teleconsulta que ninguém pediu.
+- É POST porque não é leitura pura (o acesso vai alimentar a auto-conclusão) e
+  porque POST não entra em cache de proxy, histórico nem prefetch de link.
+- **"30 minutos" não existe no contrato nem no front**: viaja `opens_at`, já
+  calculado. Mudar a antecedência é `RENOVI_JOIN_OPENS_BEFORE`, sem deploy do
+  front. Verificado ponta a ponta: com `48h`, a janela abriu.
+- O struct `models.Appointment` **não tem** o campo da url, de propósito: se
+  tivesse, mais cedo ou mais tarde alguém o serializaria numa listagem.
+
+---
+
+## ADR-018 — Adapter da agenda escrito à mão, sem sqlc (exceção ao ADR-003)
+
+**Contexto:** o ADR-003 manda usar sqlc. O MySQL legado é a exceção.
+
+**Decisão:** `internal/adapters/agenda` usa `database/sql` à mão.
+
+**Consequência:** o valor do sqlc é conferir a query contra o **schema**. Do lado
+do Postgres, o schema são as nossas migrations — ele se paga. No legado, o "schema"
+seria `deploy/mysql-legacy/init.sql`, que é uma **cópia** de um banco que não é
+nosso e que não podemos migrar. Apontar codegen para ele inverte a relação: a cópia
+vira autoridade, e no dia em que a produção divergir o `generate-check` continua
+verde. Isso não é segurança, é **aparência** de segurança.
+
+Em troca vieram dois controles melhores: um teste de integração que executa
+**todas** as queries contra o schema real (o que o sqlc faria) e um que enumera as
+colunas de que dependemos via `information_schema` (o que o sqlc nunca faria, e que
+dá para apontar para uma réplica num job noturno).
+
+O fuso entra na mesma conta: as colunas são `DATETIME` ingênuo em
+`America/Sao_Paulo`, e o adapter **força** `parseTime=true&loc=America/Sao_Paulo`
+em vez de confiar no DSN — recusando subir se alguém pedir outro fuso. Com o
+default (UTC), 09:00 viraria 06:00 em silêncio.

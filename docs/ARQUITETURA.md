@@ -80,7 +80,19 @@ são declarativas (JSONB). Ver SPEC §3 para a gramática completa.
 ## 5. Fluxos críticos (referência — implementação no MVP)
 
 - **Ativação** (Gestão → paciente): token por CPF/e-mail → conta ACTIVE → enrollment → cadastro na DAV.
-- **Agendamento** (3 sistemas, sem transação global): motor de elegibilidade → idempotência → lock pessimista do slot no legado → espelho local `CONFIRMED` → agendamento na DAV (best-effort + retry).
+- **Agendamento** (3 sistemas, sem transação global): intenção registrada no
+  `renovi_care` (`PENDING_SLOT`) → **CAS** do slot no legado (`booked=0 → 1`) →
+  `DAV_PENDING` → `POST /appointment` na DAV, **uma tentativa, sem retry** →
+  `CONFIRMED` com o link do paciente. No desconhecido, **falha fechada**: o horário
+  fica retido e a consulta vai para revisão humana (ADR-016).
+
+  > Este parágrafo já disse "lock pessimista → espelho local `CONFIRMED` →
+  > agendamento na DAV (best-effort + retry)". As três coisas estavam erradas e
+  > ficam registradas aqui porque a versão antiga é a intuição que qualquer um
+  > teria: **lock pessimista** virou CAS (ADR-015), **`CONFIRMED` antes da DAV**
+  > seria uma consulta confirmada sem link — mentira que o paciente descobriria no
+  > horário da consulta — e **retry** é exatamente o que o ADR-011b proíbe: repetir
+  > uma escrita que talvez tenha pegado cria uma segunda consulta de verdade.
 - **Teleconsulta + auto-conclusão**: paciente entra na sala DAV; job marca `COMPLETED` após o horário, avançando a jornada.
 
 Detalhes e ordem exata: SPEC §5.
