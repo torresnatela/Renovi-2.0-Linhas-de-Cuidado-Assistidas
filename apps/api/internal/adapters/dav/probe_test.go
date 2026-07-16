@@ -404,6 +404,11 @@ func TestDAVProbe(t *testing.T) {
 	c := newProbeClient(t)
 
 	t.Cleanup(func() {
+		// Ordem importa: a consulta aponta para os participantes, então ela sai
+		// primeiro. O inverso deixaria appointments referenciando gente que já
+		// não existe — e a limpeza é justamente o que evita entulhar a HML.
+		cleanupAppointments(t, c)
+		cleanupProfessionals(t, c)
 		cleanup(t, c)
 		writeReport(t, c.baseURL)
 	})
@@ -419,6 +424,22 @@ func TestDAVProbe(t *testing.T) {
 	t.Run("09_superficie_pii", func(t *testing.T) { probePIISurface(t, c) })
 	t.Run("10_latencia", func(t *testing.T) { probeLatency(t, c) })
 	t.Run("11_id_repetido", func(t *testing.T) { probeDuplicateID(t, c) })
+
+	// --- Agendamento (ver probe_appointment_test.go) ---
+	//
+	// O elenco (um MMD e um PAT) é criado UMA vez e compartilhado: todo
+	// appointment exige no mínimo 2 participantes, e criar um par por sondagem
+	// só multiplicaria o lixo na homologação sem responder nada a mais.
+	cast := newProbeCast(t, c)
+	t.Run("12_appointment_id_do_integrador", func(t *testing.T) { probeAppointmentIntegratorID(t, c, cast) })
+	t.Run("13_participante_url_obrigatoria", func(t *testing.T) { probeParticipantURLRequired(t, c, cast) })
+	t.Run("14_url_de_atendimento", func(t *testing.T) { probeAttendanceURL(t, c, cast) })
+	t.Run("15_appointment_get", func(t *testing.T) { probeAppointmentGet(t, c, cast) })
+	t.Run("16_fuso", func(t *testing.T) { probeTimezone(t, c, cast) })
+	t.Run("17_double_booking", func(t *testing.T) { probeDoubleBooking(t, c, cast) })
+	t.Run("18_appointment_passado", func(t *testing.T) { probePastAppointment(t, c, cast) })
+	t.Run("19_appointment_latencia", func(t *testing.T) { probeAppointmentLatency(t, c, cast) })
+	t.Run("20_cancel", func(t *testing.T) { probeCancel(t, c, cast) })
 }
 
 // 11. O que acontece ao repetir um POST com o MESMO id?
