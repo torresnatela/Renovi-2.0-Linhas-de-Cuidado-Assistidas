@@ -13,6 +13,30 @@ const (
 	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
+// Defines values for AppointmentStatus.
+const (
+	CANCELLED   AppointmentStatus = "CANCELLED"
+	CONFIRMED   AppointmentStatus = "CONFIRMED"
+	PROCESSING  AppointmentStatus = "PROCESSING"
+	UNCONFIRMED AppointmentStatus = "UNCONFIRMED"
+)
+
+// Valid indicates whether the value is a known member of the AppointmentStatus enum.
+func (e AppointmentStatus) Valid() bool {
+	switch e {
+	case CANCELLED:
+		return true
+	case CONFIRMED:
+		return true
+	case PROCESSING:
+		return true
+	case UNCONFIRMED:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatusStatus.
 const (
 	Degraded HealthStatusStatus = "degraded"
@@ -58,6 +82,30 @@ func (e ItemVerdictStatus) Valid() bool {
 	}
 }
 
+// Defines values for JoinWindowStatus.
+const (
+	OPEN        JoinWindowStatus = "OPEN"
+	TOOEARLY    JoinWindowStatus = "TOO_EARLY"
+	TOOLATE     JoinWindowStatus = "TOO_LATE"
+	UNAVAILABLE JoinWindowStatus = "UNAVAILABLE"
+)
+
+// Valid indicates whether the value is a known member of the JoinWindowStatus enum.
+func (e JoinWindowStatus) Valid() bool {
+	switch e {
+	case OPEN:
+		return true
+	case TOOEARLY:
+		return true
+	case TOOLATE:
+		return true
+	case UNAVAILABLE:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account A conta do próprio portador da sessão. Deliberadamente enxuta: não carrega nada vindo da DAV nem o id de lá.
 type Account struct {
 	Email    openapi_types.Email `json:"email"`
@@ -79,6 +127,59 @@ type Address struct {
 
 	// ZipCode CEP, com ou sem traço.
 	ZipCode string `json:"zip_code"`
+}
+
+// Appointment A consulta como o paciente a vê. Enxuta pelo mesmo motivo de `Account`: não carrega o id da DAV, nem o id do slot no legado, nem — jamais — o link da sala.
+type Appointment struct {
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	EndsAt    time.Time  `json:"ends_at"`
+
+	// Id Id no renovi_care (UUID v7).
+	Id openapi_types.UUID `json:"id"`
+
+	// Join O ESTADO da janela de acesso — nunca o link. Vem junto da consulta porque é o que a tela precisa para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o motivo.
+	// Repare que "30 minutos" não existe em lugar nenhum deste contrato: o que viaja é `opens_at`, JÁ CALCULADO pelo servidor. O front espera uma hora que recebeu em vez de aplicar uma regra que decorou — então mudar a antecedência é uma linha no servidor, sem deploy do front, e relógio errado no cliente não abre a sala mais cedo.
+	Join JoinWindow `json:"join"`
+
+	// Professional O profissional como o paciente o vê na hora de escolher. Sem contato, sem CPF, sem agenda interna: o que não está aqui não vaza.
+	Professional Professional `json:"professional"`
+	Specialty    Specialty    `json:"specialty"`
+	StartsAt     time.Time    `json:"starts_at"`
+
+	// Status O estado que interessa ao PACIENTE, não o estado interno da saga.
+	// - PROCESSING: reservamos o horário e estamos criando a consulta na DAV. - CONFIRMED: existe na DAV e temos o link. É o caso normal. - UNCONFIRMED: a DAV não respondeu e NÃO temos como descobrir se
+	//   criou (ela recusa id nosso e não tem rota de busca — achado #12).
+	//   O horário fica retido e alguém do time verifica. A tela precisa
+	//   dizer isso com todas as letras: esconder seria pior, porque o
+	//   paciente pode ter uma consulta de verdade marcada.
+	// - CANCELLED.
+	// Consulta que comprovadamente não aconteceu não aparece nesta lista.
+	Status AppointmentStatus `json:"status"`
+
+	// TimeZone Fuso IANA para exibição (mesma regra de Slot.time_zone).
+	TimeZone string `json:"time_zone"`
+}
+
+// AppointmentStatus O estado que interessa ao PACIENTE, não o estado interno da saga.
+//   - PROCESSING: reservamos o horário e estamos criando a consulta na DAV. - CONFIRMED: existe na DAV e temos o link. É o caso normal. - UNCONFIRMED: a DAV não respondeu e NÃO temos como descobrir se
+//     criou (ela recusa id nosso e não tem rota de busca — achado #12).
+//     O horário fica retido e alguém do time verifica. A tela precisa
+//     dizer isso com todas as letras: esconder seria pior, porque o
+//     paciente pode ter uma consulta de verdade marcada.
+//   - CANCELLED.
+//
+// Consulta que comprovadamente não aconteceu não aparece nesta lista.
+type AppointmentStatus string
+
+// AppointmentList defines model for AppointmentList.
+type AppointmentList struct {
+	Items []Appointment `json:"items"`
+}
+
+// CreateAppointmentRequest defines model for CreateAppointmentRequest.
+type CreateAppointmentRequest struct {
+	// SlotId O horário escolhido. Sozinho basta: profissional e especialidade saem do próprio slot no legado.
+	SlotId string `json:"slot_id"`
 }
 
 // HealthStatus defines model for HealthStatus.
@@ -103,6 +204,27 @@ type ItemVerdict struct {
 // ItemVerdictStatus defines model for ItemVerdict.Status.
 type ItemVerdictStatus string
 
+// JoinTicket O link de acesso do paciente à sala da DAV. É uma CAPACIDADE, não um dado: não guarde em cache, não coloque em log, não mande por e-mail.
+type JoinTicket struct {
+	Url string `json:"url"`
+}
+
+// JoinWindow O ESTADO da janela de acesso — nunca o link. Vem junto da consulta porque é o que a tela precisa para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o motivo.
+// Repare que "30 minutos" não existe em lugar nenhum deste contrato: o que viaja é `opens_at`, JÁ CALCULADO pelo servidor. O front espera uma hora que recebeu em vez de aplicar uma regra que decorou — então mudar a antecedência é uma linha no servidor, sem deploy do front, e relógio errado no cliente não abre a sala mais cedo.
+type JoinWindow struct {
+	ClosesAt time.Time `json:"closes_at"`
+
+	// OpensAt A partir de quando o POST .../join devolve o link.
+	OpensAt time.Time `json:"opens_at"`
+	Reason  *Reason   `json:"reason,omitempty"`
+
+	// Status Decidido com o relógio do SERVIDOR. UNAVAILABLE = a consulta não está confirmada ou não temos link para ela — é diferente de "ainda não" e merece outra frase.
+	Status JoinWindowStatus `json:"status"`
+}
+
+// JoinWindowStatus Decidido com o relógio do SERVIDOR. UNAVAILABLE = a consulta não está confirmada ou não temos link para ela — é diferente de "ainda não" e merece outra frase.
+type JoinWindowStatus string
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	// Cpf O CPF é o identificador de login, não o e-mail — é a chave de identidade do paciente e é sempre único.
@@ -114,9 +236,43 @@ type LoginRequest struct {
 type Problem struct {
 	Detail   *string `json:"detail,omitempty"`
 	Instance *string `json:"instance,omitempty"`
+	Reason   *Reason `json:"reason,omitempty"`
 	Status   int     `json:"status"`
 	Title    string  `json:"title"`
 	Type     *string `json:"type,omitempty"`
+}
+
+// Professional O profissional como o paciente o vê na hora de escolher. Sem contato, sem CPF, sem agenda interna: o que não está aqui não vaza.
+type Professional struct {
+	// FullName firstName + lastName do legado, já juntos.
+	FullName string `json:"full_name"`
+	Id       string `json:"id"`
+
+	// ImageUrl Foto. Nula é comum — a tela cai nas iniciais, não num ícone quebrado.
+	ImageUrl *string `json:"image_url,omitempty"`
+
+	// License Registro no conselho. É o que identifica publicamente o profissional e é com isso que o paciente escolhe — por isso é obrigatório, não enfeite.
+	// Vai em partes, e não como "CRP/SP 06/123456" pronto, porque as partes têm significado próprio: a região é uma UF e o RQE só existe para especialista (e por isso é exibido condicionalmente). Uma string pronta obrigaria o cliente a fazer parsing para qualquer coisa além de ecoar.
+	License ProfessionalLicense `json:"license"`
+}
+
+// ProfessionalLicense Registro no conselho. É o que identifica publicamente o profissional e é com isso que o paciente escolhe — por isso é obrigatório, não enfeite.
+// Vai em partes, e não como "CRP/SP 06/123456" pronto, porque as partes têm significado próprio: a região é uma UF e o RQE só existe para especialista (e por isso é exibido condicionalmente). Uma string pronta obrigaria o cliente a fazer parsing para qualquer coisa além de ecoar.
+type ProfessionalLicense struct {
+	// Council Conselho (licenseCouncil). Ex.: CRM (médico), CRP (psicólogo).
+	Council string `json:"council"`
+	Number  string `json:"number"`
+
+	// Region UF do registro.
+	Region string `json:"region"`
+
+	// Rqe Registro de Qualificação de Especialista. Nulo quando não há.
+	Rqe *string `json:"rqe,omitempty"`
+}
+
+// ProfessionalList defines model for ProfessionalList.
+type ProfessionalList struct {
+	Items []Professional `json:"items"`
 }
 
 // Reason defines model for Reason.
@@ -143,11 +299,69 @@ type RegisterRequest struct {
 	Phone string `json:"phone"`
 }
 
+// Slot Um horário livre. Autossuficiente de propósito: qualquer Slot, sozinho, tem tudo para ser renderizado certo, sem depender do contexto de onde veio.
+type Slot struct {
+	EndsAt time.Time `json:"ends_at"`
+
+	// Id Id do slot no legado (tb_slots), opaco.
+	Id string `json:"id"`
+
+	// StartsAt Instante do início, RFC 3339 COM offset. A origem no legado é DATETIME SEM fuso, que significa hora de parede de America/Sao_Paulo; quem resolve para instante é a API.
+	// Nunca mandamos "2026-07-20T09:00:00" sem offset: `new Date()` no browser leria isso no fuso do USUÁRIO, e um paciente viajando (ou um runner de CI em UTC) veria a hora errada — sem erro, sem aviso, só errado.
+	StartsAt time.Time `json:"starts_at"`
+
+	// TimeZone Fuso IANA em que este horário DEVE ser exibido — o da agenda.
+	// Não é redundante com o offset de `starts_at`: o offset é propriedade de um INSTANTE, o fuso é a REGRA. A consulta é às 09:00 em São Paulo, e é 09:00 que o paciente precisa ler mesmo que o relógio dele esteja em Lisboa. Sem este campo o front só poderia formatar no fuso do browser — que é exatamente o erro.
+	TimeZone string `json:"time_zone"`
+}
+
+// SlotPage A tela é "os horários da Ana": o profissional vem junto porque separá-lo em outra rota só acrescentaria um segundo estado de carregando e um segundo modo de falhar, para um dado que o servidor já tem em mãos.
+type SlotPage struct {
+	// From Primeiro dia do intervalo que o servidor de fato usou.
+	From  openapi_types.Date `json:"from"`
+	Items []Slot             `json:"items"`
+
+	// Professional O profissional como o paciente o vê na hora de escolher. Sem contato, sem CPF, sem agenda interna: o que não está aqui não vaza.
+	Professional Professional `json:"professional"`
+
+	// To Último dia (inclusive) que o servidor de fato usou.
+	To openapi_types.Date `json:"to"`
+}
+
+// Specialty defines model for Specialty.
+type Specialty struct {
+	Id   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// SpecialtyList defines model for SpecialtyList.
+type SpecialtyList struct {
+	Items []Specialty `json:"items"`
+}
+
+// AppointmentId defines model for AppointmentId.
+type AppointmentId = openapi_types.UUID
+
+// ProfessionalId defines model for ProfessionalId.
+type ProfessionalId = string
+
+// SpecialtyId defines model for SpecialtyId.
+type SpecialtyId = string
+
 // BadRequest Erro no formato RFC 7807 (problem+json).
 type BadRequest = Problem
 
+// BookingUnconfirmed Erro no formato RFC 7807 (problem+json).
+type BookingUnconfirmed = Problem
+
 // DavUnavailable Erro no formato RFC 7807 (problem+json).
 type DavUnavailable = Problem
+
+// LegacyUnavailable Erro no formato RFC 7807 (problem+json).
+type LegacyUnavailable = Problem
+
+// NotFound Erro no formato RFC 7807 (problem+json).
+type NotFound = Problem
 
 // TooManyRequests Erro no formato RFC 7807 (problem+json).
 type TooManyRequests = Problem
@@ -157,6 +371,18 @@ type Unauthorized = Problem
 
 // cookieAuthContextKey is the context key for cookieAuth security scheme
 type cookieAuthContextKey string
+
+// ListProfessionalSlotsParams defines parameters for ListProfessionalSlots.
+type ListProfessionalSlotsParams struct {
+	// From Primeiro dia do intervalo, no fuso da agenda. Default: hoje.
+	From *openapi_types.Date `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Último dia, inclusive. Default: `from` + 30 dias. O intervalo é limitado a 60 dias; acima disso é 400, para que um cliente distraído não peça a agenda do ano inteiro ao MySQL de terceiro.
+	To *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// CreateAppointmentJSONRequestBody defines body for CreateAppointment for application/json ContentType.
+type CreateAppointmentJSONRequestBody = CreateAppointmentRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
