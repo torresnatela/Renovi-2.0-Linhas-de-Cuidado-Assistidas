@@ -12,6 +12,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Appointment struct {
+	ID                   uuid.UUID          `json:"id"`
+	AccountID            uuid.UUID          `json:"account_id"`
+	LegacySlotID         string             `json:"legacy_slot_id"`
+	LegacyProfessionalID string             `json:"legacy_professional_id"`
+	LegacySpecialtyID    string             `json:"legacy_specialty_id"`
+	ProfessionalName     string             `json:"professional_name"`
+	SpecialtyName        string             `json:"specialty_name"`
+	StartsAt             time.Time          `json:"starts_at"`
+	EndsAt               time.Time          `json:"ends_at"`
+	Status               string             `json:"status"`
+	DavAppointmentID     pgtype.Text        `json:"dav_appointment_id"`
+	PatientJoinUrl       pgtype.Text        `json:"patient_join_url"`
+	SlotHeldAt           pgtype.Timestamptz `json:"slot_held_at"`
+	SlotReleasedAt       pgtype.Timestamptz `json:"slot_released_at"`
+	DavAttemptedAt       pgtype.Timestamptz `json:"dav_attempted_at"`
+	ConfirmedAt          pgtype.Timestamptz `json:"confirmed_at"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
+}
+
 type DavLinkAudit struct {
 	ID          uuid.UUID   `json:"id"`
 	AccountID   uuid.UUID   `json:"account_id"`
