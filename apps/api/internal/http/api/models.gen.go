@@ -5,6 +5,12 @@ package api
 
 import (
 	"time"
+
+	openapi_types "github.com/oapi-codegen/runtime/types"
+)
+
+const (
+	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
 // Defines values for HealthStatusStatus.
@@ -52,6 +58,29 @@ func (e ItemVerdictStatus) Valid() bool {
 	}
 }
 
+// Account A conta do próprio portador da sessão. Deliberadamente enxuta: não carrega nada vindo da DAV nem o id de lá.
+type Account struct {
+	Email    openapi_types.Email `json:"email"`
+	FullName string              `json:"full_name"`
+	Id       openapi_types.UUID  `json:"id"`
+}
+
+// Address defines model for Address.
+type Address struct {
+	City         string  `json:"city"`
+	Complement   *string `json:"complement,omitempty"`
+	Country      *string `json:"country,omitempty"`
+	Neighborhood string  `json:"neighborhood"`
+	Number       string  `json:"number"`
+
+	// State UF.
+	State  string `json:"state"`
+	Street string `json:"street"`
+
+	// ZipCode CEP, com ou sem traço.
+	ZipCode string `json:"zip_code"`
+}
+
 // HealthStatus defines model for HealthStatus.
 type HealthStatus struct {
 	Service string             `json:"service"`
@@ -74,6 +103,13 @@ type ItemVerdict struct {
 // ItemVerdictStatus defines model for ItemVerdict.Status.
 type ItemVerdictStatus string
 
+// LoginRequest defines model for LoginRequest.
+type LoginRequest struct {
+	// Cpf O CPF é o identificador de login, não o e-mail — é a chave de identidade do paciente e é sempre único.
+	Cpf      string `json:"cpf"`
+	Password string `json:"password"`
+}
+
 // Problem Erro no formato RFC 7807 (problem+json).
 type Problem struct {
 	Detail   *string `json:"detail,omitempty"`
@@ -90,5 +126,40 @@ type Reason struct {
 	Detail *string `json:"detail,omitempty"`
 }
 
-// bearerAuthContextKey is the context key for bearerAuth security scheme
-type bearerAuthContextKey string
+// RegisterRequest defines model for RegisterRequest.
+type RegisterRequest struct {
+	Address   Address            `json:"address"`
+	BirthDate openapi_types.Date `json:"birth_date"`
+
+	// Cpf Com ou sem formatação. O dígito verificador é conferido pela API.
+	Cpf      string              `json:"cpf"`
+	Email    openapi_types.Email `json:"email"`
+	FullName string              `json:"full_name"`
+
+	// Password Mínimo de 12 caracteres. Não exigimos maiúscula/símbolo: regras de composição empurram para "Senha1!" e a OWASP as desaconselha.
+	Password string `json:"password"`
+
+	// Phone Celular com DDD, só dígitos (10 ou 11).
+	Phone string `json:"phone"`
+}
+
+// BadRequest Erro no formato RFC 7807 (problem+json).
+type BadRequest = Problem
+
+// DavUnavailable Erro no formato RFC 7807 (problem+json).
+type DavUnavailable = Problem
+
+// TooManyRequests Erro no formato RFC 7807 (problem+json).
+type TooManyRequests = Problem
+
+// Unauthorized Erro no formato RFC 7807 (problem+json).
+type Unauthorized = Problem
+
+// cookieAuthContextKey is the context key for cookieAuth security scheme
+type cookieAuthContextKey string
+
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody = LoginRequest
+
+// RegisterJSONRequestBody defines body for Register for application/json ContentType.
+type RegisterJSONRequestBody = RegisterRequest

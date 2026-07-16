@@ -46,11 +46,15 @@ fmt: ## Formata o código Go
 	cd $(API_DIR) && gofmt -w .
 
 .PHONY: lint
-lint: ## Checa formatação e roda go vet
+lint: ## Checa formatação e roda go vet (inclusive o código atrás de build tags)
 	@echo ">> gofmt"
 	@test -z "$$(cd $(API_DIR) && gofmt -l .)" || (echo "ERRO: arquivos não formatados. Rode 'make fmt'." && cd $(API_DIR) && gofmt -l . && exit 1)
 	@echo ">> go vet"
 	cd $(API_DIR) && go vet ./...
+	@echo ">> go vet (tags: integration, davprobe)"
+	@# Sem isto, código atrás de tag só quebra quando alguém o roda. O probe ficou
+	@# semanas sem compilar (colisão de tipo com o client.go) porque o CI não o via.
+	cd $(API_DIR) && go vet -tags=integration ./... && go vet -tags=davprobe ./...
 
 .PHONY: test
 test: ## Testes unitários (rápidos, sem Docker)
@@ -59,6 +63,11 @@ test: ## Testes unitários (rápidos, sem Docker)
 .PHONY: test-integration
 test-integration: ## Testes de integração (testcontainers; exige Docker)
 	cd $(API_DIR) && go test -tags=integration ./...
+
+.PHONY: dav-probe
+dav-probe: ## Sonda a API da DAV (HML) e gera docs/DAV-API-NOTAS.md — fora do CI, CRIA pessoas de teste
+	@echo ">> sondagem da DAV — bate na API real e cria pessoas de teste (nunca aponte para PRODUÇÃO)"
+	cd $(API_DIR) && go test -tags=davprobe -count=1 -v -timeout 5m ./internal/adapters/dav/
 
 .PHONY: tidy
 tidy: ## Atualiza go.mod/go.sum

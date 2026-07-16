@@ -10,6 +10,7 @@ Contexto local do backend Go. Regras gerais no `CLAUDE.md` da raiz; arquitetura 
 | Handler de uma rota | `internal/controllers/<área>_controller.go` |
 | Regra de negócio + acesso a dados | `internal/models/<entidade>.go` |
 | Decisão pura (elegibilidade) | `internal/models/eligibility/` — **sem I/O, nunca** |
+| Cliente de sistema externo (DAV, Gestão, legado) | `internal/adapters/<sistema>/` — interface no **consumidor** (ADR-012) |
 | Query SQL | `internal/db/queries/*.sql` → `make generate-sqlc` |
 | Migration | `internal/db/migrations/NNNN_nome.up.sql` + `.down.sql` |
 | Montar rota | `internal/http/router.go` |
@@ -25,6 +26,8 @@ Contexto local do backend Go. Regras gerais no `CLAUDE.md` da raiz; arquitetura 
 - **Controllers finos:** validam entrada, chamam model, respondem (`WriteJSON`/`WriteProblem`). Sem SQL no controller.
 - **Erros HTTP:** use `controllers.WriteProblem` (RFC 7807).
 - **Testes:** unitários por padrão (`_test.go`); integração com `//go:build integration` + testcontainers (`make test-integration`).
+- **Sondagem da DAV:** `make dav-probe` (tag `davprobe`) bate na API real de HML e **cria pessoas de teste**. Fora do CI. Achados em `docs/DAV-API-NOTAS.md` — ele vale mais que o spec publicado deles, que se contradiz.
+- **Segredos:** `config.Config` tem `LogValue()` que redige a API key e a senha do banco. Ao somar campo sensível na config, some-o lá também.
 
 ## Comandos
 
