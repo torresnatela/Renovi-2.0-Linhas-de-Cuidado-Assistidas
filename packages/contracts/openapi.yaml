@@ -294,10 +294,11 @@ paths:
         Reserva o horário no legado (tb_slots.booked = 1), cria a consulta na DAV
         e espelha aqui com o link de acesso do paciente.
 
-        É LENTO: o POST da DAV levou em média 10,5s e no máximo 17,2s na
-        sondagem, contra o teto rígido de 29s do AWS API Gateway na frente deles.
-        Toda tela que dispare isto PRECISA avisar — spinner mudo faz o usuário
-        recarregar no meio.
+        É LENTO e IMPREVISÍVEL: o POST da DAV variou de ~3s a ~17s entre
+        sondagens do MESMO dia, contra o teto rígido de 29s do AWS API Gateway na
+        frente deles. Não é "alguns segundos" com uma cauda rara — a média dobra
+        ou triplica de uma hora para outra. Toda tela que dispare isto PRECISA
+        avisar — spinner mudo faz o usuário recarregar no meio.
 
         O corpo leva `slot_id` + `specialty_id`. O profissional NÃO vem: o slot já
         o determina (slot -> shift -> profissional). A especialidade vem porque o

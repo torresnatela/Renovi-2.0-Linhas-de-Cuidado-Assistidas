@@ -289,14 +289,19 @@ func probeAttendanceURL(t *testing.T, c *probeClient, cast probeCast) {
 	var out struct {
 		ID           string `json:"id"`
 		Participants []struct {
-			ID  string `json:"id"`
-			URL string `json:"url"`
+			ID   string `json:"id"`
+			Role string `json:"role"`
+			URL  string `json:"url"`
 		} `json:"participants"`
 	}
 	_ = json.Unmarshal(r.body, &out)
 
 	var patURL, mmdURL string
+	temRole := false
 	for _, p := range out.Participants {
+		if p.Role != "" {
+			temRole = true
+		}
 		switch p.ID {
 		case cast.patientID:
 			patURL = p.URL
@@ -308,13 +313,23 @@ func probeAttendanceURL(t *testing.T, c *probeClient, cast probeCast) {
 	verdict := fmt.Sprintf("HTTP %d — a resposta traz %d participante(s). ", r.status, len(out.Participants))
 	switch {
 	case patURL != "" && mmdURL != "" && patURL != mmdURL:
-		verdict += "**Cada participante tem a SUA url**, e dá para casar pelo id que enviamos " +
-			"(a resposta não traz `role`). A url do PAT é o link que o paciente clica."
+		verdict += "**Cada participante tem a SUA url.** A do PAT é o link que o paciente clica."
 	case patURL != "" && patURL == mmdURL:
-		verdict += "⚠️ **A url é a MESMA para médico e paciente** — é um link de sala, não por pessoa."
+		verdict += "⚠️ **A url é a MESMA para médico e paciente** — é link de sala, não por pessoa."
 	case patURL == "":
-		verdict += "⚠️ **Não achei url para o id do PAT.** Sem isso não há link para o paciente: " +
-			"a feature depende disto. Conferir se os ids voltam como enviados."
+		verdict += "⚠️ **Não achei url para o id do PAT.** Sem isso não há link para o paciente e a " +
+			"feature inteira não existe. Conferir se os ids voltam como enviados."
+	}
+	// O ParticipantResponseSchema deles declara só {id, url}. Se vier `role`, é
+	// mais uma contradição do spec — e muda como o adapter acha a url do paciente.
+	if temRole {
+		verdict += " O spec declara a resposta como `{id, url}`, mas ela **também traz `role`**. " +
+			"Mesmo assim casamos pelo ID que enviamos, e não pelo role: o id é o que NÓS " +
+			"controlamos, e depender de um campo que o spec diz não existir é construir sobre " +
+			"algo que eles podem remover sem avisar."
+	} else {
+		verdict += " A resposta não traz `role` (como o spec diz), então a única forma de achar a " +
+			"url do paciente é casar pelo id que enviamos."
 	}
 	record(14, q, verdict, codeBlock("json", r.pretty(1200)))
 }
@@ -437,9 +452,10 @@ func probeDoubleBooking(t *testing.T, c *probeClient, cast probeCast) {
 		verdict = fmt.Sprintf("HTTP %d — **a DAV recusa.** Segunda rede contra double-booking, "+
 			"além do nosso SELECT..FOR UPDATE no slot.", second.status)
 	case accepted:
-		verdict = fmt.Sprintf("HTTP %d — ⚠️ **a DAV ACEITA sobreposição.** O `SELECT..FOR UPDATE` "+
-			"em `tb_slots` é a ÚNICA trava de double-booking que existe (o MySQL real não tem "+
-			"constraint alguma). O teste de concorrência do adapter não é opcional.", second.status)
+		verdict = fmt.Sprintf("HTTP %d — ⚠️ **a DAV ACEITA sobreposição.** Não há segunda rede: o CAS "+
+			"do adapter da agenda (`UPDATE tb_slots SET booked=1 WHERE id=? AND booked=0`) é a ÚNICA "+
+			"trava de double-booking do sistema — o MySQL real não tem constraint alguma ligando "+
+			"consulta a horário. O teste de concorrência do adapter não é opcional.", second.status)
 	default:
 		verdict = second.inconclusiveNote()
 	}
@@ -500,9 +516,13 @@ func probeAppointmentLatency(t *testing.T, c *probeClient, cast probeCast) {
 	}
 	avg := total / time.Duration(len(samples))
 
-	record(19, q, fmt.Sprintf("Média **%s**, máx **%s** (n=%d). O teto do gateway (29s) continua "+
-		"valendo: `RENOVI_DAV_TIMEOUT` acima disso é inútil. A rota de POST /appointments precisa "+
-		"do mesmo tratamento que o register: timeout próprio derivado do `config.DAVBudget()`.",
+	record(19, q, fmt.Sprintf("Média **%s**, máx **%s** (n=%d) NESTA execução. ⚠️ **Varia muito entre "+
+		"execuções**: sondagens do mesmo dia deram média de 3,3s e de 10,5s, com máximo de 17,2s — "+
+		"ou seja, o número de uma rodada só não dimensiona nada. Tratar como "+
+		"\"alguns segundos, às vezes mais de 15\". O teto do gateway (29s) continua valendo: "+
+		"`RENOVI_DAV_TIMEOUT` acima disso é inútil, e com essa variância o 504 não é hipótese "+
+		"remota. A rota de POST /appointments precisa do mesmo tratamento do register: timeout "+
+		"próprio derivado do orçamento da DAV + SetWriteDeadline.",
 		avg.Round(time.Millisecond), max.Round(time.Millisecond), len(samples)),
 		codeBlock("", formatSamples(samples)))
 }
