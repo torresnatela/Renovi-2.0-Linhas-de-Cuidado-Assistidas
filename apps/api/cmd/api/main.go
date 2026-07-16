@@ -11,6 +11,12 @@ import (
 	"syscall"
 	"time"
 
+	// Embute a base de fusos no binário. O adapter da agenda precisa carregar
+	// America/Sao_Paulo para interpretar os DATETIME ingênuos do legado, e uma
+	// imagem scratch/distroless não tem tzdata — sem isto, a API sobe em dev e
+	// morre no boot em produção, no lugar mais caro possível.
+	_ "time/tzdata"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/renovisaude/renovi-care/internal/adapters/dav"
