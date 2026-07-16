@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -38,6 +39,13 @@ type Querier interface {
 	// ganho concreto de sessão opaca sobre JWT (ADR-010).
 	FindLiveSession(ctx context.Context, tokenHash []byte) (FindLiveSessionRow, error)
 	GetAccountByID(ctx context.Context, id uuid.UUID) (PatientAccount, error)
+	// O id do paciente na DAV, que vira o participante PAT do appointment.
+	//
+	// Filtra por ACTIVE porque conta PENDING_DAV não tem vínculo (é o que o CHECK
+	// active_exige_vinculo_dav garante). Na prática ela nem chega aqui — a sessão só
+	// valida conta ACTIVE — mas o agendamento não deve depender disso para não criar
+	// consulta na DAV sem paciente.
+	GetAccountDavPersonID(ctx context.Context, id uuid.UUID) (pgtype.Text, error)
 	// Sempre por (id, dono). Nunca só por id: um SELECT por id sozinho é um convite a
 	// alguém esquecer o WHERE do dono na próxima rota e devolver a consulta de
 	// terceiro — e aqui a consulta carrega o link da sala.

@@ -135,9 +135,12 @@ func (s *BookingStore) Location() *time.Location { return s.agenda.Location() }
 // ---------------------------------------------------------------------------
 
 // BookInput são os dados do agendamento.
+//
+// Repare que NÃO tem o id do paciente na DAV: quem o busca é o store. O
+// controller não deve manusear id de sistema externo só para repassá-lo — é
+// exatamente o tipo de dado que acaba num log ou numa resposta por descuido.
 type BookInput struct {
 	Account     Account
-	DAVPersonID string
 	SlotID      string
 	SpecialtyID string
 	Now         time.Time
@@ -164,8 +167,9 @@ type BookInput struct {
 // mesma disciplina do Register (ADR-011), pelo mesmo motivo: uma transação aberta
 // por 17s prende conexão e derruba a API sob carga.
 func (s *BookingStore) Book(ctx context.Context, in BookInput) (Appointment, error) {
-	if in.DAVPersonID == "" {
-		return Appointment{}, ErrAccountNotLinked
+	davPersonID, err := s.davPersonID(ctx, in.Account.ID)
+	if err != nil {
+		return Appointment{}, err
 	}
 
 	booking, err := s.loadBooking(ctx, in)
@@ -183,7 +187,7 @@ func (s *BookingStore) Book(ctx context.Context, in BookInput) (Appointment, err
 		return Appointment{}, err
 	}
 
-	created, err := s.createInDAV(ctx, row.ID, booking, in)
+	created, err := s.createInDAV(ctx, row.ID, booking, davPersonID)
 	if err != nil {
 		return Appointment{}, err
 	}
@@ -206,6 +210,19 @@ func (s *BookingStore) Book(ctx context.Context, in BookInput) (Appointment, err
 	out.Status = statusConfirmed
 	out.Join = scheduling.Evaluate(s.policy, scheduling.StateConfirmed, out.StartsAt, out.EndsAt, in.Now)
 	return out, nil
+}
+
+// davPersonID busca o vínculo do paciente com a DAV. Sem ele não há participante
+// PAT, e uma consulta sem paciente não é consulta.
+func (s *BookingStore) davPersonID(ctx context.Context, accountID uuid.UUID) (string, error) {
+	got, err := s.q.GetAccountDavPersonID(ctx, accountID)
+	if err != nil {
+		return "", ErrAccountNotLinked
+	}
+	if !got.Valid || got.String == "" {
+		return "", ErrAccountNotLinked
+	}
+	return got.String, nil
 }
 
 // loadBooking resolve e valida o horário ANTES de escrever em qualquer lugar.
@@ -291,14 +308,14 @@ func (s *BookingStore) holdSlot(ctx context.Context, appointmentID uuid.UUID, sl
 }
 
 // createInDAV faz a escrita que não dá para desfazer nem reconciliar.
-func (s *BookingStore) createInDAV(ctx context.Context, appointmentID uuid.UUID, b agenda.Booking, in BookInput) (dav.Appointment, error) {
+func (s *BookingStore) createInDAV(ctx context.Context, appointmentID uuid.UUID, b agenda.Booking, davPersonID string) (dav.Appointment, error) {
 	created, err := s.dav.CreateAppointment(ctx, dav.CreateAppointmentInput{
 		Title:          b.Specialty.Name + " com " + b.Professional.FullName,
 		StartsAt:       b.Slot.StartsAt,
 		EndsAt:         b.Slot.EndsAt,
 		Specialty:      b.Specialty.Name,
 		ProfessionalID: b.Professional.ID,
-		PatientID:      in.DAVPersonID,
+		PatientID:      davPersonID,
 	})
 	if err == nil {
 		return created, nil

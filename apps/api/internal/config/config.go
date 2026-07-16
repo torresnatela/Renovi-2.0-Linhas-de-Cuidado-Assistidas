@@ -71,6 +71,16 @@ type Config struct {
 	// --- Sessão (ADR-010: token opaco em cookie httpOnly) ---
 
 	SessionTTL time.Duration
+
+	// JoinOpensBefore: com quanta antecedência o paciente pode entrar na sala da
+	// teleconsulta. É config, e não constante, porque é decisão de PRODUTO — e
+	// porque o front nunca sabe este número: ele recebe a hora já calculada
+	// (`opens_at`). Mudar de 30 para 15 minutos é uma variável de ambiente, sem
+	// deploy do front.
+	JoinOpensBefore time.Duration
+	// JoinClosesAfter: quanto DEPOIS do fim ainda deixamos entrar. Zero = fecha no
+	// fim da consulta.
+	JoinClosesAfter time.Duration
 	// SessionCookieSecure desliga o atributo Secure do cookie. Só faz sentido em
 	// desenvolvimento sem TLS; o default é true para que esquecer de configurar
 	// erre para o lado seguro.
@@ -133,6 +143,14 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.DAVMaxAttempts, err = envInt("RENOVI_DAV_MAX_ATTEMPTS", 2); err != nil {
+		return Config{}, err
+	}
+	// 30 minutos é a decisão do piloto (SPEC). Fica aqui, e não no código, porque
+	// é produto: quem muda não deveria precisar de deploy do front.
+	if cfg.JoinOpensBefore, err = envDuration("RENOVI_JOIN_OPENS_BEFORE", 30*time.Minute); err != nil {
+		return Config{}, err
+	}
+	if cfg.JoinClosesAfter, err = envDuration("RENOVI_JOIN_CLOSES_AFTER", 0); err != nil {
 		return Config{}, err
 	}
 	if cfg.SessionCookieSecure, err = envBool("RENOVI_SESSION_COOKIE_SECURE", true); err != nil {

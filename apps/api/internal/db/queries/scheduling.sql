@@ -103,3 +103,13 @@ WHERE id = $1 AND account_id = $2;
 -- Quantas consultas estão em DAV_UNKNOWN. Se esta lista cresce, alguém precisa
 -- olhar: a máquina não consegue resolver sozinha.
 SELECT COUNT(*) FROM appointment WHERE status = 'DAV_UNKNOWN';
+
+-- name: GetAccountDavPersonID :one
+-- O id do paciente na DAV, que vira o participante PAT do appointment.
+--
+-- Filtra por ACTIVE porque conta PENDING_DAV não tem vínculo (é o que o CHECK
+-- active_exige_vinculo_dav garante). Na prática ela nem chega aqui — a sessão só
+-- valida conta ACTIVE — mas o agendamento não deve depender disso para não criar
+-- consulta na DAV sem paciente.
+SELECT dav_person_id FROM patient_account
+WHERE id = $1 AND status = 'ACTIVE';

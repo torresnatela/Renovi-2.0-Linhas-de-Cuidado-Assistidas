@@ -163,8 +163,7 @@ func criaConta(t *testing.T, pool *pgxpool.Pool) models.Account {
 
 func (c cenario) entrada() models.BookInput {
 	return models.BookInput{
-		Account: c.conta, DAVPersonID: davPersonID,
-		SlotID: slotID, SpecialtyID: specID, Now: c.agora,
+		Account: c.conta, SlotID: slotID, SpecialtyID: specID, Now: c.agora,
 	}
 }
 
@@ -341,17 +340,27 @@ func TestBook_RecusaAntesDeTocarEmQualquerSistema(t *testing.T) {
 	}
 }
 
-// A conta sem vínculo não tem participante PAT. Não deveria acontecer (o CHECK do
-// banco garante que só conta vinculada fica ACTIVE), mas errar aqui criaria uma
-// consulta na DAV sem paciente.
+// Conta sem vínculo não tem participante PAT, e consulta sem paciente não é
+// consulta. Na prática ela nem chega aqui (a sessão só valida conta ACTIVE, e o
+// CHECK active_exige_vinculo_dav garante que ACTIVE tem vínculo) — mas o
+// agendamento não deve depender disso para não criar consulta órfã na DAV.
 func TestBook_ContaSemVinculoComADAV(t *testing.T) {
 	c := novoCenario(t)
-	in := c.entrada()
-	in.DAVPersonID = ""
 
-	_, err := c.store.Book(context.Background(), in)
+	id, err := uuid.NewV7()
+	require.NoError(t, err)
+	_, err = c.pool.Exec(context.Background(), `
+		INSERT INTO patient_account (id, full_name, email, phone, birth_date, password_hash, status)
+		VALUES ($1,'Pendente','pendente@example.com','11912345671','1990-01-01','x','PENDING_DAV')`, id)
+	require.NoError(t, err, "PENDING_DAV é o único estado sem dav_person_id que o banco aceita")
+
+	in := c.entrada()
+	in.Account = models.Account{ID: id, FullName: "Pendente", Email: "pendente@example.com"}
+
+	_, err = c.store.Book(context.Background(), in)
 	require.ErrorIs(t, err, models.ErrAccountNotLinked)
-	require.Zero(t, c.ag.bookCalls)
+	require.Zero(t, c.ag.bookCalls, "nem chega a reservar horário")
+	require.Zero(t, c.dv.calls, "e muito menos a falar com a DAV")
 }
 
 // ---------------------------------------------------------------------------

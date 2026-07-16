@@ -129,6 +129,24 @@ func (q *Queries) FailAppointment(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const getAccountDavPersonID = `-- name: GetAccountDavPersonID :one
+SELECT dav_person_id FROM patient_account
+WHERE id = $1 AND status = 'ACTIVE'
+`
+
+// O id do paciente na DAV, que vira o participante PAT do appointment.
+//
+// Filtra por ACTIVE porque conta PENDING_DAV não tem vínculo (é o que o CHECK
+// active_exige_vinculo_dav garante). Na prática ela nem chega aqui — a sessão só
+// valida conta ACTIVE — mas o agendamento não deve depender disso para não criar
+// consulta na DAV sem paciente.
+func (q *Queries) GetAccountDavPersonID(ctx context.Context, id uuid.UUID) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getAccountDavPersonID, id)
+	var dav_person_id pgtype.Text
+	err := row.Scan(&dav_person_id)
+	return dav_person_id, err
+}
+
 const getAppointmentForAccount = `-- name: GetAppointmentForAccount :one
 SELECT id, account_id, legacy_slot_id, legacy_professional_id, legacy_specialty_id, professional_name, specialty_name, starts_at, ends_at, status, dav_appointment_id, patient_join_url, slot_held_at, slot_released_at, dav_attempted_at, confirmed_at, created_at, updated_at FROM appointment
 WHERE id = $1 AND account_id = $2
