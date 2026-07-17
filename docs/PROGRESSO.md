@@ -3,9 +3,9 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-16 — **backend do Agendamento concluído e verificado ponta a ponta** contra a DAV de homologação. O front ainda não existe._
+_Última atualização: 2026-07-16 — **Agendamento concluído (backend + front)** e verificado ponta a ponta no browser contra a DAV de homologação._
 
-## ✅ Agendamento — BACKEND CONCLUÍDO (front pendente)
+## ✅ Agendamento — CONCLUÍDO (backend + front)
 
 Fluxo: especialidade → profissional → horário → consulta na DAV → link de entrada.
 **Sem** motor de elegibilidade e sem linha de cuidado (decisão de escopo).
@@ -22,16 +22,21 @@ Fluxo: especialidade → profissional → horário → consulta na DAV → link 
 - `adapters/dav` — `CreateAppointment`, uma tentativa, `ErrMaybeApplied`.
 - Migration `0003_scheduling` + saga em `models/appointment.go`.
 - Controllers + rotas atrás de `RequireSession`, com timeout próprio no POST.
+- Front (`apps/web/src/features/scheduling/`): wizard, minhas consultas e entrar
+  na consulta. `shared/datetime` (fuso obrigatório) e `shared/navigate`.
 
-**Verificado ponta a ponta** (API real + mock do legado + DAV de homologação):
-cadastro → login → especialidades → profissionais → horários (09:00 do legado
-saindo como `09:00-03:00`) → **agendamento 201 CONFIRMED** → consulta na DAV →
-`POST /join` devolvendo o link, que abre a sala (HTTP 200).
+**Verificado ponta a ponta NO BROWSER** (Chrome + API real + mock do legado + DAV
+de homologação): cadastro → login → especialidade → profissional → horário (09:00
+do legado saindo como `09:00-03:00` na tela) → **agendamento 201 CONFIRMED** →
+minhas consultas → entrar → **a sala da Doutor ao Vivo abriu**.
+
+Rodar de verdade encontrou dois bugs que os testes não pegavam, os dois do mesmo
+tipo — contrato e mock concordando entre si e discordando da realidade:
+`SlotPage` sem o profissional (tela em branco) e `Appointment.professional`
+prometendo um registro no conselho que a consulta não guarda.
 
 ### 🔴 Pendências e riscos conhecidos do agendamento
 
-- **O front NÃO existe.** As telas de agendar/minhas consultas/entrar são o próximo
-  passo. O contrato e a API estão prontos e verificados.
 - **`cmd/worker` continua stub.** A saga já grava a fila de compensação
   (`FAILED` + `slot_held_at` + `slot_released_at IS NULL`) e a de revisão
   (`DAV_UNKNOWN`), mas **ninguém as varre ainda**. Enquanto isso, um horário que a
@@ -100,26 +105,11 @@ e ADR-010 a ADR-013 em `docs/DECISOES.md`.
 
 ## ⏳ Próximo passo
 
-**1. As telas do agendamento** (`apps/web/src/features/scheduling/`). O contrato
-está fechado e a API verificada ponta a ponta, então o front não depende de mais
-nada: wizard (especialidade → profissional → horário → confirmar), "minhas
-consultas" e o botão de entrar.
-
-Três coisas que a tela NÃO pode errar, e que já custaram decisão:
-- **Avisar que agendar demora.** O POST fala com a DAV: mediu de 3s a 29s. Spinner
-  mudo faz o usuário recarregar no meio — e recarregar aqui é péssimo.
-- **No 502 (`BOOKING_UNCONFIRMED`), NÃO oferecer "tentar de novo".** A consulta
-  pode existir e repetir cria uma segunda de verdade (ADR-016). Mandar para
-  "minhas consultas".
-- **Nunca um botão de entrar desabilitado e mudo**: usar `join.opens_at`, que já
-  vem calculado, para dizer "você poderá entrar a partir das 08:30". "30 minutos"
-  não existe no front, de propósito (ADR-017).
-
-**2. `cmd/worker`** — hoje stub, e a saga já produz as filas que ele deveria varrer
+**1. `cmd/worker`** — hoje stub, e a saga já produz as filas que ele deveria varrer
 (compensação e revisão). Sem ele, horário que a compensação não devolveu fica
 retido até alguém olhar.
 
-**3. Motor de elegibilidade** (`models/eligibility`, hoje stub). Ele filtra ANTES
+**2. Motor de elegibilidade** (`models/eligibility`, hoje stub). Ele filtra ANTES
 do agendamento, sem mudar as rotas já contratadas. Escreva a suíte table-driven
 antes: cota semanal (semana ISO), dependências N, "cancelou → cota volta",
 `NOT_YET_OPEN`, `OVERDUE`. Ver SPEC §3.3.
