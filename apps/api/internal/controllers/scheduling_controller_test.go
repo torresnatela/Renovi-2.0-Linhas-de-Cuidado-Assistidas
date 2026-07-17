@@ -53,8 +53,14 @@ func (f *fakeBookings) ListSpecialties(context.Context, time.Time) ([]agenda.Spe
 func (f *fakeBookings) ListProfessionals(context.Context, string, time.Time) ([]agenda.Professional, error) {
 	return nil, f.specErr
 }
-func (f *fakeBookings) ListSlots(context.Context, string, time.Time, time.Time, time.Time) ([]agenda.Slot, error) {
-	return f.slots, f.specErr
+func (f *fakeBookings) ListSlotPage(context.Context, string, time.Time, time.Time, time.Time) (models.SlotPage, error) {
+	if f.specErr != nil {
+		return models.SlotPage{}, f.specErr
+	}
+	return models.SlotPage{
+		Professional: agenda.Professional{ID: "prof-1", FullName: "Ana Beatriz Moura"},
+		Slots:        f.slots,
+	}, nil
 }
 func (f *fakeBookings) Book(context.Context, models.BookInput) (models.Appointment, error) {
 	if f.bookErr != nil {
@@ -331,6 +337,30 @@ func TestListSlots_EcoaOIntervaloQueUsou(t *testing.T) {
 	}
 	if got.To != "2026-08-19" {
 		t.Errorf("to = %q, quero hoje+30d", got.To)
+	}
+}
+
+// Este teste existe porque o bug aconteceu: o contrato declarava
+// `SlotPage.professional` obrigatório e o DTO simplesmente não tinha o campo. Os
+// testes do front passavam (o mock deles devolvia o profissional) e a API real
+// mandava a página sem ele — a tela quebrava em branco com "Cannot read
+// properties of undefined". Só rodar de verdade pegou.
+func TestListSlots_LevaOProfissionalJunto(t *testing.T) {
+	w := serve(t, &fakeBookings{}, http.MethodGet, "", "/professionals/prof-1/slots", "")
+
+	var got struct {
+		Professional struct {
+			ID       string `json:"id"`
+			FullName string `json:"full_name"`
+		} `json:"professional"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	// A tela é "os horários da Ana": sem isto o front não sabe de quem está
+	// mostrando a agenda.
+	if got.Professional.FullName != "Ana Beatriz Moura" {
+		t.Errorf("professional.full_name = %q, quero o nome de quem tem a agenda", got.Professional.FullName)
 	}
 }
 

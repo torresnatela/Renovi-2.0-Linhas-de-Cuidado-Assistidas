@@ -24,7 +24,7 @@ const maxSlotRange = 60 * 24 * time.Hour
 type Booking interface {
 	ListSpecialties(ctx context.Context, now time.Time) ([]agenda.Specialty, error)
 	ListProfessionals(ctx context.Context, specialtyID string, now time.Time) ([]agenda.Professional, error)
-	ListSlots(ctx context.Context, professionalID string, from, to, now time.Time) ([]agenda.Slot, error)
+	ListSlotPage(ctx context.Context, professionalID string, from, to, now time.Time) (models.SlotPage, error)
 	Book(ctx context.Context, in models.BookInput) (models.Appointment, error)
 	ListForAccount(ctx context.Context, accountID uuid.UUID, now time.Time) ([]models.Appointment, error)
 	GetForAccount(ctx context.Context, id, accountID uuid.UUID, now time.Time) (models.Appointment, error)
@@ -116,14 +116,18 @@ func (c SchedulingController) ListSlots(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// `to` é inclusivo no contrato, mas a query é semiaberta: somamos um dia.
-	items, err := c.Bookings.ListSlots(r.Context(), professionalID, from, to.AddDate(0, 0, 1), now)
+	page, err := c.Bookings.ListSlotPage(r.Context(), professionalID, from, to.AddDate(0, 0, 1), now)
+	if errors.Is(err, models.ErrProfessionalNotFound) {
+		WriteProblem(w, http.StatusNotFound, "Não encontrado", "Profissional não encontrado.")
+		return
+	}
 	if err != nil {
 		writeLegacyError(w, err)
 		return
 	}
 
-	out := make([]slotDTO, 0, len(items))
-	for _, s := range items {
+	out := make([]slotDTO, 0, len(page.Slots))
+	for _, s := range page.Slots {
 		out = append(out, slotDTO{
 			ID:       s.ID,
 			StartsAt: s.StartsAt.Format(time.RFC3339),
@@ -132,9 +136,13 @@ func (c SchedulingController) ListSlots(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 	WriteJSON(w, http.StatusOK, slotPageDTO{
-		From:  from.Format(dayLayout),
-		To:    to.Format(dayLayout),
-		Items: out,
+		// O profissional vai junto: o contrato o declara obrigatório, e a tela é
+		// "os horários da Ana" — sem ele o front não sabe de quem está mostrando
+		// a agenda.
+		Professional: toProfessionalDTO(page.Professional),
+		From:         from.Format(dayLayout),
+		To:           to.Format(dayLayout),
+		Items:        out,
 	})
 }
 
@@ -355,9 +363,10 @@ type slotDTO struct {
 }
 
 type slotPageDTO struct {
-	From  string    `json:"from"`
-	To    string    `json:"to"`
-	Items []slotDTO `json:"items"`
+	Professional professionalDTO `json:"professional"`
+	From         string          `json:"from"`
+	To           string          `json:"to"`
+	Items        []slotDTO       `json:"items"`
 }
 
 type joinWindowDTO struct {

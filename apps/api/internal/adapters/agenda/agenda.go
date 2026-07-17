@@ -54,6 +54,8 @@ var (
 	// especialidade. Separado do NotFound porque a resposta HTTP é outra (400, e
 	// não 404) e o front pode corrigir a escolha.
 	ErrSpecialtyMismatch = errors.New("agenda: profissional não atende esta especialidade")
+	// ErrProfessionalNotFound: o profissional não existe (ou saiu do legado).
+	ErrProfessionalNotFound = errors.New("agenda: profissional não encontrado")
 	// ErrUnavailable: o legado não respondeu. Nunca confundir com "não há
 	// horários" — ver a resposta LegacyUnavailable no openapi.yaml.
 	ErrUnavailable = errors.New("agenda: legado indisponível")
@@ -302,6 +304,28 @@ func (c *Client) ListSlots(ctx context.Context, professionalID string, from, to,
 		return nil, c.fail("ListSlots/rows", err)
 	}
 	return out, nil
+}
+
+// GetProfessional busca um profissional pelo id.
+//
+// Existe porque a tela de horários é "os horários da Ana": o nome e o registro
+// vêm junto com os slots. Separá-los em outra rota acrescentaria um segundo
+// estado de carregando e um segundo modo de falhar, para um dado que já está aqui.
+func (c *Client) GetProfessional(ctx context.Context, id string) (Professional, error) {
+	const q = `
+		SELECT p.id, p.firstName, p.lastName, p.imageUrl,
+		       p.licenseNumber, p.licenseRegion, p.licenseCouncil, p.rqe
+		FROM tb_professionals p
+		WHERE p.id = ?`
+
+	p, err := scanProfessional(c.db.QueryRowContext(ctx, q, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Professional{}, ErrProfessionalNotFound
+	}
+	if err != nil {
+		return Professional{}, c.fail("GetProfessional", err)
+	}
+	return p, nil
 }
 
 // LoadBooking resolve, numa consulta só, tudo o que a saga precisa: o slot, o

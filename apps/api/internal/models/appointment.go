@@ -30,6 +30,8 @@ var (
 	ErrSlotExpired = errors.New("agendamento: horário no passado")
 	// ErrSpecialtyMismatch: o profissional do horário não atende essa especialidade.
 	ErrSpecialtyMismatch = errors.New("agendamento: profissional não atende esta especialidade")
+	// ErrProfessionalNotFound: o profissional não existe no legado.
+	ErrProfessionalNotFound = errors.New("agendamento: profissional não encontrado")
 	// ErrAccountNotLinked: a conta não tem vínculo com a DAV, então não há
 	// participante PAT. Não deveria acontecer (só conta ACTIVE autentica, e ACTIVE
 	// exige vínculo pelo CHECK do banco), mas é barato conferir.
@@ -63,6 +65,7 @@ type AgendaClient interface {
 	ListSpecialties(ctx context.Context, now time.Time) ([]agenda.Specialty, error)
 	ListProfessionalsBySpecialty(ctx context.Context, specialtyID string, now time.Time) ([]agenda.Professional, error)
 	ListSlots(ctx context.Context, professionalID string, from, to, now time.Time) ([]agenda.Slot, error)
+	GetProfessional(ctx context.Context, professionalID string) (agenda.Professional, error)
 	LoadBooking(ctx context.Context, slotID, specialtyID string) (agenda.Booking, error)
 	BookSlot(ctx context.Context, slotID string) error
 	ReleaseSlot(ctx context.Context, slotID string) error
@@ -124,8 +127,31 @@ func (s *BookingStore) ListProfessionals(ctx context.Context, specialtyID string
 	return s.agenda.ListProfessionalsBySpecialty(ctx, specialtyID, now)
 }
 
-func (s *BookingStore) ListSlots(ctx context.Context, professionalID string, from, to, now time.Time) ([]agenda.Slot, error) {
-	return s.agenda.ListSlots(ctx, professionalID, from, to, now)
+// SlotPage é a tela de horários: o profissional vem junto com os slots.
+type SlotPage struct {
+	Professional agenda.Professional
+	Slots        []agenda.Slot
+}
+
+// ListSlotPage devolve o profissional E os horários dele.
+//
+// Os dois juntos porque a tela é "os horários da Ana": o contrato promete
+// `SlotPage.professional` como obrigatório, e devolver a página sem ele deixaria
+// o front sem o nome de quem ele está mostrando.
+func (s *BookingStore) ListSlotPage(ctx context.Context, professionalID string, from, to, now time.Time) (SlotPage, error) {
+	prof, err := s.agenda.GetProfessional(ctx, professionalID)
+	if errors.Is(err, agenda.ErrProfessionalNotFound) {
+		return SlotPage{}, ErrProfessionalNotFound
+	}
+	if err != nil {
+		return SlotPage{}, err
+	}
+
+	slots, err := s.agenda.ListSlots(ctx, professionalID, from, to, now)
+	if err != nil {
+		return SlotPage{}, err
+	}
+	return SlotPage{Professional: prof, Slots: slots}, nil
 }
 
 func (s *BookingStore) Location() *time.Location { return s.agenda.Location() }

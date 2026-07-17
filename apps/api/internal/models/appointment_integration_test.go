@@ -77,6 +77,9 @@ func (f *fakeAgenda) ListProfessionalsBySpecialty(context.Context, string, time.
 func (f *fakeAgenda) ListSlots(context.Context, string, time.Time, time.Time, time.Time) ([]agenda.Slot, error) {
 	return nil, nil
 }
+func (f *fakeAgenda) GetProfessional(context.Context, string) (agenda.Professional, error) {
+	return f.booking.Professional, nil
+}
 func (f *fakeAgenda) LoadBooking(context.Context, string, string) (agenda.Booking, error) {
 	if f.loadErr != nil {
 		return agenda.Booking{}, f.loadErr
