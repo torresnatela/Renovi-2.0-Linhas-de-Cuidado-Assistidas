@@ -621,6 +621,11 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          # A publicação valida as especialidades do item contra o legado (MySQL).
+          # Se ele não responde, a validação não pode concluir: 503, como as rotas de
+          # catálogo do agendamento — não é "template inválido", é "não deu para checar".
+          $ref: "#/components/responses/LegacyUnavailable"
   /admin/enrollments:
     post:
       operationId: createEnrollment

@@ -146,6 +146,29 @@ func TestCareLineAdminFlow(t *testing.T) {
 	require.True(t, wantUntil.Equal(novo.StartsAt), "período novo começa no valid_until antigo")
 	require.True(t, wantUntil2.Equal(novo.EndsAt))
 
+	// --- Renova uma EXPIRADA (reativa) -----------------------------------------
+	// Força a vigência a vencer (o caminho comum do piloto: renovar o que expirou).
+	_, err = pool.Exec(ctx, `UPDATE enrollment SET status = 'expirada' WHERE id = $1`, e.ID)
+	require.NoError(t, err)
+
+	// Renova DEPOIS de a vigência ter passado (o caso real da reativação), então o
+	// período novo é o mais recente de todos.
+	now3 := wantUntil2.Add(5 * 24 * time.Hour)
+	reativada, err := enroll.Renew(ctx, e.ID, 2, now3)
+	require.NoError(t, err)
+	require.Equal(t, "ativa", reativada.Status, "renovar expirada devolve o status a ativa")
+	wantUntil3 := now3.Add(2 * careline.MonthWindow)
+	require.True(t, wantUntil3.Equal(reativada.ValidUntil), "reativação: valid_until = now + months×30d")
+	require.Len(t, reativada.Periods, 3)
+	// A reativação NÃO é contígua: o período novo começa AGORA, não no valid_until velho.
+	reativado := reativada.Periods[len(reativada.Periods)-1]
+	require.True(t, now3.Equal(reativado.StartsAt), "período de reativação começa em now (não no valid_until antigo)")
+	require.True(t, wantUntil3.Equal(reativado.EndsAt))
+
+	evType, _, reativaPayload := latestEvent(t, pool, e.ID)
+	require.Equal(t, "matricula_renovada", evType)
+	require.Equal(t, true, reativaPayload["reactivated"], "o evento marca a reativação")
+
 	// --- Encerra ---------------------------------------------------------------
 	ended, err := enroll.End(ctx, e.ID, careline.EnrollmentEncerrada, "piloto concluído", now2)
 	require.NoError(t, err)
