@@ -171,6 +171,25 @@ func (s *BookingStore) ListSlotPage(ctx context.Context, professionalID string, 
 
 func (s *BookingStore) Location() *time.Location { return s.agenda.Location() }
 
+// SlotInfo resolve um horário (slot + profissional + especialidade) SEM reservar
+// nada. Existe para a jornada conhecer o starts_at do slot antes de rodar o motor
+// de elegibilidade — o Book revalida tudo de novo, então isto é só leitura.
+// Delegado ao LoadBooking do adapter, com o MESMO mapeamento de erros do Book.
+func (s *BookingStore) SlotInfo(ctx context.Context, slotID, specialtyID string) (agenda.Booking, error) {
+	booking, err := s.agenda.LoadBooking(ctx, slotID, specialtyID)
+	switch {
+	case errors.Is(err, agenda.ErrSlotNotFound):
+		return agenda.Booking{}, ErrSlotNotFound
+	case errors.Is(err, agenda.ErrSpecialtyMismatch):
+		return agenda.Booking{}, ErrSpecialtyMismatch
+	case errors.Is(err, agenda.ErrSpecialtyInactive):
+		return agenda.Booking{}, ErrSpecialtyInactive
+	case err != nil:
+		return agenda.Booking{}, err
+	}
+	return booking, nil
+}
+
 // ---------------------------------------------------------------------------
 // A saga
 // ---------------------------------------------------------------------------

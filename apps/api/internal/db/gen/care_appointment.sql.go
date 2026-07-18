@@ -58,6 +58,32 @@ func (q *Queries) ForceCareAppointmentStatus(ctx context.Context, arg ForceCareA
 	return result.RowsAffected(), nil
 }
 
+const getCareAppointment = `-- name: GetCareAppointment :one
+SELECT id, enrollment_id, care_line_item_id, item_ref, booking_id, scheduled_at, status, cancelled_at, idempotency_key, created_at, updated_at FROM care_appointment WHERE id = $1
+`
+
+// Leitura por id SEM dono: EXCLUSIVA do endpoint interno de teste (force-status),
+// que é gated por ambiente (RENOVI_TEST_ENDPOINTS), não por sessão — lá não há
+// paciente para conferir. Toda rota de paciente usa a versão ForPatient acima.
+func (q *Queries) GetCareAppointment(ctx context.Context, id uuid.UUID) (CareAppointment, error) {
+	row := q.db.QueryRow(ctx, getCareAppointment, id)
+	var i CareAppointment
+	err := row.Scan(
+		&i.ID,
+		&i.EnrollmentID,
+		&i.CareLineItemID,
+		&i.ItemRef,
+		&i.BookingID,
+		&i.ScheduledAt,
+		&i.Status,
+		&i.CancelledAt,
+		&i.IdempotencyKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCareAppointmentByIdemKey = `-- name: GetCareAppointmentByIdemKey :one
 SELECT id, enrollment_id, care_line_item_id, item_ref, booking_id, scheduled_at, status, cancelled_at, idempotency_key, created_at, updated_at FROM care_appointment
 WHERE enrollment_id = $1 AND idempotency_key = $2

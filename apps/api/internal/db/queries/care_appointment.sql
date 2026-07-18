@@ -25,6 +25,12 @@ SELECT ca.* FROM care_appointment ca
 JOIN enrollment e ON e.id = ca.enrollment_id
 WHERE ca.id = $1 AND e.patient_id = $2;
 
+-- name: GetCareAppointment :one
+-- Leitura por id SEM dono: EXCLUSIVA do endpoint interno de teste (force-status),
+-- que é gated por ambiente (RENOVI_TEST_ENDPOINTS), não por sessão — lá não há
+-- paciente para conferir. Toda rota de paciente usa a versão ForPatient acima.
+SELECT * FROM care_appointment WHERE id = $1;
+
 -- name: ListCareAppointmentsByEnrollment :many
 SELECT * FROM care_appointment
 WHERE enrollment_id = $1

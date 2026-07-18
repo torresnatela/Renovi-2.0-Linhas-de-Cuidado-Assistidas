@@ -82,6 +82,10 @@ type Querier interface {
 	// alguém esquecer o WHERE do dono na próxima rota e devolver a consulta de
 	// terceiro — e aqui a consulta carrega o link da sala.
 	GetAppointmentForAccount(ctx context.Context, arg GetAppointmentForAccountParams) (Appointment, error)
+	// Leitura por id SEM dono: EXCLUSIVA do endpoint interno de teste (force-status),
+	// que é gated por ambiente (RENOVI_TEST_ENDPOINTS), não por sessão — lá não há
+	// paciente para conferir. Toda rota de paciente usa a versão ForPatient acima.
+	GetCareAppointment(ctx context.Context, id uuid.UUID) (CareAppointment, error)
 	// O outro lado da idempotência: se a key já existe na matrícula, o handler devolve
 	// a consulta que já foi criada em vez de tentar (e falhar no índice único).
 	GetCareAppointmentByIdemKey(ctx context.Context, arg GetCareAppointmentByIdemKeyParams) (CareAppointment, error)
