@@ -354,6 +354,29 @@ func TestLoadBooking_SlotInexistente(t *testing.T) {
 	require.ErrorIs(t, err, agenda.ErrSlotNotFound)
 }
 
+// m13: especialidade DESATIVADA é diferente de "não atende". Se a Ana atende a
+// especialidade mas ela foi desligada, o erro tem que ser ErrSpecialtyInactive
+// (frase "indisponível"), não ErrSpecialtyMismatch (frase "não atende") — que
+// seria mentira, ela atende.
+func TestLoadBooking_EspecialidadeDesativada(t *testing.T) {
+	s := newSuite(t)
+	ctx := context.Background()
+	const desativada = "33333333-3333-4333-8333-333333333333" // active=0 no seed
+
+	// Liga a Ana à especialidade desativada e dá um slot a ela.
+	_, err := s.root.Exec(
+		`INSERT IGNORE INTO tb_professionals_specialities (professionalId, specialityId) VALUES (?, ?)`,
+		ana, desativada)
+	require.NoError(t, err)
+
+	const slot = "eeee0000-0000-4000-8000-000000000003"
+	s.seedSlot(t, slot, turnoDaAna, time.Date(2030, 7, 10, 9, 0, 0, 0, saoPaulo), false)
+
+	_, err = s.client.LoadBooking(ctx, slot, desativada)
+	require.ErrorIs(t, err, agenda.ErrSpecialtyInactive)
+	require.NotErrorIs(t, err, agenda.ErrSpecialtyMismatch)
+}
+
 // ---------------------------------------------------------------------------
 // A postura de escrita (ADR-004), provada e não prometida
 // ---------------------------------------------------------------------------

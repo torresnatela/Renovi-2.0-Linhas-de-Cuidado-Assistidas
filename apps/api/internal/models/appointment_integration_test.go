@@ -108,10 +108,16 @@ func (f *fakeAgenda) Location() *time.Location { return spTZ }
 type fakeDAVAppts struct {
 	err   error
 	calls int
+	// onCall roda DENTRO da chamada, antes de retornar. Serve para simular o
+	// paciente fechando a aba no meio da chamada lenta à DAV (cancelando o ctx).
+	onCall func()
 }
 
 func (f *fakeDAVAppts) CreateAppointment(context.Context, dav.CreateAppointmentInput) (dav.Appointment, error) {
 	f.calls++
+	if f.onCall != nil {
+		f.onCall()
+	}
 	if f.err != nil {
 		return dav.Appointment{}, f.err
 	}
@@ -236,6 +242,29 @@ func TestBook_DAVDesconhecido_SeguraOHorarioEChamaGente(t *testing.T) {
 	require.Equal(t, "DAV_UNKNOWN", status)
 	require.True(t, held)
 	require.False(t, released)
+}
+
+// M1: o paciente fecha a aba DURANTE a chamada lenta à DAV, cancelando o ctx do
+// request. A finalização (markUnknown) roda em contexto DESACOPLADO, então o
+// estado ainda transiciona — sem isso, a linha ficava presa em DAV_PENDING e, no
+// caminho de sucesso, uma consulta real com link seria jogada fora. Este teste
+// falha sem o detach() e passa com ele.
+func TestBook_CtxCanceladoNaDAVAindaFinaliza(t *testing.T) {
+	c := novoCenario(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c.dv.err = dav.ErrMaybeApplied
+	c.dv.onCall = cancel // o request morre no exato momento da chamada à DAV
+
+	_, err := c.store.Book(ctx, c.entrada())
+	require.ErrorIs(t, err, models.ErrBookingUnconfirmed)
+
+	// Apesar do ctx cancelado, a transição foi gravada.
+	status, held, released := c.statusNoBanco(t, c.idDaUnica(t))
+	require.Equal(t, "DAV_UNKNOWN", status, "a finalização não pode se perder no cancelamento do request")
+	require.True(t, held)
+	require.False(t, released, "desconhecido NUNCA libera o horário")
 }
 
 // O paciente PRECISA ver esta consulta, mesmo sem confirmação: ele pode ter uma

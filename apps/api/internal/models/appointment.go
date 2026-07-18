@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -30,6 +31,10 @@ var (
 	ErrSlotExpired = errors.New("agendamento: horário no passado")
 	// ErrSpecialtyMismatch: o profissional do horário não atende essa especialidade.
 	ErrSpecialtyMismatch = errors.New("agendamento: profissional não atende esta especialidade")
+	// ErrSpecialtyInactive: o profissional ATÉ atende a especialidade, mas ela foi
+	// desativada. Separado do mismatch porque a frase para o paciente é outra — e
+	// dizer "não atende" quando atende é mentira.
+	ErrSpecialtyInactive = errors.New("agendamento: especialidade desativada")
 	// ErrProfessionalNotFound: o profissional não existe no legado.
 	ErrProfessionalNotFound = errors.New("agendamento: profissional não encontrado")
 	// ErrAccountNotLinked: a conta não tem vínculo com a DAV, então não há
@@ -218,7 +223,14 @@ func (s *BookingStore) Book(ctx context.Context, in BookInput) (Appointment, err
 		return Appointment{}, err
 	}
 
-	if err := s.q.ConfirmAppointment(ctx, gen.ConfirmAppointmentParams{
+	// A confirmação roda em contexto DESACOPLADO do request: neste ponto a
+	// consulta já EXISTE na DAV e temos o link em mãos. Se o paciente fechou a aba
+	// durante os ~20s da chamada, gravar CONFIRMED com o ctx cancelado viraria
+	// no-op — e jogaríamos fora uma consulta real, com link, marcando-a como
+	// desconhecida. Ver detach().
+	confirmCtx, cancel := detach(ctx)
+	defer cancel()
+	if err := s.q.ConfirmAppointment(confirmCtx, gen.ConfirmAppointmentParams{
 		ID:               row.ID,
 		DavAppointmentID: text(created.ID),
 		PatientJoinUrl:   text(created.PatientJoinURL),
@@ -226,7 +238,7 @@ func (s *BookingStore) Book(ctx context.Context, in BookInput) (Appointment, err
 		// A consulta EXISTE na DAV e não conseguimos gravar. Não dá para desfazer
 		// (o cancel deles responde 500 — achado #20) e não dá para reencontrá-la.
 		// É o mesmo desconhecido: segura o horário, chama gente.
-		s.logger.ErrorContext(ctx, "agendamento: consulta criada na DAV mas não gravada",
+		s.logger.ErrorContext(confirmCtx, "agendamento: consulta criada na DAV mas não gravada",
 			"appointment_id", row.ID, "error", err.Error())
 		s.markUnknown(ctx, row.ID)
 		return Appointment{}, fmt.Errorf("%w: gravar confirmação: %v", ErrBookingUnconfirmed, err)
@@ -259,6 +271,8 @@ func (s *BookingStore) loadBooking(ctx context.Context, in BookInput) (agenda.Bo
 		return agenda.Booking{}, ErrSlotNotFound
 	case errors.Is(err, agenda.ErrSpecialtyMismatch):
 		return agenda.Booking{}, ErrSpecialtyMismatch
+	case errors.Is(err, agenda.ErrSpecialtyInactive):
+		return agenda.Booking{}, ErrSpecialtyInactive
 	case err != nil:
 		return agenda.Booking{}, err
 	}
@@ -323,8 +337,12 @@ func (s *BookingStore) holdSlot(ctx context.Context, appointmentID uuid.UUID, sl
 	}
 
 	// O horário é nosso. Gravar DAV_PENDING antes do POST custa ~1ms e é o que
-	// separa "sabemos que a DAV nunca foi chamada" de "pode ter sido".
-	if err := s.q.MarkAppointmentSlotHeld(ctx, appointmentID); err != nil {
+	// separa "sabemos que a DAV nunca foi chamada" de "pode ter sido". Desacoplado
+	// do request: já mexemos no legado, esta anotação não pode se perder num
+	// cancelamento.
+	heldCtx, cancel := detach(ctx)
+	defer cancel()
+	if err := s.q.MarkAppointmentSlotHeld(heldCtx, appointmentID); err != nil {
 		// Travamos o horário e não conseguimos anotar. Devolvê-lo é seguro: a DAV
 		// ainda não foi chamada, então não existe consulta fantasma.
 		s.releaseQuietly(ctx, appointmentID, slotID)
@@ -372,11 +390,30 @@ func (s *BookingStore) createInDAV(ctx context.Context, appointmentID uuid.UUID,
 // Compensação
 // ---------------------------------------------------------------------------
 
+// detach devolve um contexto que SOBREVIVE ao cancelamento do request.
+//
+// As escritas que registram o RESULTADO de uma ação externa (reservamos o slot,
+// a DAV criou/recusou a consulta, o horário voltou ao mercado) não podem se
+// perder porque o paciente fechou a aba ou o timeout de rota disparou no meio da
+// chamada lenta à DAV. Se rodassem no ctx do request e ele caísse, a escrita
+// viraria no-op — e a linha ficaria presa num estado intermediário, no pior caso
+// com uma consulta real na DAV que ninguém recupera.
+//
+// WithoutCancel corta a herança do cancelamento; o timeout curto evita segurar
+// conexão do pool para sempre se o banco estiver lento.
+func detach(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+}
+
 // failQuietly e releaseQuietly não propagam erro: quem os chama já está no
 // caminho de falha e tem um erro melhor para contar ao paciente. O que eles
 // deixam por fazer vira fila do worker (ListPendingSlotRelease), que é justamente
-// o motivo de a compensação não depender de o request path dar certo.
+// o motivo de a compensação não depender de o request path dar certo. Rodam em
+// contexto desacoplado (ver detach): a compensação não pode se perder no mesmo
+// cancelamento que a disparou.
 func (s *BookingStore) failQuietly(ctx context.Context, id uuid.UUID) {
+	ctx, cancel := detach(ctx)
+	defer cancel()
 	if err := s.q.FailAppointment(ctx, id); err != nil {
 		s.logger.ErrorContext(ctx, "agendamento: não consegui marcar como falha",
 			"appointment_id", id, "error", err.Error())
@@ -384,6 +421,8 @@ func (s *BookingStore) failQuietly(ctx context.Context, id uuid.UUID) {
 }
 
 func (s *BookingStore) markUnknown(ctx context.Context, id uuid.UUID) {
+	ctx, cancel := detach(ctx)
+	defer cancel()
 	if err := s.q.MarkAppointmentUnknown(ctx, id); err != nil {
 		s.logger.ErrorContext(ctx, "agendamento: não consegui marcar como desconhecido",
 			"appointment_id", id, "error", err.Error())
@@ -391,6 +430,8 @@ func (s *BookingStore) markUnknown(ctx context.Context, id uuid.UUID) {
 }
 
 func (s *BookingStore) releaseQuietly(ctx context.Context, id uuid.UUID, slotID string) {
+	ctx, cancel := detach(ctx)
+	defer cancel()
 	if err := s.agenda.ReleaseSlot(ctx, slotID); err != nil {
 		// O worker repete: a linha continua FAILED com slot_held_at e sem
 		// slot_released_at, que é exatamente a fila de compensação.
@@ -422,8 +463,14 @@ func (s *BookingStore) ListForAccount(ctx context.Context, accountID uuid.UUID, 
 
 func (s *BookingStore) GetForAccount(ctx context.Context, id, accountID uuid.UUID, now time.Time) (Appointment, error) {
 	row, err := s.q.GetAppointmentForAccount(ctx, gen.GetAppointmentForAccountParams{ID: id, AccountID: accountID})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return Appointment{}, ErrAppointmentNotFound
+	}
+	if err != nil {
+		// Falha de infra NÃO é "não existe": propaga para virar 503, não 404. Dizer
+		// "sua consulta não existe" quando o banco caiu manda o paciente embora de
+		// algo que está lá.
+		return Appointment{}, fmt.Errorf("buscar consulta: %w", err)
 	}
 	if row.Status == statusRowFailed {
 		return Appointment{}, ErrAppointmentNotFound
@@ -438,8 +485,11 @@ func (s *BookingStore) GetForAccount(ctx context.Context, id, accountID uuid.UUI
 // viraria decoração: bastaria abrir o DevTools para entrar a qualquer hora.
 func (s *BookingStore) JoinURL(ctx context.Context, id, accountID uuid.UUID, now time.Time) (string, error) {
 	row, err := s.q.GetAppointmentForAccount(ctx, gen.GetAppointmentForAccountParams{ID: id, AccountID: accountID})
-	if err != nil || row.Status == statusRowFailed {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.Status == statusRowFailed) {
 		return "", ErrAppointmentNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("buscar consulta: %w", err)
 	}
 
 	w := scheduling.Evaluate(s.policy, stateOf(row.Status), row.StartsAt, row.EndsAt, now)
@@ -458,14 +508,13 @@ func (s *BookingStore) JoinURL(ctx context.Context, id, accountID uuid.UUID, now
 // Tradução entre o vocabulário da saga e o do paciente
 // ---------------------------------------------------------------------------
 
-// Status internos (banco) — o paciente nunca os vê.
+// Status internos (banco) — o paciente nunca os vê. PENDING_SLOT e DAV_PENDING
+// existem no schema e nas queries, mas o código Go só ramifica nos abaixo.
 const (
-	statusRowPendingSlot = "PENDING_SLOT"
-	statusRowDavPending  = "DAV_PENDING"
-	statusRowConfirmed   = "CONFIRMED"
-	statusRowFailed      = "FAILED"
-	statusRowDavUnknown  = "DAV_UNKNOWN"
-	statusRowCancelled   = "CANCELLED"
+	statusRowConfirmed  = "CONFIRMED"
+	statusRowFailed     = "FAILED"
+	statusRowDavUnknown = "DAV_UNKNOWN"
+	statusRowCancelled  = "CANCELLED"
 )
 
 // Status do contrato (o que o paciente vê).

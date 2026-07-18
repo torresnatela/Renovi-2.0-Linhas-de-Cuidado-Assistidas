@@ -54,6 +54,9 @@ var (
 	// especialidade. Separado do NotFound porque a resposta HTTP é outra (400, e
 	// não 404) e o front pode corrigir a escolha.
 	ErrSpecialtyMismatch = errors.New("agenda: profissional não atende esta especialidade")
+	// ErrSpecialtyInactive: o profissional atende a especialidade, mas ela foi
+	// desativada. Distinto do mismatch: dizer "não atende" quando atende é falso.
+	ErrSpecialtyInactive = errors.New("agenda: especialidade desativada")
 	// ErrProfessionalNotFound: o profissional não existe (ou saiu do legado).
 	ErrProfessionalNotFound = errors.New("agenda: profissional não encontrado")
 	// ErrUnavailable: o legado não respondeu. Nunca confundir com "não há
@@ -152,6 +155,18 @@ func New(cfg Config) (*Client, error) {
 	parsed.ParseTime = true
 	parsed.Loc = loc
 
+	// Timeout de rede no próprio DSN, como backstop. Sem isto, um caller sem
+	// deadline no contexto (o worker rodando ReleaseSlot, por exemplo) trava numa
+	// conexão emperrada do banco de terceiro até o TCP desistir. O ctx do request
+	// HTTP continua sendo o limite fino; isto é a rede embaixo dele.
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	parsed.Timeout = timeout      // dial
+	parsed.ReadTimeout = timeout  // leitura
+	parsed.WriteTimeout = timeout // escrita
+
 	db, err := sql.Open("mysql", parsed.FormatDSN())
 	if err != nil {
 		return nil, errors.New("agenda: não consegui abrir o pool")
@@ -181,6 +196,9 @@ func (c *Client) Close() error { return c.db.Close() }
 // Ping serve ao /readyz.
 func (c *Client) Ping(ctx context.Context) error {
 	if err := c.db.PingContext(ctx); err != nil {
+		// Loga a causa (como fail) antes de esconder: um flap no /readyz sem log
+		// não deixa nada para diagnosticar.
+		c.logger.Error("agenda: ping falhou", "error", err.Error())
 		return fmt.Errorf("%w: ping", ErrUnavailable)
 	}
 	return nil
@@ -276,12 +294,18 @@ func (c *Client) ListSlots(ctx context.Context, professionalID string, from, to,
 		return nil, nil
 	}
 
+	// `startsAt > ?` (estrito), não `>=`, para casar com o "future" das listas
+	// (ListSpecialties/ListProfessionals) e com o `StartsAt.After(now)` do
+	// loadBooking: um horário que começa EXATAMENTE agora não é agendável (o
+	// loadBooking o recusa como expirado), então oferecê-lo aqui seria mostrar algo
+	// que falha ao clicar. Slots reais são de 25 min, então a borda de segundo
+	// exato é teórica — mas o operador tem que ser o mesmo nos três lugares.
 	const q = `
 		SELECT sl.id, sl.startsAt, sl.endsAt
 		FROM tb_slots sl
 		JOIN tb_shifts sh ON sh.id = sl.shiftId
 		WHERE sh.professionalId = ? AND sl.booked = 0
-		  AND sl.startsAt >= ? AND sl.startsAt < ?
+		  AND sl.startsAt > ? AND sl.startsAt < ?
 		ORDER BY sl.startsAt`
 
 	rows, err := c.db.QueryContext(ctx, q, professionalID, c.wall(from), c.wall(to))
@@ -362,7 +386,7 @@ func (c *Client) LoadBooking(ctx context.Context, slotID, specialtyID string) (B
 		&b.Specialty.ID, &b.Specialty.Name,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Booking{}, c.explainMissing(ctx, slotID)
+		return Booking{}, c.explainMissing(ctx, slotID, specialtyID)
 	}
 	if err != nil {
 		return Booking{}, c.fail("LoadBooking", err)
@@ -375,11 +399,36 @@ func (c *Client) LoadBooking(ctx context.Context, slotID, specialtyID string) (B
 	return b, nil
 }
 
-// explainMissing separa "slot não existe" de "profissional não atende essa
-// especialidade". Só roda no caminho de erro.
-func (c *Client) explainMissing(ctx context.Context, slotID string) error {
+// explainMissing separa os três motivos de LoadBooking não achar linha: o slot
+// não existe (404), o profissional dele não atende a especialidade (400
+// "não atende"), ou atende mas a especialidade está desativada (400, frase
+// diferente — dizer "não atende" seria mentira). Só roda no caminho de erro.
+func (c *Client) explainMissing(ctx context.Context, slotID, specialtyID string) error {
+	// O profissional do slot atende essa especialidade, ignorando o active? Um
+	// join do slot até a especialidade SEM o filtro `active = 1`. Se casar, o
+	// motivo é a desativação; se não, é mismatch de verdade.
+	var active bool
+	err := c.db.QueryRowContext(ctx, `
+		SELECT sp.active
+		FROM tb_slots sl
+		JOIN tb_shifts sh ON sh.id = sl.shiftId
+		JOIN tb_professionals_specialities ps ON ps.professionalId = sh.professionalId
+		JOIN tb_specialities sp ON sp.id = ps.specialityId
+		WHERE sl.id = ? AND sp.id = ?`, slotID, specialtyID).Scan(&active)
+	switch {
+	case err == nil && !active:
+		return ErrSpecialtyInactive
+	case err == nil:
+		// Casou e está ativa — não deveria cair aqui (a query principal teria
+		// achado). Trata como mismatch por segurança.
+		return ErrSpecialtyMismatch
+	case !errors.Is(err, sql.ErrNoRows):
+		return c.fail("explainMissing", err)
+	}
+
+	// Não casou: ou o slot não existe, ou o profissional não atende a especialidade.
 	var exists bool
-	err := c.db.QueryRowContext(ctx, `SELECT 1 FROM tb_slots WHERE id = ?`, slotID).Scan(&exists)
+	err = c.db.QueryRowContext(ctx, `SELECT 1 FROM tb_slots WHERE id = ?`, slotID).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrSlotNotFound
 	}
@@ -419,8 +468,11 @@ func (c *Client) BookSlot(ctx context.Context, slotID string) error {
 
 	// 0 linhas: ou o slot sumiu, ou alguém chegou antes. Distinguir importa
 	// porque a resposta ao paciente é diferente (404 vs "escolha outro horário").
-	var booked bool
-	switch err := c.db.QueryRowContext(ctx, `SELECT booked FROM tb_slots WHERE id = ?`, slotID).Scan(&booked); {
+	// Basta a EXISTÊNCIA da linha: o CAS falhou com `booked=0` no WHERE, então se a
+	// linha existe ela só pode estar com booked=1 (ou acabou de ser liberada — aí
+	// o retry do paciente resolve). Não precisamos ler o valor.
+	var exists bool
+	switch err := c.db.QueryRowContext(ctx, `SELECT 1 FROM tb_slots WHERE id = ?`, slotID).Scan(&exists); {
 	case errors.Is(err, sql.ErrNoRows):
 		return ErrSlotNotFound
 	case err != nil:
