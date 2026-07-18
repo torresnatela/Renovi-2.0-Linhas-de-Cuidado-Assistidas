@@ -32,10 +32,12 @@ var (
 	ErrCareLineNotFound = errors.New("catálogo: linha de cuidado não encontrada")
 )
 
-// Vocabulário do catálogo (espelha os CHECKs das migrations 0005).
+// Vocabulário do catálogo (espelha os CHECKs das migrations 0005/0009). Os kinds
+// vêm do motor puro, fonte da verdade do vocabulário.
 const (
 	careLineStatusDraft = "draft"
-	itemKindConsulta    = "CONSULTA"
+	itemKindConsulta    = careline.KindConsulta
+	itemKindAtividade   = careline.KindAtividade
 )
 
 // ErrCareLineInvalid reúne, de uma vez, os problemas que impedem uma operação de
@@ -174,14 +176,22 @@ func (s *CareLineStore) AddItem(ctx context.Context, careLineID uuid.UUID, in Ad
 	label := strings.TrimSpace(in.Label)
 
 	var problems []string
-	if kind != itemKindConsulta {
-		problems = append(problems, fmt.Sprintf("kind %q não é suportado (use CONSULTA)", in.Kind))
+	if kind != itemKindConsulta && kind != itemKindAtividade {
+		problems = append(problems, fmt.Sprintf("kind %q não é suportado (use CONSULTA ou ATIVIDADE)", in.Kind))
 	}
 	if ref == "" {
 		problems = append(problems, "ref é obrigatório")
 	}
-	if specialty == "" {
-		problems = append(problems, "specialty_code é obrigatório")
+	// specialty_code é condicional ao kind: CONSULTA exige, ATIVIDADE não tem.
+	switch kind {
+	case itemKindConsulta:
+		if specialty == "" {
+			problems = append(problems, "specialty_code é obrigatório para CONSULTA")
+		}
+	case itemKindAtividade:
+		if specialty != "" {
+			problems = append(problems, "specialty_code não se aplica a ATIVIDADE")
+		}
 	}
 	if label == "" {
 		problems = append(problems, "label é obrigatório")
@@ -209,9 +219,14 @@ func (s *CareLineStore) AddItem(ctx context.Context, careLineID uuid.UUID, in Ad
 	if in.SortOrder != nil {
 		sortOrder = int32(*in.SortOrder)
 	}
+	// specialty_code é NULL para ATIVIDADE (só CONSULTA aponta para especialidade).
+	var specialtyPtr *string
+	if kind == itemKindConsulta {
+		specialtyPtr = &specialty
+	}
 	item, err := q.InsertCareLineItem(ctx, gen.InsertCareLineItemParams{
 		ID: id, CareLineID: careLineID, Ref: ref, Kind: kind,
-		SpecialtyCode: specialty, Label: label,
+		SpecialtyCode: textPtr(specialtyPtr), Label: label,
 		Recurrence: textPtr(in.Recurrence), SortOrder: sortOrder,
 	})
 	if err != nil {
@@ -451,7 +466,7 @@ func toCareLineItem(row gen.CareLineItem, rules []CareLineRule) CareLineItem {
 		ID:            row.ID,
 		Ref:           row.Ref,
 		Kind:          row.Kind,
-		SpecialtyCode: row.SpecialtyCode,
+		SpecialtyCode: row.SpecialtyCode.String, // "" quando NULL (ATIVIDADE)
 		Label:         row.Label,
 		Recurrence:    textToPtr(row.Recurrence),
 		SortOrder:     int(row.SortOrder),
@@ -467,7 +482,7 @@ func toEngine(items []gen.CareLineItem, ruleRows []gen.ListRulesByCareLineRow) (
 		engineItems = append(engineItems, careline.Item{
 			Ref:           it.Ref,
 			Kind:          it.Kind,
-			SpecialtyCode: it.SpecialtyCode,
+			SpecialtyCode: it.SpecialtyCode.String, // "" quando NULL (ATIVIDADE)
 			Label:         it.Label,
 		})
 	}

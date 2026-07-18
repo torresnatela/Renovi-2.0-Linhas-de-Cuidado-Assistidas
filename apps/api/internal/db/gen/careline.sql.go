@@ -116,7 +116,7 @@ type InsertCareLineItemParams struct {
 	CareLineID    uuid.UUID   `json:"care_line_id"`
 	Ref           string      `json:"ref"`
 	Kind          string      `json:"kind"`
-	SpecialtyCode string      `json:"specialty_code"`
+	SpecialtyCode pgtype.Text `json:"specialty_code"`
 	Label         string      `json:"label"`
 	Recurrence    pgtype.Text `json:"recurrence"`
 	SortOrder     int32       `json:"sort_order"`

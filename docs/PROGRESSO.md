@@ -3,7 +3,25 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 1 concluída:** motor de regras puro `models/careline` por TDD._
+_Última atualização: 2026-07-18 — **Verificador Diário de Humor (Anexo C), Módulo 0 concluído:** `care_line_item.kind` ganha ATIVIDADE (branch `feat/verificador-humor`)._
+
+## 🌡️ Verificador Diário de Humor — Anexo C (em andamento, branch `feat/verificador-humor`)
+
+Check-in emocional contínuo como **atividade** da linha de cuidado (3 anéis:
+diário → WHO-5 semanal → PHQ-4 gatilhado). Só Degrau 2 (exige matrícula ativa).
+Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
+
+- [x] **Módulo 0 — item ATIVIDADE na fundação** (ADR-030): migration
+  `0009_activity_item` (kind `IN ('CONSULTA','ATIVIDADE')`, `specialty_code`
+  condicional ao kind), `careline_catalog.AddItem` aceita ATIVIDADE,
+  `ValidatePublish` pula especialidade para atividade. Unit + integração verdes
+  (fluxo de consulta sem regressão). Falta commit para `generate-check` fechar.
+- [ ] Módulo 1 — Consentimento (LGPD, pré-condição de gravação).
+- [ ] Módulo 2 — Catálogo de instrumentos + pontuação pura (`models/mood/scoring`).
+- [ ] Módulo 3 — Anel diário (grade valência×energia) ponta a ponta + front mínimo.
+- [ ] Módulo 4 — Anel semanal WHO-5 via `MIN_INTERVAL` (reusa o motor).
+- [ ] Módulo 5 — Anel gatilhado PHQ-4 + gatilho puro (`models/mood/trigger`).
+- [ ] Módulo 6 — Roteamento de crise/escalonamento + fechamento.
 
 ## 🚧 Slice 1 — Linhas de Cuidado Assistidas (em andamento)
 

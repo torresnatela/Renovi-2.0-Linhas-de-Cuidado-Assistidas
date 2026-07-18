@@ -186,6 +186,53 @@ func TestCareLineAdminFlow(t *testing.T) {
 	require.ErrorIs(t, err, models.ErrEnrollmentClosed)
 }
 
+// TestCareLineAdmin_AtividadeItem prova que o catálogo aceita itens ATIVIDADE
+// (sem especialidade), rejeita combinações inválidas de kind×especialidade e
+// publica uma linha com atividade — a fundação para o Verificador de Humor.
+func TestCareLineAdmin_AtividadeItem(t *testing.T) {
+	ctx := context.Background()
+	catalog, _, pool := newCareStores(t, aceitaAmbas())
+
+	line, err := catalog.Create(ctx, "bem-estar", "Bem-estar", "linha com atividade")
+	require.NoError(t, err)
+
+	// ATIVIDADE sem especialidade: aceita e grava specialty_code NULL.
+	checkin, err := catalog.AddItem(ctx, line.ID, models.AddItemInput{
+		Ref: "checkin-humor-diario", Kind: careline.KindAtividade, Label: "Check-in de humor",
+	})
+	require.NoError(t, err)
+	require.Equal(t, careline.KindAtividade, checkin.Kind)
+	require.Empty(t, checkin.SpecialtyCode)
+
+	// specialty_code IS NULL no banco (a invariante do CHECK condicional do 0009).
+	var specialtyNull bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT specialty_code IS NULL FROM care_line_item WHERE id = $1`, checkin.ID).Scan(&specialtyNull))
+	require.True(t, specialtyNull, "ATIVIDADE deve gravar specialty_code NULL")
+
+	// ATIVIDADE com especialidade é rejeitada (especialidade não se aplica).
+	_, err = catalog.AddItem(ctx, line.ID, models.AddItemInput{
+		Ref: "x", Kind: careline.KindAtividade, SpecialtyCode: "Psicologia", Label: "X",
+	})
+	require.ErrorAs(t, err, &models.ErrCareLineInvalid{})
+
+	// CONSULTA sem especialidade é rejeitada (especialidade obrigatória).
+	_, err = catalog.AddItem(ctx, line.ID, models.AddItemInput{
+		Ref: "y", Kind: careline.KindConsulta, Label: "Y",
+	})
+	require.ErrorAs(t, err, &models.ErrCareLineInvalid{})
+
+	// Cadência mínima diária na atividade — a regra da linha (não lógica nova).
+	require.NoError(t, add(ctx, catalog, line.ID, "checkin-humor-diario", careline.RuleMinInterval, `{"days":1}`))
+
+	// Publica: a validação de especialidade pula a atividade.
+	published, err := catalog.Publish(ctx, line.ID, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "published", published.Status)
+	require.Len(t, published.Items, 1)
+	require.Equal(t, careline.KindAtividade, published.Items[0].Kind)
+}
+
 // TestPublish_CicloDePrerequisito_Reprova prova que o publish acumula os erros de
 // validação em vez de gravar uma linha inconsistente.
 func TestPublish_CicloDePrerequisito_Reprova(t *testing.T) {

@@ -88,12 +88,15 @@ func (e CareLineStatus) Valid() bool {
 
 // Defines values for CareLineItemKind.
 const (
-	CareLineItemKindCONSULTA CareLineItemKind = "CONSULTA"
+	CareLineItemKindATIVIDADE CareLineItemKind = "ATIVIDADE"
+	CareLineItemKindCONSULTA  CareLineItemKind = "CONSULTA"
 )
 
 // Valid indicates whether the value is a known member of the CareLineItemKind enum.
 func (e CareLineItemKind) Valid() bool {
 	switch e {
+	case CareLineItemKindATIVIDADE:
+		return true
 	case CareLineItemKindCONSULTA:
 		return true
 	default:
@@ -127,12 +130,15 @@ func (e CareLineRuleRuleType) Valid() bool {
 
 // Defines values for CreateCareLineItemRequestKind.
 const (
-	CreateCareLineItemRequestKindCONSULTA CreateCareLineItemRequestKind = "CONSULTA"
+	CreateCareLineItemRequestKindATIVIDADE CreateCareLineItemRequestKind = "ATIVIDADE"
+	CreateCareLineItemRequestKindCONSULTA  CreateCareLineItemRequestKind = "CONSULTA"
 )
 
 // Valid indicates whether the value is a known member of the CreateCareLineItemRequestKind enum.
 func (e CreateCareLineItemRequestKind) Valid() bool {
 	switch e {
+	case CreateCareLineItemRequestKindATIVIDADE:
+		return true
 	case CreateCareLineItemRequestKindCONSULTA:
 		return true
 	default:
@@ -604,11 +610,11 @@ type CareLine struct {
 // CareLineStatus defines model for CareLine.Status.
 type CareLineStatus string
 
-// CareLineItem Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade. `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
+// CareLineItem Um passo da linha — uma CONSULTA de uma especialidade ou uma ATIVIDADE executada na plataforma (ex.: check-in de humor do Anexo C). `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
 type CareLineItem struct {
 	Id openapi_types.UUID `json:"id"`
 
-	// Kind Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+	// Kind CONSULTA (aponta para uma especialidade do legado) ou ATIVIDADE (executada na plataforma, sem especialidade).
 	Kind CareLineItemKind `json:"kind"`
 
 	// Label Rótulo em PT-BR exibido ao paciente. Ex.: "Avaliação inicial".
@@ -624,11 +630,11 @@ type CareLineItem struct {
 	// SortOrder Ordem de exibição do item na linha.
 	SortOrder int `json:"sort_order"`
 
-	// SpecialtyCode A especialidade da consulta (código do catálogo do legado).
+	// SpecialtyCode A especialidade da consulta (código do catálogo do legado). Vazio para itens ATIVIDADE, que não têm especialidade.
 	SpecialtyCode string `json:"specialty_code"`
 }
 
-// CareLineItemKind Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+// CareLineItemKind CONSULTA (aponta para uma especialidade do legado) ou ATIVIDADE (executada na plataforma, sem especialidade).
 type CareLineItemKind string
 
 // CareLineList defines model for CareLineList.
@@ -678,8 +684,10 @@ type CreateCareLineItemRequest struct {
 	Ref        string  `json:"ref"`
 
 	// SortOrder Ordem na linha. Default a cargo do servidor quando ausente.
-	SortOrder     *int   `json:"sort_order,omitempty"`
-	SpecialtyCode string `json:"specialty_code"`
+	SortOrder *int `json:"sort_order,omitempty"`
+
+	// SpecialtyCode Obrigatório para CONSULTA; omitido (ou vazio) para ATIVIDADE, que não tem especialidade.
+	SpecialtyCode *string `json:"specialty_code,omitempty"`
 }
 
 // CreateCareLineItemRequestKind defines model for CreateCareLineItemRequest.Kind.
@@ -857,7 +865,7 @@ type JourneyItem struct {
 	// Eligibility O veredito do motor para UM item, no instante avaliado. `allowed` resume (`blocks` vazio); `blocks` diz por que não, quando não. O front usa isto para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o porquê.
 	Eligibility Eligibility `json:"eligibility"`
 
-	// Item Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade. `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
+	// Item Um passo da linha — uma CONSULTA de uma especialidade ou uma ATIVIDADE executada na plataforma (ex.: check-in de humor do Anexo C). `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
 	Item CareLineItem `json:"item"`
 }
 

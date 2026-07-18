@@ -86,10 +86,16 @@ func (c CareLineAdminController) CreateCareLineItem(w http.ResponseWriter, r *ht
 	if !decodeJSON(w, r, &body) {
 		return
 	}
+	// specialty_code é opcional no contrato (ausente para ATIVIDADE); o model
+	// valida a exigência conforme o kind.
+	specialtyCode := ""
+	if body.SpecialtyCode != nil {
+		specialtyCode = *body.SpecialtyCode
+	}
 	item, err := c.Catalog.AddItem(r.Context(), id, models.AddItemInput{
 		Ref:           body.Ref,
 		Kind:          string(body.Kind),
-		SpecialtyCode: body.SpecialtyCode,
+		SpecialtyCode: specialtyCode,
 		Label:         body.Label,
 		Recurrence:    body.Recurrence,
 		SortOrder:     body.SortOrder,

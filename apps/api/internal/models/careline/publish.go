@@ -30,6 +30,10 @@ func ValidatePublish(items []Item, rules map[string][]Rule, specialtyNames []str
 		known[normalizeSpecialty(n)] = true
 	}
 	for _, it := range items {
+		// Atividades (ex.: check-in de humor) não têm especialidade — pula a checagem.
+		if it.Kind == KindAtividade {
+			continue
+		}
 		if !known[normalizeSpecialty(it.SpecialtyCode)] {
 			errs = append(errs, fmt.Sprintf(
 				"item %q: especialidade %q não encontrada no legado", it.Ref, it.SpecialtyCode))

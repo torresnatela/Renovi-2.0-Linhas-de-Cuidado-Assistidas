@@ -370,3 +370,36 @@ recalcula regra: exibe `Reason`/`AvailableFrom` que o motor mandou.
 calendário civil (semana ISO/mês civil, sem acúmulo)" caiu — o martelo bateu em
 janela móvel. Os demais pontos do ADR-009 (auto-conclusão, antecedência de
 cancelamento, ativação manual) seguem valendo até serem martelados.
+
+---
+
+> **Nota de numeração — Verificador Diário de Humor (Anexo C).** A feature do
+> Anexo C é desenvolvida no branch `feat/verificador-humor` (ramo do Slice 1). O
+> SDD do Slice 1 reserva ADR-021..024 para sua "Fase 10"; para não colidir, os
+> ADRs do Verificador de Humor começam em **ADR-030**. Reconciliar a numeração no
+> merge, se necessário.
+
+## ADR-030 — `care_line_item.kind` ganha ATIVIDADE (item não-consulta)
+
+**Contexto:** o Verificador Diário de Humor (Anexo C) é a primeira ATIVIDADE de
+uma linha de cuidado: uma execução DENTRO da plataforma (check-in de humor),
+sem especialidade do legado nem agendamento na DAV. A fundação do Slice 1 travava
+`care_line_item.kind` em `CHECK (kind IN ('CONSULTA'))` e exigia `specialty_code`
+NOT NULL — moldado só para consulta.
+
+**Decisão:**
+- Migration `0009_activity_item` estende o vocabulário: `kind IN ('CONSULTA',
+  'ATIVIDADE')` e torna `specialty_code` **condicional ao kind** via CHECK
+  `specialty_por_kind` (CONSULTA exige especialidade não vazia; ATIVIDADE tem
+  `NULL`). Invariante no banco, não em disciplina de código.
+- No domínio/motor, `SpecialtyCode` segue `string` (`""` = sem especialidade); a
+  conversão para `NULL`/`pgtype.Text` fica na fronteira `gen`, como já é feito com
+  `recurrence`. Assim o contrato de resposta admin não muda (atividade retorna
+  `specialty_code: ""`) e o ripple é mínimo.
+- `careline.ValidatePublish` **pula** a checagem de especialidade quando
+  `item.Kind == ATIVIDADE` — a tabela normativa T1–T19 permanece intacta.
+
+**Consequência:** o catálogo agora comporta atividades da linha; o Verificador de
+Humor entra como itens `ATIVIDADE` (`checkin-humor-diario`, `who5-semanal`,
+`phq4-gatilhado`). O único resíduo é `specialty_code: ""` na resposta admin de uma
+atividade (em vez de omitido) — aceitável no piloto, refinável depois.

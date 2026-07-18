@@ -26,6 +26,15 @@ const (
 	DefaultCancelCountThreshold = 24 * time.Hour
 )
 
+// Tipos de item da linha de cuidado (espelha o CHECK de care_line_item.kind).
+// CONSULTA aponta para uma especialidade do legado; ATIVIDADE (ex.: check-in de
+// humor do Anexo C) não tem especialidade e é executada dentro da própria
+// plataforma.
+const (
+	KindConsulta  = "CONSULTA"
+	KindAtividade = "ATIVIDADE"
+)
+
 // Statuses de care_appointment (vocabulário do slice, em PT).
 const (
 	StatusAgendada    = "agendada"

@@ -1711,9 +1711,10 @@ components:
           description: Parâmetros da regra, específicos de cada `rule_type`.
     CareLineItem:
       description: >
-        Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade.
-        `ref` é o código estável do item DENTRO da linha (o que as regras de
-        pré-requisito referenciam), distinto do `id` (UUID).
+        Um passo da linha — uma CONSULTA de uma especialidade ou uma ATIVIDADE
+        executada na plataforma (ex.: check-in de humor do Anexo C). `ref` é o
+        código estável do item DENTRO da linha (o que as regras de pré-requisito
+        referenciam), distinto do `id` (UUID).
       type: object
       required: [id, ref, kind, specialty_code, label, sort_order, rules]
       properties:
@@ -1728,11 +1729,15 @@ components:
           example: aval-inicial
         kind:
           type: string
-          enum: [CONSULTA]
-          description: Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+          enum: [CONSULTA, ATIVIDADE]
+          description: >
+            CONSULTA (aponta para uma especialidade do legado) ou ATIVIDADE
+            (executada na plataforma, sem especialidade).
         specialty_code:
           type: string
-          description: A especialidade da consulta (código do catálogo do legado).
+          description: >
+            A especialidade da consulta (código do catálogo do legado). Vazio
+            para itens ATIVIDADE, que não têm especialidade.
         label:
           type: string
           description: 'Rótulo em PT-BR exibido ao paciente. Ex.: "Avaliação inicial".'
@@ -2037,16 +2042,19 @@ components:
           type: string
     CreateCareLineItemRequest:
       type: object
-      required: [ref, kind, specialty_code, label]
+      required: [ref, kind, label]
       properties:
         ref:
           type: string
           example: aval-inicial
         kind:
           type: string
-          enum: [CONSULTA]
+          enum: [CONSULTA, ATIVIDADE]
         specialty_code:
           type: string
+          description: >
+            Obrigatório para CONSULTA; omitido (ou vazio) para ATIVIDADE, que não
+            tem especialidade.
         label:
           type: string
         recurrence:
