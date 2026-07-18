@@ -673,25 +673,6 @@ components:
         time:
           type: string
           format: date-time
-    # ---- Vocabulário do domínio (motor de elegibilidade, ver docs/ARQUITETURA.md).
-    # Contratado desde já para o front; a implementação entra em fase seguinte. ----
-    ItemVerdict:
-      type: object
-      required: [item_code, status, reasons]
-      properties:
-        item_code:
-          type: string
-        status:
-          type: string
-          enum: [AVAILABLE, BLOCKED, QUOTA_EXHAUSTED, NOT_YET_OPEN, OVERDUE]
-        reasons:
-          type: array
-          items:
-            $ref: "#/components/schemas/Reason"
-        next_available_at:
-          type: string
-          format: date-time
-          nullable: true
     Reason:
       type: object
       required: [code]

@@ -1,6 +1,6 @@
 // Package cpf valida e normaliza o CPF (Cadastro de Pessoa Física).
 //
-// É um pacote PURO, na mesma regra do models/eligibility: sem I/O, sem banco,
+// É um pacote PURO, na mesma regra do models/careline: sem I/O, sem banco,
 // sem time.Now(). Tudo entra por parâmetro.
 //
 // Por que um tipo em vez de `func Validate(string) error`: com um tipo, o CPF

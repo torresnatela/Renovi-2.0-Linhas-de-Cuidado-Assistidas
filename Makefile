@@ -88,10 +88,6 @@ migrate-up: ## Aplica as migrations pendentes no renovi_care
 migrate-down: ## Reverte 1 migration
 	cd $(API_DIR) && go run ./cmd/migrate down 1
 
-.PHONY: seed
-seed: ## Aplica os templates de linha de cuidado (STUB na fundação)
-	cd $(API_DIR) && go run ./cmd/seed
-
 # ---------------------------------------------------------------------------
 # Docker Compose (dev local: Postgres + mocks dos bancos externos)
 # ---------------------------------------------------------------------------

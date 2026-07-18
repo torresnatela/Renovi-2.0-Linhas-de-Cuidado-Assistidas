@@ -55,33 +55,6 @@ func (e HealthStatusStatus) Valid() bool {
 	}
 }
 
-// Defines values for ItemVerdictStatus.
-const (
-	AVAILABLE      ItemVerdictStatus = "AVAILABLE"
-	BLOCKED        ItemVerdictStatus = "BLOCKED"
-	NOTYETOPEN     ItemVerdictStatus = "NOT_YET_OPEN"
-	OVERDUE        ItemVerdictStatus = "OVERDUE"
-	QUOTAEXHAUSTED ItemVerdictStatus = "QUOTA_EXHAUSTED"
-)
-
-// Valid indicates whether the value is a known member of the ItemVerdictStatus enum.
-func (e ItemVerdictStatus) Valid() bool {
-	switch e {
-	case AVAILABLE:
-		return true
-	case BLOCKED:
-		return true
-	case NOTYETOPEN:
-		return true
-	case OVERDUE:
-		return true
-	case QUOTAEXHAUSTED:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for JoinWindowStatus.
 const (
 	OPEN        JoinWindowStatus = "OPEN"
@@ -208,17 +181,6 @@ type HealthStatus struct {
 
 // HealthStatusStatus defines model for HealthStatus.Status.
 type HealthStatusStatus string
-
-// ItemVerdict defines model for ItemVerdict.
-type ItemVerdict struct {
-	ItemCode        string            `json:"item_code"`
-	NextAvailableAt *time.Time        `json:"next_available_at,omitempty"`
-	Reasons         []Reason          `json:"reasons"`
-	Status          ItemVerdictStatus `json:"status"`
-}
-
-// ItemVerdictStatus defines model for ItemVerdict.Status.
-type ItemVerdictStatus string
 
 // JoinTicket O link de acesso do paciente à sala da DAV. É uma CAPACIDADE, não um dado: não guarde em cache, não coloque em log, não mande por e-mail.
 type JoinTicket struct {
