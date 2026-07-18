@@ -12,12 +12,20 @@ export function SlotPickerPage() {
   const { specialtyId, professionalId } = useParams();
   const { data, isLoading, error } = useSlots(professionalId);
 
-  // Guardamos o ID, não o Slot inteiro, e derivamos o slot da lista atual. Assim,
-  // quando a lista faz refetch (staleTime de 30s) e o horário escolhido some
-  // porque outra pessoa o pegou, o painel de confirmação some junto — em vez de
-  // seguir oferecendo um fantasma que só falharia no clique (409).
-  const [escolhidoId, setEscolhidoId] = useState<string | null>(null);
-  const escolhido = data?.items.find((s) => s.id === escolhidoId) ?? null;
+  // Guardamos o Slot INTEIRO em estado, e NÃO o derivamos da lista.
+  //
+  // Tentar derivar (buscar o id na lista a cada render) tinha um efeito colateral
+  // ruim, pego em teste ao vivo: ao confirmar, o onSettled invalida os horários e
+  // a lista refaz o fetch; o horário recém-reservado some da lista → o slot
+  // derivado virava null → o painel de confirmação DESMONTAVA, levando junto a
+  // mensagem de 502 "pode ter sido marcada". O paciente via o horário sumir sem
+  // NENHUM aviso de que a consulta estava em verificação.
+  //
+  // Guardando o objeto, o painel sobrevive ao horário sair da lista e mostra o
+  // resultado até o fim. O caso do "fantasma" (outra pessoa pegou o horário antes
+  // do clique) continua coberto: o servidor devolve 409 SLOT_TAKEN, que o painel
+  // exibe.
+  const [escolhido, setEscolhido] = useState<Slot | null>(null);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
@@ -43,11 +51,7 @@ export function SlotPickerPage() {
       )}
 
       {data && data.items.length > 0 && (
-        <GradeDeHorarios
-          slots={data.items}
-          escolhido={escolhido}
-          onEscolher={(s) => setEscolhidoId(s.id)}
-        />
+        <GradeDeHorarios slots={data.items} escolhido={escolhido} onEscolher={setEscolhido} />
       )}
 
       {escolhido && data && specialtyId && (
@@ -55,7 +59,7 @@ export function SlotPickerPage() {
           slot={escolhido}
           profissional={data.professional.full_name}
           specialtyId={specialtyId}
-          onCancelar={() => setEscolhidoId(null)}
+          onCancelar={() => setEscolhido(null)}
         />
       )}
     </main>
