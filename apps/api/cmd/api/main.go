@@ -84,7 +84,10 @@ func run() error {
 	// Verificador de Humor (Anexo C): consentimento e instrumentos só precisam do
 	// Postgres próprio. As rotas /me/* só sobem junto com o Auth (ver router).
 	consent := &controllers.ConsentController{Consents: models.NewConsentStore(pool)}
-	mood := &controllers.MoodController{Instruments: models.NewInstrumentStore(pool)}
+	mood := &controllers.MoodController{
+		Instruments: models.NewInstrumentStore(pool),
+		Checkins:    models.NewMoodCheckinStore(pool),
+	}
 
 	router := apihttp.NewRouter(apihttp.Deps{
 		Logger:  logger,

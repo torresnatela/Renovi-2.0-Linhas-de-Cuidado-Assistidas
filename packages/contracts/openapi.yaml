@@ -246,6 +246,75 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+  /me/mood/checkin:
+    post:
+      operationId: recordMoodCheckin
+      summary: Registra (ou atualiza) o check-in de humor do dia.
+      description: >
+        Captura obrigatória de 1 toque (valência×energia). Deriva o quadrante de
+        forma determinística e emite o fato de execução na jornada. Uma resposta
+        por dia local — repetir no mesmo dia atualiza a do dia. Exige matrícula
+        ativa e vigente na linha que contém o item e consentimento ativo; sem eles,
+        403 com `reason` (`consent_required` | `not_enrolled`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordMoodCheckinRequest"
+      responses:
+        "200":
+          description: Check-in do dia registrado/atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoodCheckin"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Sem consentimento ativo ou sem matrícula elegível (ver `reason`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /me/mood/today:
+    get:
+      operationId: getMoodToday
+      summary: O check-in de hoje (se houver) e a elegibilidade do paciente.
+      responses:
+        "200":
+          description: Situação do dia.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoodToday"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/mood/history:
+    get:
+      operationId: getMoodHistory
+      summary: Série recente de check-ins do paciente.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 30
+            maximum: 120
+      responses:
+        "200":
+          description: Check-ins do mais recente ao mais antigo.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MoodCheckin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   # ---------------------------------------------------------------------------
   # Agendamento: especialidade -> profissional -> horário -> consulta -> entrar.
   #
@@ -1517,6 +1586,74 @@ components:
         rotulo:
           type: string
           example: Sono
+    MoodCheckin:
+      description: O check-in de humor de um dia (execução do anel diário).
+      type: object
+      required: [valencia, energia, quadrante, respondido_em]
+      properties:
+        valencia:
+          type: integer
+          minimum: 0
+          maximum: 100
+        energia:
+          type: integer
+          minimum: 0
+          maximum: 100
+        quadrante:
+          type: string
+          description: Derivado determinístico (valência×energia).
+          example: desagradavel_calmo
+        emotion_label:
+          type: string
+          nullable: true
+        context_tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+        respondido_em:
+          type: string
+          format: date-time
+    RecordMoodCheckinRequest:
+      type: object
+      required: [valencia, energia]
+      properties:
+        valencia:
+          type: integer
+          minimum: 0
+          maximum: 100
+        energia:
+          type: integer
+          minimum: 0
+          maximum: 100
+        emotion_label:
+          type: string
+          description: Rótulo opcional do quadrante escolhido.
+        context_tags:
+          type: array
+          items:
+            type: string
+          description: "Contexto opcional (chaves de context_tag: trabalho, sono...)."
+    MoodToday:
+      description: O check-in de hoje (ou nulo) e a elegibilidade do paciente.
+      type: object
+      required: [dia, can_checkin]
+      properties:
+        dia:
+          type: string
+          format: date
+          description: Dia local (America/Sao_Paulo).
+        can_checkin:
+          type: boolean
+          description: true quando há consentimento ativo e matrícula elegível.
+        reason:
+          type: string
+          nullable: true
+          enum: [consent_required, not_enrolled]
+          description: Por que não pode registrar, quando `can_checkin` é false.
+        checkin:
+          $ref: "#/components/schemas/MoodCheckin"
+          nullable: true
     HealthStatus:
       type: object
       required: [status, service, version]

@@ -431,6 +431,24 @@ func (e JourneyEventEventType) Valid() bool {
 	}
 }
 
+// Defines values for MoodTodayReason.
+const (
+	ConsentRequired MoodTodayReason = "consent_required"
+	NotEnrolled     MoodTodayReason = "not_enrolled"
+)
+
+// Valid indicates whether the value is a known member of the MoodTodayReason enum.
+func (e MoodTodayReason) Valid() bool {
+	switch e {
+	case ConsentRequired:
+		return true
+	case NotEnrolled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RenewEnrollmentRequestMonths.
 const (
 	RenewEnrollmentRequestMonthsN1 RenewEnrollmentRequestMonths = 1
@@ -970,6 +988,36 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+// MoodCheckin O check-in de humor de um dia (execução do anel diário).
+type MoodCheckin struct {
+	ContextTags  *[]string `json:"context_tags,omitempty"`
+	EmotionLabel *string   `json:"emotion_label,omitempty"`
+	Energia      int       `json:"energia"`
+
+	// Quadrante Derivado determinístico (valência×energia).
+	Quadrante    string    `json:"quadrante"`
+	RespondidoEm time.Time `json:"respondido_em"`
+	Valencia     int       `json:"valencia"`
+}
+
+// MoodToday O check-in de hoje (ou nulo) e a elegibilidade do paciente.
+type MoodToday struct {
+	// CanCheckin true quando há consentimento ativo e matrícula elegível.
+	CanCheckin bool `json:"can_checkin"`
+
+	// Checkin O check-in de humor de um dia (execução do anel diário).
+	Checkin *MoodCheckin `json:"checkin,omitempty"`
+
+	// Dia Dia local (America/Sao_Paulo).
+	Dia openapi_types.Date `json:"dia"`
+
+	// Reason Por que não pode registrar, quando `can_checkin` é false.
+	Reason *MoodTodayReason `json:"reason,omitempty"`
+}
+
+// MoodTodayReason Por que não pode registrar, quando `can_checkin` é false.
+type MoodTodayReason string
+
 // Problem Erro no formato RFC 7807 (problem+json).
 type Problem struct {
 	// Blocks Bloqueios do motor de elegibilidade. Presente no 422 de agendamento barrado; cada item explica UMA regra violada.
@@ -1023,6 +1071,17 @@ type Reason struct {
 	// Code Código máquina-legível que o front traduz em frase. Ex.: QUOTA_EXHAUSTED_WEEKLY, MISSING_PREREQ:aval-psiquiatrica.
 	Code   string  `json:"code"`
 	Detail *string `json:"detail,omitempty"`
+}
+
+// RecordMoodCheckinRequest defines model for RecordMoodCheckinRequest.
+type RecordMoodCheckinRequest struct {
+	// ContextTags Contexto opcional (chaves de context_tag: trabalho, sono...).
+	ContextTags *[]string `json:"context_tags,omitempty"`
+
+	// EmotionLabel Rótulo opcional do quadrante escolhido.
+	EmotionLabel *string `json:"emotion_label,omitempty"`
+	Energia      int     `json:"energia"`
+	Valencia     int     `json:"valencia"`
 }
 
 // RegisterRequest defines model for RegisterRequest.
@@ -1207,6 +1266,11 @@ type GetMyEligibilityParams struct {
 	Date *time.Time `form:"date,omitempty" json:"date,omitempty"`
 }
 
+// GetMoodHistoryParams defines parameters for GetMoodHistory.
+type GetMoodHistoryParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListProfessionalSlotsParams defines parameters for ListProfessionalSlots.
 type ListProfessionalSlotsParams struct {
 	// From Primeiro dia do intervalo, no fuso da agenda. Default: hoje.
@@ -1254,3 +1318,6 @@ type GrantConsentJSONRequestBody = GrantConsentRequest
 
 // RevokeConsentJSONRequestBody defines body for RevokeConsent for application/json ContentType.
 type RevokeConsentJSONRequestBody = RevokeConsentRequest
+
+// RecordMoodCheckinJSONRequestBody defines body for RecordMoodCheckin for application/json ContentType.
+type RecordMoodCheckinJSONRequestBody = RecordMoodCheckinRequest

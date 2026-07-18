@@ -62,6 +62,10 @@ type Querier interface {
 	// Queries de autenticação e vínculo com a DAV (ver migration 0002_auth).
 	// O CPF é a chave de identidade: mora em patient_identity (LGPD, ver CLAUDE.md).
 	FindAccountByCPF(ctx context.Context, cpf string) (PatientAccount, error)
+	// A matrícula ATIVA e VIGENTE do paciente numa linha publicada que contém o item
+	// de atividade pedido. É a elegibilidade do check-in, derivada sob demanda dos
+	// fatos imutáveis (matrícula + item do template). Sem linha => não elegível.
+	FindActivityEnrollment(ctx context.Context, arg FindActivityEnrollmentParams) (FindActivityEnrollmentRow, error)
 	// "Viva" = não revogada, não expirada E com a conta ainda ACTIVE. O join com o
 	// status é o que faz bloquear uma conta derrubar as sessões dela na hora — o
 	// ganho concreto de sessão opaca sobre JWT (ADR-010).
@@ -103,6 +107,7 @@ type Querier interface {
 	GetExampleWidget(ctx context.Context, id uuid.UUID) (ExampleWidget, error)
 	// A versão publicada mais recente de um code: é a que rege uma nova matrícula.
 	GetLatestPublishedCareLine(ctx context.Context, code string) (CareLine, error)
+	GetMoodCheckinByDay(ctx context.Context, arg GetMoodCheckinByDayParams) (MoodCheckin, error)
 	// Nasce PENDING_DAV: a conta só ativa quando a DAV confirmar o vínculo.
 	InsertAccount(ctx context.Context, arg InsertAccountParams) (PatientAccount, error)
 	// Consultas da jornada realizada (tabela care_appointment — migration 0007).
@@ -174,6 +179,7 @@ type Querier interface {
 	// idêntica em semântica, mas o sqlc infere o tipo de cada parâmetro corretamente
 	// (o row-value constructor faz o sqlc tipar o id como timestamptz).
 	ListJourneyEventsByPatient(ctx context.Context, arg ListJourneyEventsByPatientParams) ([]JourneyEvent, error)
+	ListMoodCheckins(ctx context.Context, arg ListMoodCheckinsParams) ([]MoodCheckin, error)
 	// A fila de compensação do worker: falhou, o horário é nosso e ainda não voltou.
 	// É uma consulta ao banco, e não um estado em memória, para sobreviver a um
 	// restart no meio.
@@ -229,6 +235,9 @@ type Querier interface {
 	RevokeActiveConsent(ctx context.Context, arg RevokeActiveConsentParams) (int64, error)
 	RevokeSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	UpsertAddress(ctx context.Context, arg UpsertAddressParams) error
+	// Uma resposta por dia local (dia_ref): nova resposta no mesmo dia ATUALIZA a do
+	// dia. O id da linha original é preservado no update.
+	UpsertMoodCheckin(ctx context.Context, arg UpsertMoodCheckinParams) (MoodCheckin, error)
 }
 
 var _ Querier = (*Queries)(nil)

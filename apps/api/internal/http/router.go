@@ -181,6 +181,9 @@ func mountMood(r chi.Router, c controllers.MoodController, auth controllers.Auth
 		r.Use(middleware.Timeout(defaultRouteTimeout))
 		r.Use(controllers.RequireSession(auth.Sessions))
 		r.Get("/me/mood/instruments/{codigo}", c.GetInstrument)
+		r.Post("/me/mood/checkin", c.RecordCheckin)
+		r.Get("/me/mood/today", c.GetToday)
+		r.Get("/me/mood/history", c.GetHistory)
 	})
 }
 

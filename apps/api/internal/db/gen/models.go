@@ -187,6 +187,24 @@ type JourneyEvent struct {
 	OccurredAt   time.Time   `json:"occurred_at"`
 }
 
+type MoodCheckin struct {
+	ID             uuid.UUID   `json:"id"`
+	PatientID      uuid.UUID   `json:"patient_id"`
+	EnrollmentID   uuid.UUID   `json:"enrollment_id"`
+	CareLineItemID uuid.UUID   `json:"care_line_item_id"`
+	ConsentID      uuid.UUID   `json:"consent_id"`
+	InstrumentID   uuid.UUID   `json:"instrument_id"`
+	Valencia       int32       `json:"valencia"`
+	Energia        int32       `json:"energia"`
+	Quadrante      string      `json:"quadrante"`
+	EmotionLabel   pgtype.Text `json:"emotion_label"`
+	ContextTags    []byte      `json:"context_tags"`
+	DiaRef         pgtype.Date `json:"dia_ref"`
+	RespondidoEm   time.Time   `json:"respondido_em"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+}
+
 type PatientAccount struct {
 	ID               uuid.UUID          `json:"id"`
 	FullName         string             `json:"full_name"`
