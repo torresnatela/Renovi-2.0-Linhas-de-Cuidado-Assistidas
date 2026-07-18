@@ -365,3 +365,8 @@ primeira de setembro = 8 em 15 dias).
 normativa do slice — mudança de semântica começa por ela. O motor é O(n²) na
 quota, aceitável para listas de consultas de uma matrícula. O front nunca
 recalcula regra: exibe `Reason`/`AvailableFrom` que o motor mandou.
+
+**Supersede o ADR-009 (parcial):** a decisão assumida "janela de cota =
+calendário civil (semana ISO/mês civil, sem acúmulo)" caiu — o martelo bateu em
+janela móvel. Os demais pontos do ADR-009 (auto-conclusão, antecedência de
+cancelamento, ativação manual) seguem valendo até serem martelados.
