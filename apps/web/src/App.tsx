@@ -4,6 +4,7 @@ import { LoginPage } from './features/auth/LoginPage';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { RegisterPage } from './features/auth/RegisterPage';
 import { HomePage } from './features/home/HomePage';
+import { MoodPage } from './features/mood/MoodPage';
 import { AppointmentPage, AppointmentsPage } from './features/scheduling/AppointmentsPage';
 import { ProfessionalPickerPage, SpecialtyPickerPage } from './features/scheduling/SchedulingPages';
 import { SlotPickerPage } from './features/scheduling/SlotPickerPage';
@@ -58,6 +59,9 @@ export default function App() {
 
               <Route path="/consultas" element={<AppointmentsPage />} />
               <Route path="/consultas/:appointmentId" element={<AppointmentPage />} />
+
+              {/* Verificador Diário de Humor (Anexo C). */}
+              <Route path="/humor" element={<MoodPage />} />
             </Route>
 
             <Route path="*" element={<NaoEncontrada />} />

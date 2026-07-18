@@ -43,6 +43,9 @@ export function HomePage() {
           <Link to="/consultas" className="rounded border px-4 py-2 text-sm">
             Minhas consultas
           </Link>
+          <Link to="/humor" className="rounded border px-4 py-2 text-sm">
+            Verificar meu humor
+          </Link>
         </div>
 
         <HealthBadge />

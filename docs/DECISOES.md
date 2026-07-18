@@ -455,3 +455,29 @@ como parâmetro configurável — nunca constante de código.
 verdade separadas: o Módulo 4 carregará os cortes do banco e os passará ao scorer.
 Instrumentos são semeados em toda migração/ambiente (inclusive testcontainers),
 então o feature funciona sem passo de seed manual.
+
+## ADR-033 — O "1 por dia" do check-in é o dia LOCAL (America/Sao_Paulo)
+
+**Contexto:** o anel diário aceita uma resposta por dia (atualizável). "Dia" tem
+de ser o dia do colaborador no Brasil, não o dia UTC: um check-in às 22h de
+Brasília (01h UTC do dia seguinte) tem de contar como HOJE, não amanhã.
+
+**Decisão:**
+- `mood_checkin.dia_ref DATE` é calculado na APLICAÇÃO a partir de `respondido_em`
+  convertido para `America/Sao_Paulo` (`models.localDay`). A unicidade é
+  `ux_mood_checkin_dia (patient_id, dia_ref)`; o upsert é `ON CONFLICT
+  (patient_id, dia_ref)`. Não se usa `respondido_em::date` (que dependeria do fuso
+  da sessão do banco e quebraria na fronteira da meia-noite).
+- Pré-condição do check-in é DERIVADA sob demanda dos fatos imutáveis
+  (`FindActivityEnrollment`: matrícula ativa+vigente numa linha publicada que
+  contém o item `checkin-humor-diario`), não materializada. O anel diário NÃO usa
+  o motor de agendamento (não trava); só as pré-condições de matrícula + consentimento.
+- O comentário livre cifrado foi **adiado** (sem infra de cifra ainda): MVP grava
+  só dado estruturado (coordenadas, quadrante derivado, rótulo, context_tags) —
+  princípio de minimização (LGPD).
+
+**Consequência:** a série temporal é do dia vivido pelo colaborador. O front usa
+paleta e vocabulário PRÓPRIOS da Renovi na grade (não os do Mood Meter/Yale) e
+nunca recalcula o quadrante — exibe o que o servidor derivou. Rotas `/me/*` só
+sobem quando o Auth está montado (dependem de RequireSession), então a verificação
+no browser exige o stack de dev com credenciais DAV.

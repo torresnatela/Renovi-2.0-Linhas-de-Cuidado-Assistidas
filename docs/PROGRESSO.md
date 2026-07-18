@@ -27,7 +27,14 @@ Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
   (instrument/dimension/cutoff + lookups) com seed dos 3 instrumentos e cortes BR;
   `InstrumentStore.Config` + `GET /me/mood/instruments/{codigo}`. Unit + controller
   + integração verdes.
-- [ ] Módulo 3 — Anel diário (grade valência×energia) ponta a ponta + front mínimo.
+- [x] **Módulo 3 — Anel diário (grade) ponta a ponta** (ADR-033): migration
+  `0012_mood_checkin` (dia_ref local, sem comentario), `MoodCheckinStore`
+  (pré-condições derivadas, upsert do dia, fato na jornada), rotas
+  `POST /me/mood/checkin`, `GET /me/mood/today`, `/history`. Front
+  `apps/web/src/features/mood/` (grade valência×energia + fluxo de consentimento,
+  paleta própria da Renovi). Verificado: scoring/model (integração), controllers
+  (fakes), front (Vitest) + typecheck + build. **Browser: pendente** — precisa do
+  stack de dev com credenciais DAV (rotas /me só montam com Auth).
 - [ ] Módulo 4 — Anel semanal WHO-5 via `MIN_INTERVAL` (reusa o motor).
 - [ ] Módulo 5 — Anel gatilhado PHQ-4 + gatilho puro (`models/mood/trigger`).
 - [ ] Módulo 6 — Roteamento de crise/escalonamento + fechamento.

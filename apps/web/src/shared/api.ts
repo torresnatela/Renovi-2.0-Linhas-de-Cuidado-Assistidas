@@ -217,3 +217,84 @@ export const createAppointment = (body: { slot_id: string; specialty_id: string 
  */
 export const joinAppointment = (id: string) =>
   request<JoinTicket>(`/appointments/${encodeURIComponent(id)}/join`, { method: 'POST' });
+
+// ---------------------------------------------------------------------------
+// Verificador Diário de Humor (Anexo C)
+// ---------------------------------------------------------------------------
+
+/** Status do consentimento (LGPD) do paciente para uma finalidade. */
+export interface ConsentStatus {
+  finalidade: string;
+  active: boolean;
+  versao_termo?: string | null;
+  concedido_em?: string | null;
+}
+
+/** Um check-in de humor (execução do anel diário). */
+export interface MoodCheckin {
+  valencia: number;
+  energia: number;
+  /** Quadrante derivado determinístico — o front NÃO recalcula, exibe. */
+  quadrante: string;
+  emotion_label?: string | null;
+  context_tags?: string[] | null;
+  respondido_em: string;
+}
+
+export type MoodReason = 'consent_required' | 'not_enrolled';
+
+/** O check-in de hoje (ou nulo) e a elegibilidade do paciente. */
+export interface MoodToday {
+  dia: string;
+  can_checkin: boolean;
+  reason?: MoodReason | null;
+  checkin?: MoodCheckin | null;
+}
+
+export interface InstrumentDimension {
+  dimensao: string;
+  polaridade: string;
+  min_score: number;
+  max_score: number;
+}
+export interface EmotionLabel {
+  quadrante: string;
+  rotulo: string;
+}
+export interface ContextTag {
+  chave: string;
+  rotulo: string;
+}
+export interface InstrumentConfig {
+  codigo: string;
+  versao: string;
+  anel: string;
+  dimensions: InstrumentDimension[];
+  emotion_labels: EmotionLabel[];
+  context_tags: ContextTag[];
+}
+
+export const CHECKIN_FINALIDADE = 'checkin_humor';
+
+export const getConsent = (finalidade = CHECKIN_FINALIDADE) =>
+  request<ConsentStatus>(`/me/consent?finalidade=${encodeURIComponent(finalidade)}`);
+
+export const grantConsent = (versaoTermo: string, finalidade = CHECKIN_FINALIDADE) =>
+  request<ConsentStatus>('/me/consent', {
+    method: 'POST',
+    body: JSON.stringify({ finalidade, versao_termo: versaoTermo }),
+  });
+
+export const getMoodInstrument = (codigo: string) =>
+  request<InstrumentConfig>(`/me/mood/instruments/${encodeURIComponent(codigo)}`);
+
+export const getMoodToday = () => request<MoodToday>('/me/mood/today');
+
+export const recordMoodCheckin = (body: {
+  valencia: number;
+  energia: number;
+  emotion_label?: string;
+  context_tags?: string[];
+}) => request<MoodCheckin>('/me/mood/checkin', { method: 'POST', body: JSON.stringify(body) });
+
+export const getMoodHistory = () => request<MoodCheckin[]>('/me/mood/history');
