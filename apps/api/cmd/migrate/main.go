@@ -6,7 +6,9 @@
 //	migrate down [n]           # reverte n passos (default 1)
 //	migrate version            # mostra a versão atual
 //
-// A URL do banco vem de RENOVI_CARE_DATABASE_URL (ver internal/config).
+// A URL do banco vem de RENOVI_CARE_MIGRATE_DATABASE_URL (ver internal/config):
+// as migrations rodam como OWNER, pois criam tabelas e o role restrito renovi_app.
+// Quando essa variável não é definida, cai em RENOVI_CARE_DATABASE_URL.
 package main
 
 import (
@@ -35,7 +37,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	url := cfg.CareDatabaseURL
+	url := cfg.CareMigrateDatabaseURL
 
 	switch args[0] {
 	case "up":

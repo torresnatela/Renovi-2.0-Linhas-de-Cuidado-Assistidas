@@ -38,8 +38,16 @@ type Config struct {
 
 	// --- Bancos (ver docs/ARQUITETURA.md, seção "Papel de cada banco") ---
 
-	// CareDatabaseURL: Postgres renovi_care (nosso banco, escrita/leitura).
+	// CareDatabaseURL: Postgres renovi_care, como a APLICAÇÃO conecta em runtime.
+	// Em staging/produção é o role restrito renovi_app (sem UPDATE/DELETE em
+	// journey_event — ver migration 0008).
 	CareDatabaseURL string
+	// CareMigrateDatabaseURL: Postgres renovi_care para rodar as MIGRATIONS. Elas
+	// criam tabelas e o próprio role renovi_app, então precisam do OWNER (renovi),
+	// não do role restrito. Quando RENOVI_CARE_MIGRATE_DATABASE_URL não é definida,
+	// cai no valor de CareDatabaseURL (setup simples em que app e migrate usam o
+	// mesmo usuário — ex.: dev local sem o split de privilégio).
+	CareMigrateDatabaseURL string
 	// LegacyDatabaseURL: MySQL legado (escala/slots). Leitura + escrita restrita
 	// à tabela de agendamento, sempre via Adapter Agenda. Opcional no MVP inicial.
 	LegacyDatabaseURL string
@@ -99,6 +107,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("http_addr", c.HTTPAddr),
 		slog.String("log_level", c.LogLevel),
 		slog.Bool("care_database_url_set", c.CareDatabaseURL != ""),
+		slog.Bool("care_migrate_database_url_set", c.CareMigrateDatabaseURL != ""),
 		slog.Bool("legacy_database_url_set", c.LegacyDatabaseURL != ""),
 		slog.Bool("gestao_database_url_set", c.GestaoDatabaseURL != ""),
 		// A URL da DAV não é segredo e dizer qual ambiente foi alvejado já evitou
@@ -167,6 +176,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: RENOVI_CARE_DATABASE_URL é obrigatório em produção")
 		}
 		cfg.CareDatabaseURL = defaultCareDatabaseURL
+	}
+
+	// A URL de migração roda como owner (cria tabelas e o role renovi_app). Quando
+	// não é definida, usa a mesma URL da aplicação — cenário simples em que não há
+	// split de privilégio (o próprio usuário é dono do schema).
+	cfg.CareMigrateDatabaseURL = env("RENOVI_CARE_MIGRATE_DATABASE_URL", "")
+	if cfg.CareMigrateDatabaseURL == "" {
+		cfg.CareMigrateDatabaseURL = cfg.CareDatabaseURL
 	}
 
 	if err := cfg.validate(); err != nil {
