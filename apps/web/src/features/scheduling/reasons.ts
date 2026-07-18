@@ -23,8 +23,12 @@ const FRASES: Record<string, string> = {
   JOIN_TOO_EARLY: 'Ainda não está na hora de entrar nesta consulta.',
   JOIN_TOO_LATE: 'Esta consulta já terminou.',
   JOIN_CANCELLED: 'Esta consulta foi cancelada.',
+  // Não promete que o botão aparece "sozinho": um UNCONFIRMED (DAV_UNKNOWN)
+  // depende de verificação humana e pode nem virar confirmável — a tela não faz
+  // polling nesse estado (seria o laço de bateria de novo). Peça para o paciente
+  // voltar, em vez de prometer atualização automática.
   JOIN_UNAVAILABLE:
-    'Ainda estamos confirmando esta consulta com a Doutor ao Vivo. Assim que confirmarmos, o botão de entrar aparece aqui.',
+    'Ainda estamos confirmando esta consulta com a Doutor ao Vivo. Volte a esta página em instantes.',
 };
 
 /**

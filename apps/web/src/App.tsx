@@ -7,6 +7,7 @@ import { HomePage } from './features/home/HomePage';
 import { AppointmentPage, AppointmentsPage } from './features/scheduling/AppointmentsPage';
 import { ProfessionalPickerPage, SpecialtyPickerPage } from './features/scheduling/SchedulingPages';
 import { SlotPickerPage } from './features/scheduling/SlotPickerPage';
+import { ErrorBoundary } from './shared/ErrorBoundary';
 
 /**
  * Shell do app. A Minha Jornada (SPEC §7) entra ao lado destas quando o motor de
@@ -23,38 +24,45 @@ export default function App() {
           </div>
         </header>
 
-        <Routes>
-          <Route path="/entrar" element={<LoginPage />} />
-          <Route path="/cadastro" element={<RegisterPage />} />
-
-          {/*
-            Rota de layout sem path: a guarda de sessão fica em UM lugar em vez de
-            envolver cada uma das seis telas — e envolver seis vezes é como uma
-            acaba esquecida.
-          */}
-          <Route
-            element={
-              <ProtectedRoute>
-                <Outlet />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/" element={<HomePage />} />
+        {/*
+          ErrorBoundary: um erro síncrono no render de qualquer tela (ex.: um
+          time_zone malformado da API fazendo toLocaleTimeString lançar) deixaria
+          o app inteiro em branco. O boundary vira isso numa mensagem com saída.
+        */}
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/entrar" element={<LoginPage />} />
+            <Route path="/cadastro" element={<RegisterPage />} />
 
             {/*
-              A URL É o estado do wizard: voltar, recarregar e compartilhar
-              funcionam de graça, e cada passo é testável isolado.
+              Rota de layout sem path: a guarda de sessão fica em UM lugar em vez
+              de envolver cada uma das seis telas — e envolver seis vezes é como
+              uma acaba esquecida.
             */}
-            <Route path="/agendar" element={<SpecialtyPickerPage />} />
-            <Route path="/agendar/:specialtyId" element={<ProfessionalPickerPage />} />
-            <Route path="/agendar/:specialtyId/:professionalId" element={<SlotPickerPage />} />
+            <Route
+              element={
+                <ProtectedRoute>
+                  <Outlet />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/" element={<HomePage />} />
 
-            <Route path="/consultas" element={<AppointmentsPage />} />
-            <Route path="/consultas/:appointmentId" element={<AppointmentPage />} />
-          </Route>
+              {/*
+                A URL É o estado do wizard: voltar, recarregar e compartilhar
+                funcionam de graça, e cada passo é testável isolado.
+              */}
+              <Route path="/agendar" element={<SpecialtyPickerPage />} />
+              <Route path="/agendar/:specialtyId" element={<ProfessionalPickerPage />} />
+              <Route path="/agendar/:specialtyId/:professionalId" element={<SlotPickerPage />} />
 
-          <Route path="*" element={<NaoEncontrada />} />
-        </Routes>
+              <Route path="/consultas" element={<AppointmentsPage />} />
+              <Route path="/consultas/:appointmentId" element={<AppointmentPage />} />
+            </Route>
+
+            <Route path="*" element={<NaoEncontrada />} />
+          </Routes>
+        </ErrorBoundary>
       </div>
     </BrowserRouter>
   );

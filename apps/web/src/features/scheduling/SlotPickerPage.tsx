@@ -11,7 +11,13 @@ import { Carregando, Erro, Passos, Vazio } from './ui';
 export function SlotPickerPage() {
   const { specialtyId, professionalId } = useParams();
   const { data, isLoading, error } = useSlots(professionalId);
-  const [escolhido, setEscolhido] = useState<Slot | null>(null);
+
+  // Guardamos o ID, não o Slot inteiro, e derivamos o slot da lista atual. Assim,
+  // quando a lista faz refetch (staleTime de 30s) e o horário escolhido some
+  // porque outra pessoa o pegou, o painel de confirmação some junto — em vez de
+  // seguir oferecendo um fantasma que só falharia no clique (409).
+  const [escolhidoId, setEscolhidoId] = useState<string | null>(null);
+  const escolhido = data?.items.find((s) => s.id === escolhidoId) ?? null;
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
@@ -37,7 +43,11 @@ export function SlotPickerPage() {
       )}
 
       {data && data.items.length > 0 && (
-        <GradeDeHorarios slots={data.items} escolhido={escolhido} onEscolher={setEscolhido} />
+        <GradeDeHorarios
+          slots={data.items}
+          escolhido={escolhido}
+          onEscolher={(s) => setEscolhidoId(s.id)}
+        />
       )}
 
       {escolhido && data && specialtyId && (
@@ -45,7 +55,7 @@ export function SlotPickerPage() {
           slot={escolhido}
           profissional={data.professional.full_name}
           specialtyId={specialtyId}
-          onCancelar={() => setEscolhido(null)}
+          onCancelar={() => setEscolhidoId(null)}
         />
       )}
     </main>

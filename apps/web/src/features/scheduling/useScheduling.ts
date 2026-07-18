@@ -79,14 +79,43 @@ export function useAppointment(id: string | undefined) {
      *
      * Aba em segundo plano não dispara (é o padrão do TanStack Query); quem cobre
      * a volta é o refetchOnWindowFocus, que também já é padrão.
+     *
+     * O TETO de 24h não é firula: `setTimeout` guarda o delay num int de 32 bits,
+     * e qualquer valor acima de ~24,8 dias estoura e dispara NA HORA. A janela de
+     * agendamento é de 30 dias, então uma consulta marcada para daqui a 25+ dias
+     * daria um `faltam` gigante → refetch imediato → mesmo `opens_at` → refetch
+     * imediato de novo: um laço apertado martelando o servidor por dias, o oposto
+     * de "dormir". Com o teto, no pior caso ele acorda uma vez por dia e volta a
+     * dormir.
      */
     refetchInterval: (query) => {
       const appt = query.state.data;
       if (!appt || appt.join.status !== 'TOO_EARLY') return false;
-      const faltam = new Date(appt.join.opens_at).getTime() - Date.now();
-      return Math.max(faltam + 1000, 15_000);
+      return proximoPoll(appt.join.opens_at, Date.now());
     },
   });
+}
+
+/**
+ * Quanto esperar até reconferir a janela de entrada, dado quando ela abre.
+ *
+ * PISO de 15s: cobre o relógio do cliente adiantado (ele acha que já passou de
+ * opens_at, o servidor ainda diz TOO_EARLY) — vira um poll curto, não um laço de
+ * milissegundos.
+ *
+ * TETO de 24h: `setTimeout` guarda o delay num int de 32 bits e estoura acima de
+ * ~24,8 dias, disparando NA HORA. A janela de agendamento é de 30 dias, então uma
+ * consulta a 25+ dias daria um delay gigante → refetch imediato → mesmo opens_at
+ * → refetch imediato: um laço apertado por dias. Com o teto, no pior caso acorda
+ * uma vez por dia.
+ *
+ * Exportada para ser testável — a lógica de overflow não pode viver escondida
+ * dentro de um closure de useQuery.
+ */
+export function proximoPoll(opensAt: string, agora: number): number {
+  const UM_DIA = 24 * 60 * 60 * 1000;
+  const faltam = new Date(opensAt).getTime() - agora;
+  return Math.min(Math.max(faltam + 1000, 15_000), UM_DIA);
 }
 
 export function useCreateAppointment() {
@@ -98,10 +127,16 @@ export function useCreateAppointment() {
      * horário foi reservado e a consulta pode existir (ADR-016). Invalidar só no
      * sucesso deixaria a tela oferecendo como livre um horário que já é do
      * próprio paciente, e a lista sem a consulta que ele talvez tenha marcado.
+     *
+     * Invalida a LISTA e os HORÁRIOS, mas NÃO a subárvore de detalhe — senão
+     * derrubaria o detalhe que o onSuccess acaba de semear e a tela pós-
+     * agendamento piscaria em "carregando" logo depois de o paciente esperar 20s.
+     * É por isso que schedulingKeys separa 'list' de 'detail'. (Antes isto
+     * invalidava `all`, que casa com o detalhe e anulava a separação.)
      */
     onSettled: () => {
       qc.invalidateQueries({ queryKey: schedulingKeys.appointments() });
-      qc.invalidateQueries({ queryKey: schedulingKeys.all });
+      qc.invalidateQueries({ queryKey: [...schedulingKeys.all, 'slots'] });
     },
     onSuccess: (appt) => qc.setQueryData(schedulingKeys.appointment(appt.id), appt),
   });

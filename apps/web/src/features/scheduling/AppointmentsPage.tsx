@@ -130,7 +130,13 @@ function PainelDeEntrada({ consulta }: { consulta: Appointment }) {
     <>
       <button
         type="button"
-        onClick={() => entrar.mutate(undefined, { onSuccess: (t) => openExternal(t.url) })}
+        onClick={() => {
+          // Guarda contra o duplo-clique no mesmo tick, antes de isPending virar:
+          // cada clique é um POST que registra acesso no servidor, e dois abririam
+          // a sala duas vezes.
+          if (entrar.isPending) return;
+          entrar.mutate(undefined, { onSuccess: (t) => openExternal(t.url) });
+        }}
         disabled={entrar.isPending}
         className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
       >
