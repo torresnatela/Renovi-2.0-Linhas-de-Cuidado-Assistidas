@@ -27,6 +27,13 @@ type Deps struct {
 	// Scheduling monta o agendamento. Nil desliga (ex.: sem DSN do legado no
 	// ambiente local). Depende de Auth: tudo aqui exige sessão.
 	Scheduling *controllers.SchedulingController
+	// CareAdmin monta as rotas /admin/* (catálogo + matrícula). Nil desliga (sem
+	// RENOVI_ADMIN_TOKEN ou sem agenda para validar o publish). NÃO depende de Auth:
+	// autentica pelo token de admin, nunca pela sessão do paciente.
+	CareAdmin *controllers.CareLineAdminController
+	// AdminToken é o token estático exigido pelas rotas /admin (header
+	// X-Admin-Token). Só é usado quando CareAdmin != nil.
+	AdminToken string
 	// RegisterTimeout é o teto da rota de cadastro, que fala com a DAV de forma
 	// síncrona. Deve vir de config.DAVBudget() + folga; zero cai num default.
 	RegisterTimeout time.Duration
@@ -89,6 +96,13 @@ func NewRouter(d Deps) *chi.Mux {
 				mountScheduling(r, *d.Scheduling, *d.Auth, d.BookTimeout)
 			}
 		}
+
+		// As rotas /admin NÃO dependem de Auth: autenticam pelo token de admin, não
+		// pela sessão do paciente. Só sobem quando o controller foi montado (token
+		// presente E agenda disponível — ver cmd/api/main.go).
+		if d.CareAdmin != nil {
+			mountCareAdmin(r, *d.CareAdmin, d.AdminToken)
+		}
 		// TODO(mvp): /me/eligibility entra aqui, filtrando ANTES do agendamento.
 		// Ver packages/contracts/openapi.yaml e docs/PROGRESSO.md.
 	})
@@ -130,6 +144,29 @@ func mountScheduling(r chi.Router, s controllers.SchedulingController, auth cont
 			r.Use(rateLimitByAccount(20, 1.0/3.0))
 			r.Use(middleware.Timeout(bookTimeout))
 			r.Post("/appointments", s.Create)
+		})
+	})
+}
+
+// mountCareAdmin monta as rotas /admin/*, todas atrás do token de admin.
+//
+// O timeout é o normal: são operações rápidas contra o Postgres próprio. O publish
+// consulta o legado, mas é uma leitura de catálogo, não a saga lenta da DAV — cabe
+// no teto de 30s como as demais rotas.
+func mountCareAdmin(r chi.Router, c controllers.CareLineAdminController, adminToken string) {
+	r.Group(func(r chi.Router) {
+		r.Use(controllers.RequireAdminToken(adminToken))
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+
+		r.Route("/admin", func(r chi.Router) {
+			r.Post("/care-lines", c.CreateCareLine)
+			r.Get("/care-lines", c.ListCareLines)
+			r.Post("/care-lines/{care_line_id}/items", c.CreateCareLineItem)
+			r.Post("/care-lines/{care_line_id}/items/{item_ref}/rules", c.CreateCareLineItemRule)
+			r.Post("/care-lines/{care_line_id}/publish", c.PublishCareLine)
+			r.Post("/enrollments", c.CreateEnrollment)
+			r.Post("/enrollments/{enrollment_id}/renew", c.RenewEnrollment)
+			r.Post("/enrollments/{enrollment_id}/end", c.EndEnrollment)
 		})
 	})
 }

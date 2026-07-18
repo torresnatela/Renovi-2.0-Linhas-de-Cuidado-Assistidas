@@ -63,13 +63,23 @@ func run() error {
 		return err
 	}
 
-	scheduling, schedulingReady, closeAgenda, err := newSchedulingController(cfg, pool, logger)
+	// O cliente do legado é COMPARTILHADO: o agendamento o usa para ler a agenda, e
+	// o admin o usa para validar as especialidades na publicação. Um pool só, criado
+	// aqui — o main é onde as camadas se encontram.
+	agendaClient, closeAgenda, err := newAgendaClient(cfg, logger)
 	if err != nil {
 		return err
 	}
 	if closeAgenda != nil {
 		defer closeAgenda()
 	}
+
+	scheduling, schedulingReady, err := newSchedulingController(cfg, pool, agendaClient, logger)
+	if err != nil {
+		return err
+	}
+
+	careAdmin := newCareAdminController(cfg, pool, agendaClient, logger)
 
 	router := apihttp.NewRouter(apihttp.Deps{
 		Logger:  logger,
@@ -88,6 +98,8 @@ func run() error {
 		},
 		Auth:       auth,
 		Scheduling: scheduling,
+		CareAdmin:  careAdmin,
+		AdminToken: cfg.AdminToken,
 		// O cadastro precisa de um teto maior que o de uma rota normal: ele
 		// espera a DAV de forma síncrona. Derivar do orçamento evita que os dois
 		// números divirjam e a última tentativa seja sempre cortada.
@@ -184,24 +196,33 @@ func newLogger(cfg config.Config) *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, opts))
 }
 
-// newSchedulingController monta a cadeia do agendamento: legado + DAV -> models
-// -> controller. Devolve também um ping de readiness (nil se desligado) e o
-// fechador do pool do legado.
-//
-// Sem DSN do legado, devolve nil e o agendamento não sobe — mesma política do
-// cadastro sem credencial da DAV. Só acontece em `local`.
-func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*controllers.SchedulingController, func(context.Context) error, func(), error) {
-	if cfg.LegacyDatabaseURL == "" || cfg.DAVBaseURL == "" || cfg.DAVAPIKey == "" {
-		logger.Warn("rotas de agendamento DESLIGADAS: faltam RENOVI_LEGACY_DATABASE_URL ou credenciais da DAV")
-		return nil, nil, nil, nil
+// newAgendaClient abre o pool do MySQL legado, COMPARTILHADO pelo agendamento e
+// pelo admin. Sem DSN do legado devolve nil (e nil no fechador): as rotas que
+// dependem dele simplesmente não sobem. Só acontece em `local`.
+func newAgendaClient(cfg config.Config, logger *slog.Logger) (*agenda.Client, func(), error) {
+	if cfg.LegacyDatabaseURL == "" {
+		return nil, nil, nil
 	}
-
-	agendaClient, err := agenda.New(agenda.Config{
+	client, err := agenda.New(agenda.Config{
 		DSN:    cfg.LegacyDatabaseURL,
 		Logger: logger,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
+	}
+	return client, func() { _ = client.Close() }, nil
+}
+
+// newSchedulingController monta a cadeia do agendamento: legado + DAV -> models
+// -> controller. Recebe o cliente do legado já pronto (compartilhado) e devolve um
+// ping de readiness (nil se desligado).
+//
+// Sem cliente do legado ou sem credencial da DAV, devolve nil e o agendamento não
+// sobe — mesma política do cadastro sem credencial da DAV. Só acontece em `local`.
+func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, agendaClient *agenda.Client, logger *slog.Logger) (*controllers.SchedulingController, func(context.Context) error, error) {
+	if agendaClient == nil || cfg.DAVBaseURL == "" || cfg.DAVAPIKey == "" {
+		logger.Warn("rotas de agendamento DESLIGADAS: faltam RENOVI_LEGACY_DATABASE_URL ou credenciais da DAV")
+		return nil, nil, nil
 	}
 
 	davClient, err := dav.New(dav.Config{
@@ -212,8 +233,7 @@ func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog
 		Logger:      logger,
 	})
 	if err != nil {
-		_ = agendaClient.Close()
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	// A política da janela é montada AQUI, e não na config, para que o pacote de
@@ -230,5 +250,27 @@ func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog
 		// certo. Manter os dois derivados da mesma fonte evita que divirjam.
 		BookDeadline: cfg.DAVTimeout + 30*time.Second,
 	}
-	return ctrl, agendaClient.Ping, func() { _ = agendaClient.Close() }, nil
+	return ctrl, agendaClient.Ping, nil
+}
+
+// newCareAdminController monta as rotas /admin (catálogo + matrícula). Duas
+// condições para subir, ambas registradas em log quando falham:
+//
+//   - RENOVI_ADMIN_TOKEN presente: sem token não há como autenticar a operação, e
+//     montar as rotas sem trava seria expor a criação de linhas e matrículas.
+//   - agenda disponível: a publicação de uma linha VALIDA as especialidades contra
+//     o legado; sem esse cliente o publish não teria como confirmar o template.
+func newCareAdminController(cfg config.Config, pool *pgxpool.Pool, agendaClient *agenda.Client, logger *slog.Logger) *controllers.CareLineAdminController {
+	if cfg.AdminToken == "" {
+		logger.Warn("rotas admin DESLIGADAS: RENOVI_ADMIN_TOKEN vazio")
+		return nil
+	}
+	if agendaClient == nil {
+		logger.Warn("rotas admin DESLIGADAS: sem RENOVI_LEGACY_DATABASE_URL (o publish valida especialidades no legado)")
+		return nil
+	}
+	return &controllers.CareLineAdminController{
+		Catalog:     models.NewCareLineStore(pool, agendaClient),
+		Enrollments: models.NewEnrollmentStore(pool),
+	}
 }
