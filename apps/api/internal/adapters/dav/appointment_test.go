@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,7 @@ const (
 const (
 	pacienteDAV     = "019f6ceb-1ff2-7616-af46-7574a621ac28" // o nosso UUIDv7 lá
 	profissionalDAV = "fcde8cbf-f54a-429d-9e6d-078848587100" // = tb_professionals.id
+	apptDAV         = "13cd147e-68a7-45da-a65b-80b826cf674a" // o id da consulta que a DAV devolve
 	urlDoPaciente   = "https://renovisaude.atendimento.hom.dav.med.br/a/sopr8brbkz"
 	urlDoMedico     = "https://renovisaude.atendimento.hom.dav.med.br/a/xucz7cx8cc"
 )
@@ -250,5 +252,91 @@ func TestCreateAppointment_4xxEhRecusaDefinitiva(t *testing.T) {
 				t.Errorf("chamou %d vezes; 4xx não se repete", chamadas)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CancelAppointment — best-effort (ADR-011b, achado #20)
+// ---------------------------------------------------------------------------
+
+// Caminho feliz: 2xx vira nil, e o adapter bate no PUT certo. Confere método E
+// path porque trocar qualquer um cancelaria a consulta errada — ou nenhuma.
+func TestCancelAppointment_2xxCancela(t *testing.T) {
+	casos := []struct {
+		nome   string
+		status int
+	}{
+		{"204 sem corpo", http.StatusNoContent},
+		{"200 com corpo", http.StatusOK},
+	}
+	for _, tt := range casos {
+		t.Run(tt.nome, func(t *testing.T) {
+			var gotMethod, gotPath, gotKey string
+			c := clientPara(t, func(w http.ResponseWriter, r *http.Request) {
+				gotMethod, gotPath, gotKey = r.Method, r.URL.Path, r.Header.Get("x-api-key")
+				w.WriteHeader(tt.status)
+			})
+
+			if err := c.CancelAppointment(context.Background(), apptDAV); err != nil {
+				t.Fatalf("erro inesperado: %v", err)
+			}
+			if gotMethod != http.MethodPut {
+				t.Errorf("método = %q, quero PUT", gotMethod)
+			}
+			if gotPath != "/appointment/"+apptDAV+"/cancel" {
+				t.Errorf("path = %q, quero /appointment/{id}/cancel", gotPath)
+			}
+			if gotKey != "chave-de-teste" {
+				t.Errorf("x-api-key = %q; a chave não foi enviada", gotKey)
+			}
+		})
+	}
+}
+
+// 500 é o comportamento REAL da HML hoje (docs/DAV-API-NOTAS.md, achado #20): o
+// cancel da DAV responde 500. Por isso ele é best-effort — o adapter devolve erro
+// (com o status, sem vazar corpo) e quem chama decide tolerar. E NUNCA repete
+// (ADR-011b): repetir um cancel que talvez tenha pego não muda o 500 fixo da HML.
+func TestCancelAppointment_500EhErro(t *testing.T) {
+	var chamadas int
+	c := clientPara(t, func(w http.ResponseWriter, r *http.Request) {
+		chamadas++
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"code":500,"message":"Unexpected token '<'","trace":"50295b5"}`)
+	})
+
+	err := c.CancelAppointment(context.Background(), apptDAV)
+	if err == nil {
+		t.Fatal("500 não devolveu erro; o cancel precisa sinalizar que não cancelou")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("erro = %v; quero que carregue o status 500", err)
+	}
+	if chamadas != 1 {
+		t.Errorf("chamou %d vezes; o cancel NUNCA repete", chamadas)
+	}
+}
+
+// Cancelamento do contexto para na hora: se o request morreu, não há motivo para
+// insistir contra uma API lenta.
+func TestCancelAppointment_RespeitaCancelamentoDoContexto(t *testing.T) {
+	var chamadas int
+	c := clientPara(t, func(w http.ResponseWriter, r *http.Request) {
+		chamadas++
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := c.CancelAppointment(ctx, apptDAV)
+	if err == nil {
+		t.Fatal("contexto cancelado não devolveu erro")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("erro = %v; quero que case com context.Canceled", err)
+	}
+	if chamadas != 0 {
+		t.Errorf("chamou %d vezes; contexto já cancelado não deve bater na DAV", chamadas)
 	}
 }
