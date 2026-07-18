@@ -4,7 +4,6 @@ package models_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -356,6 +355,3 @@ func TestJourneyRepo_FindByIdemKey_EViewComLabel(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, empty)
 }
-
-// evita unused em builds parciais durante o desenvolvimento.
-var _ = json.Marshal

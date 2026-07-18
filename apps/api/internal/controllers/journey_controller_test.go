@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -366,6 +367,35 @@ func TestJourneyController_Eligibility_DateInvalida400(t *testing.T) {
 	f := &fakeJourneys{}
 	rec := serveJourney(t, f, http.MethodGet, "/me/eligibility?item_id="+uuid.NewString()+"&date=ontem", "", nil)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// Falha genérica em rota que NÃO é de agendamento: o 500 default precisa de
+// frase neutra — "Não foi possível agendar." num GET de elegibilidade mentiria.
+func TestJourneyController_ErroGenerico_500Neutro(t *testing.T) {
+	boom := errors.New("banco caiu")
+	cases := []struct {
+		nome string
+		f    *fakeJourneys
+		alvo string
+	}{
+		{"eligibility", &fakeJourneys{eligErr: boom}, "/me/eligibility?item_id=" + uuid.NewString()},
+		{"availability", &fakeJourneys{availErr: boom}, "/me/availability?item_id=" + uuid.NewString()},
+		{"audit", &fakeJourneys{auditErr: boom}, "/me/audit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.nome, func(t *testing.T) {
+			rec := serveJourney(t, tc.f, http.MethodGet, tc.alvo, "", nil)
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			var problem struct {
+				Title  string `json:"title"`
+				Detail string `json:"detail"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+			assert.Equal(t, "Erro interno", problem.Title)
+			assert.Equal(t, "Não foi possível processar a solicitação.", problem.Detail)
+			assert.NotContains(t, problem.Detail, "agendar", "a frase do booking não vaza para leituras")
+		})
+	}
 }
 
 func TestJourneyController_Eligibility_Feliz200(t *testing.T) {

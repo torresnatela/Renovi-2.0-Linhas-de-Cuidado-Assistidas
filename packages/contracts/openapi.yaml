@@ -1036,6 +1036,15 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            A consulta já está num estado terminal (realizada, falta ou
+            cancelada) e não aceita forçar status. `reason.code`:
+            FORCE_STATUS_NOT_ALLOWED.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   securitySchemes:
     # Sessão opaca em cookie httpOnly, não JWT (ver ADR-010 em docs/DECISOES.md).

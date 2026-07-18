@@ -311,9 +311,28 @@ func writeJourneyError(w http.ResponseWriter, err error) {
 		WriteProblemReason(w, http.StatusServiceUnavailable, "Agenda indisponível",
 			"Não conseguimos consultar a agenda agora. Tente novamente em instantes.",
 			Reason{Code: "LEGACY_UNAVAILABLE"})
-	default:
+	case isBookingError(err):
+		// Só os sentinelas do BOOKING delegam ao mapeamento do scheduling: o
+		// default de lá diz "Não foi possível agendar.", que mentiria num GET de
+		// elegibilidade ou de auditoria que falhou.
 		writeBookError(w, err)
+	default:
+		WriteProblem(w, http.StatusInternalServerError, "Erro interno",
+			"Não foi possível processar a solicitação.")
 	}
+}
+
+// isBookingError reconhece os erros que o writeBookError sabe mapear — a lista
+// dos sentinelas do módulo de booking que o Schedule deixa subir intactos.
+func isBookingError(err error) bool {
+	return errors.Is(err, models.ErrSlotTaken) ||
+		errors.Is(err, models.ErrSlotExpired) ||
+		errors.Is(err, models.ErrSlotNotFound) ||
+		errors.Is(err, models.ErrSpecialtyMismatch) ||
+		errors.Is(err, models.ErrSpecialtyInactive) ||
+		errors.Is(err, models.ErrAccountNotLinked) ||
+		errors.Is(err, models.ErrBookingRejected) ||
+		errors.Is(err, models.ErrBookingUnconfirmed)
 }
 
 func toProblemBlocks(blocks []careline.Block) []ProblemBlock {
