@@ -286,13 +286,16 @@ func TestBook_DesconhecidoApareceComoUNCONFIRMED(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // 4xx é opinião firme da DAV: não houve efeito. Segurar o horário aqui seria
-// vazá-lo à toa.
+// vazá-lo à toa. E o erro é ErrBookingRejected (vira 422), NÃO ErrBookingUnconfirmed
+// (502 "pode ter sido marcada") — não foi.
 func TestBook_DAVRecusaDefinitiva_DevolveOHorario(t *testing.T) {
 	c := novoCenario(t)
 	c.dv.err = dav.ErrValidation
 
 	_, err := c.store.Book(context.Background(), c.entrada())
-	require.ErrorIs(t, err, models.ErrBookingUnconfirmed)
+	require.ErrorIs(t, err, models.ErrBookingRejected)
+	require.NotErrorIs(t, err, models.ErrBookingUnconfirmed,
+		"rejeição definitiva não pode virar 'desconhecido'")
 
 	require.True(t, c.ag.released, "a DAV disse que não fez: o horário volta ao mercado")
 	require.False(t, c.ag.booked)
@@ -327,7 +330,7 @@ func TestBook_FalhaAoDevolverDeixaAFilaDoWorker(t *testing.T) {
 	c.ag.releaseErr = agenda.ErrUnavailable
 
 	_, err := c.store.Book(context.Background(), c.entrada())
-	require.ErrorIs(t, err, models.ErrBookingUnconfirmed)
+	require.ErrorIs(t, err, models.ErrBookingRejected)
 
 	status, held, released := c.statusNoBanco(t, c.idDaUnica(t))
 	require.Equal(t, "FAILED", status)

@@ -63,7 +63,7 @@ func run() error {
 		return err
 	}
 
-	scheduling, closeAgenda, err := newSchedulingController(cfg, pool, logger)
+	scheduling, schedulingReady, closeAgenda, err := newSchedulingController(cfg, pool, logger)
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,16 @@ func run() error {
 		Logger:  logger,
 		Version: version,
 		Ready: func(ctx context.Context) error {
-			return db.Ping(ctx, pool)
+			if err := db.Ping(ctx, pool); err != nil {
+				return err
+			}
+			// Quando o agendamento está ligado, o MySQL legado é dependência dura:
+			// se ele cair, o /readyz precisa reprovar, senão o orquestrador mantém
+			// a instância em rotação enquanto todo agendamento falha.
+			if schedulingReady != nil {
+				return schedulingReady(ctx)
+			}
+			return nil
 		},
 		Auth:       auth,
 		Scheduling: scheduling,
@@ -176,14 +185,15 @@ func newLogger(cfg config.Config) *slog.Logger {
 }
 
 // newSchedulingController monta a cadeia do agendamento: legado + DAV -> models
-// -> controller. Devolve também o fechador do pool do legado.
+// -> controller. Devolve também um ping de readiness (nil se desligado) e o
+// fechador do pool do legado.
 //
 // Sem DSN do legado, devolve nil e o agendamento não sobe — mesma política do
 // cadastro sem credencial da DAV. Só acontece em `local`.
-func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*controllers.SchedulingController, func(), error) {
+func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*controllers.SchedulingController, func(context.Context) error, func(), error) {
 	if cfg.LegacyDatabaseURL == "" || cfg.DAVBaseURL == "" || cfg.DAVAPIKey == "" {
 		logger.Warn("rotas de agendamento DESLIGADAS: faltam RENOVI_LEGACY_DATABASE_URL ou credenciais da DAV")
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	agendaClient, err := agenda.New(agenda.Config{
@@ -191,7 +201,7 @@ func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog
 		Logger: logger,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	davClient, err := dav.New(dav.Config{
@@ -203,7 +213,7 @@ func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog
 	})
 	if err != nil {
 		_ = agendaClient.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// A política da janela é montada AQUI, e não na config, para que o pacote de
@@ -212,12 +222,13 @@ func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog
 	policy := scheduling.Policy{OpensBefore: cfg.JoinOpensBefore, ClosesAfter: cfg.JoinClosesAfter}
 
 	store := models.NewBookingStore(pool, agendaClient, davClient, policy, logger)
-	return &controllers.SchedulingController{
+	ctrl := &controllers.SchedulingController{
 		Bookings: store,
 		// Deriva do timeout da DAV com folga, como o RegisterDeadline do cadastro:
 		// o deadline de escrita precisa ser > que o timeout da rota (DAVTimeout+10s,
 		// ver router), senão o servidor corta a resposta de um agendamento que deu
 		// certo. Manter os dois derivados da mesma fonte evita que divirjam.
 		BookDeadline: cfg.DAVTimeout + 30*time.Second,
-	}, func() { _ = agendaClient.Close() }, nil
+	}
+	return ctrl, agendaClient.Ping, func() { _ = agendaClient.Close() }, nil
 }

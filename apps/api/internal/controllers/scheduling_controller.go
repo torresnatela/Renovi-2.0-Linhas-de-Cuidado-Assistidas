@@ -323,6 +323,14 @@ func writeBookError(w http.ResponseWriter, err error) {
 	case errors.Is(err, models.ErrAccountNotLinked):
 		WriteProblem(w, http.StatusForbidden, "Cadastro incompleto",
 			"Sua conta ainda não está vinculada à Doutor ao Vivo.")
+	case errors.Is(err, models.ErrBookingRejected):
+		// 422 e NÃO 502: a DAV recusou os dados, nada foi criado e o horário foi
+		// liberado. Ao contrário do BOOKING_UNCONFIRMED, aqui NÃO dizemos "pode
+		// ter sido marcada" — não foi — e tentar de novo é seguro.
+		WriteProblemReason(w, http.StatusUnprocessableEntity, "Não foi possível agendar",
+			"A Doutor ao Vivo recusou os dados desta consulta. O horário foi liberado; "+
+				"tente novamente ou escolha outro.",
+			Reason{Code: "BOOKING_REJECTED"})
 	case errors.Is(err, models.ErrBookingUnconfirmed):
 		// 502 e NÃO 500: o problema é do sistema de terceiro. E o texto precisa
 		// ser honesto — a consulta PODE existir, e repetir criaria uma segunda de

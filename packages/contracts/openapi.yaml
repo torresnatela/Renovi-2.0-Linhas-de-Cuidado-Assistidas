@@ -352,9 +352,22 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "422":
+          description: >
+            A DAV RECUSOU os dados da consulta (`reason.code` = BOOKING_REJECTED).
+            Ao contrário do 502, aqui NADA foi criado e o horário foi liberado —
+            tentar de novo é seguro. Nunca diga "pode ter sido marcada": não foi.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "429":
           $ref: "#/components/responses/TooManyRequests"
-        # Só 502. O 504 do gateway da DAV é traduzido pelo model em
+        # O agendamento LÊ e reserva a agenda do legado antes de falar com a DAV;
+        # se o MySQL legado cair, a rota responde 503 (como as de catálogo).
+        "503":
+          $ref: "#/components/responses/LegacyUnavailable"
+        # Só 502 do lado da DAV. O 504 do gateway dela é traduzido pelo model em
         # BOOKING_UNCONFIRMED e sai como 502 — o cliente nunca recebe 504 daqui,
         # então declará-lo seria prometer uma resposta que não existe.
         "502":

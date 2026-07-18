@@ -13,8 +13,9 @@ import (
 
 type Querier interface {
 	// Passo 3: a DAV criou e temos o link. O CHECK confirmed_exige_dav garante que
-	// não dá para chegar em CONFIRMED sem os dois.
-	ConfirmAppointment(ctx context.Context, arg ConfirmAppointmentParams) error
+	// não dá para chegar em CONFIRMED sem os dois. :execrows para o model não dar
+	// CONFIRMED por bom como sucesso quando o UPDATE não casou nenhuma linha.
+	ConfirmAppointment(ctx context.Context, arg ConfirmAppointmentParams) (int64, error)
 	// Quantas consultas estão em DAV_UNKNOWN. Se esta lista cresce, alguém precisa
 	// olhar: a máquina não consegue resolver sozinha.
 	CountAppointmentsNeedingReview(ctx context.Context) (int64, error)
@@ -29,8 +30,10 @@ type Querier interface {
 	CreateExampleWidget(ctx context.Context, arg CreateExampleWidgetParams) (ExampleWidget, error)
 	// A consulta comprovadamente NÃO aconteceu (a DAV recusou o payload, ou nem
 	// chegamos a reservar). Só use quando houver certeza: FAILED tira a linha do
-	// índice de reservas vivas e libera o horário para outro paciente.
-	FailAppointment(ctx context.Context, id uuid.UUID) error
+	// índice de reservas vivas e libera o horário para outro paciente. :execrows
+	// para a compensação logar quando não transicionou nada (a linha não estava onde
+	// se esperava).
+	FailAppointment(ctx context.Context, id uuid.UUID) (int64, error)
 	// Queries de autenticação e vínculo com a DAV (ver migration 0002_auth).
 	// O CPF é a chave de identidade: mora em patient_identity (LGPD, ver CLAUDE.md).
 	FindAccountByCPF(ctx context.Context, cpf string) (PatientAccount, error)
@@ -84,15 +87,23 @@ type Querier interface {
 	// Passo 2: o horário é nosso e estamos prestes a fazer a escrita insondável.
 	// Gravar ANTES do POST é o que separa "sabemos que a DAV nunca foi chamada" de
 	// "a DAV pode ter sido chamada". Custa ~1ms e é o que torna o crash recuperável.
-	MarkAppointmentSlotHeld(ctx context.Context, id uuid.UUID) error
+	//
+	// :execrows (não :exec): o guard `status = 'PENDING_SLOT'` pode casar 0 linhas
+	// (estado inesperado), e um :exec devolveria nil — o chamador acharia que gravou.
+	// Devolvendo a contagem, o model exige 1 linha e trata 0 como falha.
+	MarkAppointmentSlotHeld(ctx context.Context, id uuid.UUID) (int64, error)
 	// O ErrMaybeApplied virando estado. A consulta PODE existir na DAV e nunca
 	// saberemos sozinhos (id é deles, não há rota de busca). O horário fica retido —
 	// o CHECK desconhecido_nao_libera impede que alguém o solte por engano.
-	MarkAppointmentUnknown(ctx context.Context, id uuid.UUID) error
+	MarkAppointmentUnknown(ctx context.Context, id uuid.UUID) (int64, error)
 	// Registra que o horário voltou ao mercado no legado. Separado do FailAppointment
 	// porque são dois sistemas: entre marcar FAILED aqui e soltar o booked lá pode
 	// haver um crash, e é essa diferença que o worker usa como fila de compensação.
-	MarkSlotReleased(ctx context.Context, id uuid.UUID) error
+	//
+	// `status = 'FAILED'` no WHERE (junto do CHECK novo em 0004): só registra a
+	// liberação de uma reserva JÁ terminal. Impede, no nível do banco, gravar
+	// slot_released_at numa consulta ainda viva.
+	MarkSlotReleased(ctx context.Context, id uuid.UUID) (int64, error)
 	// Reaproveita a linha de uma tentativa que morreu antes da DAV confirmar.
 	// O filtro por status é a trava: uma conta ACTIVE nunca pode ser sobrescrita por
 	// quem apenas conhece o CPF.

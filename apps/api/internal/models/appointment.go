@@ -45,6 +45,10 @@ var (
 	// vamos descobrir sozinhos se a consulta existe. Vira 502/504 e status
 	// UNCONFIRMED para o paciente. Repetir NÃO é seguro.
 	ErrBookingUnconfirmed = errors.New("agendamento: a DAV não confirmou e o resultado é desconhecido")
+	// ErrBookingRejected: a DAV RECUSOU o payload (4xx). Diferente do unconfirmed:
+	// aqui não houve efeito nenhum e o horário foi liberado. Vira 4xx, e o paciente
+	// pode tentar de novo — nada de "pode ter sido marcada".
+	ErrBookingRejected = errors.New("agendamento: a DAV recusou os dados da consulta")
 	// ErrAppointmentNotFound: não existe, ou não é do dono da sessão. Os dois
 	// respondem igual (404) — ver a resposta NotFound no openapi.yaml.
 	ErrAppointmentNotFound = errors.New("agendamento: consulta não encontrada")
@@ -230,18 +234,21 @@ func (s *BookingStore) Book(ctx context.Context, in BookInput) (Appointment, err
 	// desconhecida. Ver detach().
 	confirmCtx, cancel := detach(ctx)
 	defer cancel()
-	if err := s.q.ConfirmAppointment(confirmCtx, gen.ConfirmAppointmentParams{
+	rows, err := s.q.ConfirmAppointment(confirmCtx, gen.ConfirmAppointmentParams{
 		ID:               row.ID,
 		DavAppointmentID: text(created.ID),
 		PatientJoinUrl:   text(created.PatientJoinURL),
-	}); err != nil {
-		// A consulta EXISTE na DAV e não conseguimos gravar. Não dá para desfazer
-		// (o cancel deles responde 500 — achado #20) e não dá para reencontrá-la.
-		// É o mesmo desconhecido: segura o horário, chama gente.
-		s.logger.ErrorContext(confirmCtx, "agendamento: consulta criada na DAV mas não gravada",
-			"appointment_id", row.ID, "error", err.Error())
+	})
+	// err OU 0 linhas: a consulta EXISTE na DAV e não conseguimos gravar o
+	// CONFIRMED. Não dá para desfazer (o cancel deles responde 500 — achado #20)
+	// nem reencontrá-la. Zero linhas (a linha não estava em DAV_PENDING) é tão
+	// grave quanto o erro: concluir "sucesso" aqui daria CONFIRMED por bom sem ter
+	// gravado. Nos dois casos: segura o horário, chama gente.
+	if err != nil || rows != 1 {
+		s.logger.ErrorContext(confirmCtx, "agendamento: consulta criada na DAV mas não gravada como confirmada",
+			"appointment_id", row.ID, "rows", rows, "error", errStr(err))
 		s.markUnknown(ctx, row.ID)
-		return Appointment{}, fmt.Errorf("%w: gravar confirmação: %v", ErrBookingUnconfirmed, err)
+		return Appointment{}, fmt.Errorf("%w: gravar confirmação (rows=%d): %v", ErrBookingUnconfirmed, rows, err)
 	}
 
 	out := s.toAppointment(row, booking, in.Now)
@@ -254,8 +261,14 @@ func (s *BookingStore) Book(ctx context.Context, in BookInput) (Appointment, err
 // PAT, e uma consulta sem paciente não é consulta.
 func (s *BookingStore) davPersonID(ctx context.Context, accountID uuid.UUID) (string, error) {
 	got, err := s.q.GetAccountDavPersonID(ctx, accountID)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Não achou conta ACTIVE com vínculo: ausência de verdade.
 		return "", ErrAccountNotLinked
+	}
+	if err != nil {
+		// Falha de infra NÃO é "sem vínculo": vira 403 "cadastro incompleto" e
+		// esconde um incidente. Propaga para virar 500.
+		return "", fmt.Errorf("buscar vínculo com a DAV: %w", err)
 	}
 	if !got.Valid || got.String == "" {
 		return "", ErrAccountNotLinked
@@ -342,11 +355,15 @@ func (s *BookingStore) holdSlot(ctx context.Context, appointmentID uuid.UUID, sl
 	// cancelamento.
 	heldCtx, cancel := detach(ctx)
 	defer cancel()
-	if err := s.q.MarkAppointmentSlotHeld(heldCtx, appointmentID); err != nil {
-		// Travamos o horário e não conseguimos anotar. Devolvê-lo é seguro: a DAV
-		// ainda não foi chamada, então não existe consulta fantasma.
+	rows, err := s.q.MarkAppointmentSlotHeld(heldCtx, appointmentID)
+	if err != nil || rows != 1 {
+		// Travamos o horário e não conseguimos anotar (erro, ou a linha não estava
+		// em PENDING_SLOT). Devolvê-lo é seguro: a DAV ainda não foi chamada, então
+		// não existe consulta fantasma. Mas antes de soltar, precisamos gravar
+		// FAILED — senão o CHECK liberado_exige_terminal (0004) barra a liberação.
+		s.failQuietly(ctx, appointmentID)
 		s.releaseQuietly(ctx, appointmentID, slotID)
-		return fmt.Errorf("marcar horário reservado: %w", err)
+		return fmt.Errorf("marcar horário reservado (rows=%d): %w", rows, err)
 	}
 	return nil
 }
@@ -365,13 +382,16 @@ func (s *BookingStore) createInDAV(ctx context.Context, appointmentID uuid.UUID,
 		return created, nil
 	}
 
-	// 4xx: a DAV tem opinião firme e não houve efeito. O horário volta ao mercado.
+	// 4xx: a DAV tem opinião firme e NÃO houve efeito — nada foi criado e o horário
+	// volta ao mercado. É ErrBookingRejected, NÃO ErrBookingUnconfirmed: dizer ao
+	// paciente "pode ter sido marcada, estamos verificando" seria mentira, quando
+	// definitivamente não foi. Vira um 4xx, e tentar de novo é seguro.
 	if errors.Is(err, dav.ErrValidation) || errors.Is(err, dav.ErrDuplicateCPF) || errors.Is(err, dav.ErrDuplicateEmail) {
 		s.logger.WarnContext(ctx, "agendamento: a DAV recusou a consulta",
 			"appointment_id", appointmentID, "error", err.Error())
 		s.failQuietly(ctx, appointmentID)
 		s.releaseQuietly(ctx, appointmentID, b.Slot.ID)
-		return dav.Appointment{}, fmt.Errorf("%w: %v", ErrBookingUnconfirmed, err)
+		return dav.Appointment{}, fmt.Errorf("%w: %v", ErrBookingRejected, err)
 	}
 
 	// Qualquer outra coisa é DESCONHECIDO — e aqui, ao contrário do cadastro, é
@@ -414,18 +434,20 @@ func detach(ctx context.Context) (context.Context, context.CancelFunc) {
 func (s *BookingStore) failQuietly(ctx context.Context, id uuid.UUID) {
 	ctx, cancel := detach(ctx)
 	defer cancel()
-	if err := s.q.FailAppointment(ctx, id); err != nil {
-		s.logger.ErrorContext(ctx, "agendamento: não consegui marcar como falha",
-			"appointment_id", id, "error", err.Error())
+	// rows != 1 é surfaced (a transição não aconteceu — a linha não estava onde se
+	// esperava), mas não é fatal: a compensação é idempotente e o worker reprocessa.
+	if rows, err := s.q.FailAppointment(ctx, id); err != nil || rows != 1 {
+		s.logger.WarnContext(ctx, "agendamento: transição para FAILED não aplicou 1 linha",
+			"appointment_id", id, "rows", rows, "error", errStr(err))
 	}
 }
 
 func (s *BookingStore) markUnknown(ctx context.Context, id uuid.UUID) {
 	ctx, cancel := detach(ctx)
 	defer cancel()
-	if err := s.q.MarkAppointmentUnknown(ctx, id); err != nil {
-		s.logger.ErrorContext(ctx, "agendamento: não consegui marcar como desconhecido",
-			"appointment_id", id, "error", err.Error())
+	if rows, err := s.q.MarkAppointmentUnknown(ctx, id); err != nil || rows != 1 {
+		s.logger.WarnContext(ctx, "agendamento: transição para DAV_UNKNOWN não aplicou 1 linha",
+			"appointment_id", id, "rows", rows, "error", errStr(err))
 	}
 }
 
@@ -439,10 +461,21 @@ func (s *BookingStore) releaseQuietly(ctx context.Context, id uuid.UUID, slotID 
 			"appointment_id", id, "slot_id", slotID, "error", err.Error())
 		return
 	}
-	if err := s.q.MarkSlotReleased(ctx, id); err != nil {
-		s.logger.ErrorContext(ctx, "agendamento: horário devolvido mas não anotado",
-			"appointment_id", id, "error", err.Error())
+	// MarkSlotReleased só casa se a linha estiver FAILED com slot_held_at (WHERE +
+	// CHECK do 0004). 0 linhas aqui é legítimo em bordas (ex.: o hold nunca foi
+	// gravado), então é WARN, não erro: o horário já foi solto no MySQL acima.
+	if rows, err := s.q.MarkSlotReleased(ctx, id); err != nil || rows != 1 {
+		s.logger.WarnContext(ctx, "agendamento: horário devolvido no legado mas não anotado (rows!=1)",
+			"appointment_id", id, "rows", rows, "error", errStr(err))
 	}
+}
+
+// errStr formata um erro possivelmente nil para log estruturado.
+func errStr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // ---------------------------------------------------------------------------

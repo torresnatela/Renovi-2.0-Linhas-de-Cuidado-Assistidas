@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const confirmAppointment = `-- name: ConfirmAppointment :exec
+const confirmAppointment = `-- name: ConfirmAppointment :execrows
 UPDATE appointment
 SET status = 'CONFIRMED',
     dav_appointment_id = $2,
@@ -30,10 +30,14 @@ type ConfirmAppointmentParams struct {
 }
 
 // Passo 3: a DAV criou e temos o link. O CHECK confirmed_exige_dav garante que
-// não dá para chegar em CONFIRMED sem os dois.
-func (q *Queries) ConfirmAppointment(ctx context.Context, arg ConfirmAppointmentParams) error {
-	_, err := q.db.Exec(ctx, confirmAppointment, arg.ID, arg.DavAppointmentID, arg.PatientJoinUrl)
-	return err
+// não dá para chegar em CONFIRMED sem os dois. :execrows para o model não dar
+// CONFIRMED por bom como sucesso quando o UPDATE não casou nenhuma linha.
+func (q *Queries) ConfirmAppointment(ctx context.Context, arg ConfirmAppointmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, confirmAppointment, arg.ID, arg.DavAppointmentID, arg.PatientJoinUrl)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countAppointmentsNeedingReview = `-- name: CountAppointmentsNeedingReview :one
@@ -115,7 +119,7 @@ func (q *Queries) CreateAppointmentIntent(ctx context.Context, arg CreateAppoint
 	return i, err
 }
 
-const failAppointment = `-- name: FailAppointment :exec
+const failAppointment = `-- name: FailAppointment :execrows
 UPDATE appointment
 SET status = 'FAILED', updated_at = now()
 WHERE id = $1 AND status IN ('PENDING_SLOT', 'DAV_PENDING')
@@ -123,10 +127,15 @@ WHERE id = $1 AND status IN ('PENDING_SLOT', 'DAV_PENDING')
 
 // A consulta comprovadamente NÃO aconteceu (a DAV recusou o payload, ou nem
 // chegamos a reservar). Só use quando houver certeza: FAILED tira a linha do
-// índice de reservas vivas e libera o horário para outro paciente.
-func (q *Queries) FailAppointment(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, failAppointment, id)
-	return err
+// índice de reservas vivas e libera o horário para outro paciente. :execrows
+// para a compensação logar quando não transicionou nada (a linha não estava onde
+// se esperava).
+func (q *Queries) FailAppointment(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, failAppointment, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getAccountDavPersonID = `-- name: GetAccountDavPersonID :one
@@ -342,7 +351,7 @@ func (q *Queries) ListStaleInFlight(ctx context.Context, arg ListStaleInFlightPa
 	return items, nil
 }
 
-const markAppointmentSlotHeld = `-- name: MarkAppointmentSlotHeld :exec
+const markAppointmentSlotHeld = `-- name: MarkAppointmentSlotHeld :execrows
 UPDATE appointment
 SET status = 'DAV_PENDING',
     slot_held_at = now(),
@@ -354,12 +363,19 @@ WHERE id = $1 AND status = 'PENDING_SLOT'
 // Passo 2: o horário é nosso e estamos prestes a fazer a escrita insondável.
 // Gravar ANTES do POST é o que separa "sabemos que a DAV nunca foi chamada" de
 // "a DAV pode ter sido chamada". Custa ~1ms e é o que torna o crash recuperável.
-func (q *Queries) MarkAppointmentSlotHeld(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, markAppointmentSlotHeld, id)
-	return err
+//
+// :execrows (não :exec): o guard `status = 'PENDING_SLOT'` pode casar 0 linhas
+// (estado inesperado), e um :exec devolveria nil — o chamador acharia que gravou.
+// Devolvendo a contagem, o model exige 1 linha e trata 0 como falha.
+func (q *Queries) MarkAppointmentSlotHeld(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markAppointmentSlotHeld, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const markAppointmentUnknown = `-- name: MarkAppointmentUnknown :exec
+const markAppointmentUnknown = `-- name: MarkAppointmentUnknown :execrows
 UPDATE appointment
 SET status = 'DAV_UNKNOWN', updated_at = now()
 WHERE id = $1 AND status = 'DAV_PENDING'
@@ -368,21 +384,31 @@ WHERE id = $1 AND status = 'DAV_PENDING'
 // O ErrMaybeApplied virando estado. A consulta PODE existir na DAV e nunca
 // saberemos sozinhos (id é deles, não há rota de busca). O horário fica retido —
 // o CHECK desconhecido_nao_libera impede que alguém o solte por engano.
-func (q *Queries) MarkAppointmentUnknown(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, markAppointmentUnknown, id)
-	return err
+func (q *Queries) MarkAppointmentUnknown(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markAppointmentUnknown, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const markSlotReleased = `-- name: MarkSlotReleased :exec
+const markSlotReleased = `-- name: MarkSlotReleased :execrows
 UPDATE appointment
 SET slot_released_at = now(), updated_at = now()
-WHERE id = $1 AND slot_held_at IS NOT NULL AND slot_released_at IS NULL
+WHERE id = $1 AND status = 'FAILED' AND slot_held_at IS NOT NULL AND slot_released_at IS NULL
 `
 
 // Registra que o horário voltou ao mercado no legado. Separado do FailAppointment
 // porque são dois sistemas: entre marcar FAILED aqui e soltar o booked lá pode
 // haver um crash, e é essa diferença que o worker usa como fila de compensação.
-func (q *Queries) MarkSlotReleased(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, markSlotReleased, id)
-	return err
+//
+// `status = 'FAILED'` no WHERE (junto do CHECK novo em 0004): só registra a
+// liberação de uma reserva JÁ terminal. Impede, no nível do banco, gravar
+// slot_released_at numa consulta ainda viva.
+func (q *Queries) MarkSlotReleased(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markSlotReleased, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

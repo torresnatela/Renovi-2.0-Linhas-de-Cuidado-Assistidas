@@ -245,7 +245,11 @@ func TestCreate_TraduzOsErrosDoModel(t *testing.T) {
 		{"horário no passado", models.ErrSlotExpired, http.StatusConflict, "SLOT_EXPIRED"},
 		{"horário inexistente", models.ErrSlotNotFound, http.StatusNotFound, ""},
 		{"especialidade errada", models.ErrSpecialtyMismatch, http.StatusBadRequest, ""},
-		// 502 e não 500: o problema é da DAV, não nosso.
+		{"especialidade desativada", models.ErrSpecialtyInactive, http.StatusBadRequest, ""},
+		{"conta sem vínculo", models.ErrAccountNotLinked, http.StatusForbidden, ""},
+		// 422 e não 502: a DAV recusou os dados, nada foi criado, o horário voltou.
+		{"DAV recusou os dados", models.ErrBookingRejected, http.StatusUnprocessableEntity, "BOOKING_REJECTED"},
+		// 502 e não 500: o problema é da DAV, e o resultado é desconhecido.
 		{"DAV não confirmou", models.ErrBookingUnconfirmed, http.StatusBadGateway, "BOOKING_UNCONFIRMED"},
 		{"agenda fora do ar", agenda.ErrUnavailable, http.StatusServiceUnavailable, ""},
 	}
