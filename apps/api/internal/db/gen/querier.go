@@ -78,6 +78,7 @@ type Querier interface {
 	// valida conta ACTIVE — mas o agendamento não deve depender disso para não criar
 	// consulta na DAV sem paciente.
 	GetAccountDavPersonID(ctx context.Context, id uuid.UUID) (pgtype.Text, error)
+	GetActiveConsent(ctx context.Context, arg GetActiveConsentParams) (Consent, error)
 	// Sempre por (id, dono). Nunca só por id: um SELECT por id sozinho é um convite a
 	// alguém esquecer o WHERE do dono na próxima rota e devolver a consulta de
 	// terceiro — e aqui a consulta carrega o link da sala.
@@ -113,6 +114,7 @@ type Querier interface {
 	InsertCareAppointment(ctx context.Context, arg InsertCareAppointmentParams) (CareAppointment, error)
 	InsertCareLineItem(ctx context.Context, arg InsertCareLineItemParams) (CareLineItem, error)
 	InsertCareLineRule(ctx context.Context, arg InsertCareLineRuleParams) (CareLineRule, error)
+	InsertConsent(ctx context.Context, arg InsertConsentParams) (Consent, error)
 	// Trilha de todo vínculo. É o que permitirá revisar retroativamente quem anexou
 	// prontuário de quem, quando o fator de posse (WhatsApp/e-mail) existir.
 	InsertDavLinkAudit(ctx context.Context, arg InsertDavLinkAuditParams) error
@@ -219,6 +221,7 @@ type Querier interface {
 	// expirada (o caso comum do piloto é renovar o que venceu); concluída/encerrada
 	// são terminais e não voltam por aqui.
 	RenewEnrollment(ctx context.Context, arg RenewEnrollmentParams) (int64, error)
+	RevokeActiveConsent(ctx context.Context, arg RevokeActiveConsentParams) (int64, error)
 	RevokeSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	UpsertAddress(ctx context.Context, arg UpsertAddressParams) error
 }

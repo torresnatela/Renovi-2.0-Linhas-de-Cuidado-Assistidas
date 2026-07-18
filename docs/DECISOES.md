@@ -403,3 +403,30 @@ NOT NULL — moldado só para consulta.
 Humor entra como itens `ATIVIDADE` (`checkin-humor-diario`, `who5-semanal`,
 `phq4-gatilhado`). O único resíduo é `specialty_code: ""` na resposta admin de uma
 atividade (em vez de omitido) — aceitável no piloto, refinável depois.
+
+## ADR-031 — Consentimento LGPD: titular é o paciente, um ativo por finalidade
+
+**Contexto:** o Verificador de Humor (Anexo C) exige consentimento livre e
+informado (LGPD art. 11, dado sensível) como pré-condição de gravação. O Anexo C
+modela `consent` com `colaborador_id`/`empresa_id` pseudonimizados. No renovi_care,
+porém, o sujeito autenticado é o **paciente** (`patient_account`), e não há
+entidade de colaborador/empresa integrada (a Gestão 2.0 é somente leitura e ainda
+não conectada).
+
+**Decisão:**
+- `consent.patient_id` referencia `patient_account` (ON DELETE RESTRICT: a trilha
+  de consentimento sobrevive). `empresa_id` do Anexo vira `gestao_contract_id`
+  opcional (preenchido a partir da matrícula quando houver).
+- **Allowlist de finalidade:** só finalidades conhecidas (`checkin_humor`) são
+  aceitas no model — não se grava consentimento para propósito arbitrário.
+- **Um ativo por (paciente, finalidade):** índice único parcial
+  `ux_consent_ativo ... WHERE status='ativo'`. Reconceder é versionado: mesmo
+  `versao_termo` é idempotente (não recria); versão nova revoga o anterior e cria
+  um novo, numa transação. Revogação é idempotente.
+- `Active(patient, finalidade)` devolve `ErrNoActiveConsent` quando não há ativo —
+  é o gate que as capturas (Módulos 3–5) consultam antes de persistir; sem ele,
+  respondem 403.
+
+**Consequência:** o consentimento é rastreável e revogável, com histórico
+preservado (linhas revogadas não são apagadas). O front do check-in coleta o
+aceite do termo antes da primeira captura; sem consentimento ativo, nada é gravado.

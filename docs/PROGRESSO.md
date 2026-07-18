@@ -15,8 +15,12 @@ Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
   `0009_activity_item` (kind `IN ('CONSULTA','ATIVIDADE')`, `specialty_code`
   condicional ao kind), `careline_catalog.AddItem` aceita ATIVIDADE,
   `ValidatePublish` pula especialidade para atividade. Unit + integração verdes
-  (fluxo de consulta sem regressão). Falta commit para `generate-check` fechar.
-- [ ] Módulo 1 — Consentimento (LGPD, pré-condição de gravação).
+  (fluxo de consulta sem regressão).
+- [x] **Módulo 1 — Consentimento** (ADR-031): migration `0010_consent`
+  (índice parcial `ux_consent_ativo` = um ativo por paciente+finalidade), model
+  `ConsentStore` (Grant idempotente por termo, reconcessão versionada, Revoke,
+  `Active`), controller + rotas `/me/consent` (GET/POST/revoke) sob `RequireSession`.
+  Testes de controller (fakes) + integração verdes.
 - [ ] Módulo 2 — Catálogo de instrumentos + pontuação pura (`models/mood/scoring`).
 - [ ] Módulo 3 — Anel diário (grade valência×energia) ponta a ponta + front mínimo.
 - [ ] Módulo 4 — Anel semanal WHO-5 via `MIN_INTERVAL` (reusa o motor).

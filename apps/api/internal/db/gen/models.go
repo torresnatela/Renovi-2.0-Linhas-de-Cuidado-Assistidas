@@ -79,6 +79,18 @@ type CareLineRule struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type Consent struct {
+	ID               uuid.UUID          `json:"id"`
+	PatientID        uuid.UUID          `json:"patient_id"`
+	GestaoContractID pgtype.Text        `json:"gestao_contract_id"`
+	Finalidade       string             `json:"finalidade"`
+	VersaoTermo      string             `json:"versao_termo"`
+	Status           string             `json:"status"`
+	ConcedidoEm      time.Time          `json:"concedido_em"`
+	RevogadoEm       pgtype.Timestamptz `json:"revogado_em"`
+	CreatedAt        time.Time          `json:"created_at"`
+}
+
 type DavLinkAudit struct {
 	ID          uuid.UUID   `json:"id"`
 	AccountID   uuid.UUID   `json:"account_id"`

@@ -654,6 +654,19 @@ type CareLineRule struct {
 // CareLineRuleRuleType As quatro regras ARMAZENÁVEIS. VIGENCIA não entra: é da matrícula, avaliada sempre, não uma regra que o admin liga por item.
 type CareLineRuleRuleType string
 
+// ConsentStatus Situação do consentimento do paciente para uma finalidade. `active` resume: o front só grava check-in quando há consentimento ativo.
+type ConsentStatus struct {
+	// Active true quando há consentimento ativo para a finalidade.
+	Active bool `json:"active"`
+
+	// ConcedidoEm Quando o consentimento ativo foi concedido.
+	ConcedidoEm *time.Time `json:"concedido_em,omitempty"`
+	Finalidade  string     `json:"finalidade"`
+
+	// VersaoTermo Versão do termo aceito (presente quando ativo).
+	VersaoTermo *string `json:"versao_termo,omitempty"`
+}
+
 // CreateAppointmentRequest defines model for CreateAppointmentRequest.
 type CreateAppointmentRequest struct {
 	// SlotId O horário escolhido. Ele já determina o PROFISSIONAL (slot -> shift -> profissional), então o profissional não vem no corpo: mandar de novo o que o servidor já sabe criaria uma segunda verdade para conferir.
@@ -796,6 +809,12 @@ type ForceStatusRequest struct {
 
 // ForceStatusRequestStatus O status a forçar na consulta (rota interna de teste).
 type ForceStatusRequestStatus string
+
+// GrantConsentRequest defines model for GrantConsentRequest.
+type GrantConsentRequest struct {
+	Finalidade  string `json:"finalidade"`
+	VersaoTermo string `json:"versao_termo"`
+}
 
 // HealthStatus defines model for HealthStatus.
 type HealthStatus struct {
@@ -957,6 +976,11 @@ type RenewEnrollmentRequest struct {
 // RenewEnrollmentRequestMonths Meses acrescentados à vigência (novo período, não edita o atual).
 type RenewEnrollmentRequestMonths int
 
+// RevokeConsentRequest defines model for RevokeConsentRequest.
+type RevokeConsentRequest struct {
+	Finalidade string `json:"finalidade"`
+}
+
 // Slot Um horário livre. Autossuficiente de propósito: qualquer Slot, sozinho, tem tudo para ser renderizado certo, sem depender do contexto de onde veio.
 type Slot struct {
 	EndsAt time.Time `json:"ends_at"`
@@ -1093,6 +1117,12 @@ type GetMyAvailabilityParams struct {
 	To *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
 }
 
+// GetConsentParams defines parameters for GetConsent.
+type GetConsentParams struct {
+	// Finalidade Finalidade do consentimento. Default: checkin_humor.
+	Finalidade *string `form:"finalidade,omitempty" json:"finalidade,omitempty"`
+}
+
 // GetMyEligibilityParams defines parameters for GetMyEligibility.
 type GetMyEligibilityParams struct {
 	// ItemId Id do item da linha (UUID).
@@ -1143,3 +1173,9 @@ type ForceCareAppointmentStatusJSONRequestBody = ForceStatusRequest
 
 // CreateMyCareAppointmentJSONRequestBody defines body for CreateMyCareAppointment for application/json ContentType.
 type CreateMyCareAppointmentJSONRequestBody = CreateCareAppointmentRequest
+
+// GrantConsentJSONRequestBody defines body for GrantConsent for application/json ContentType.
+type GrantConsentJSONRequestBody = GrantConsentRequest
+
+// RevokeConsentJSONRequestBody defines body for RevokeConsent for application/json ContentType.
+type RevokeConsentJSONRequestBody = RevokeConsentRequest

@@ -154,6 +154,73 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
   # ---------------------------------------------------------------------------
+  # Verificador Diário de Humor (Anexo C) — lado do paciente.
+  #
+  # Consentimento livre e informado (LGPD art. 11, dado sensível) é PRÉ-CONDIÇÃO
+  # de gravação do check-in: sem consentimento ativo, nenhuma resposta é persistida.
+  # ---------------------------------------------------------------------------
+  /me/consent:
+    get:
+      operationId: getConsent
+      summary: Status do consentimento do paciente para uma finalidade.
+      parameters:
+        - name: finalidade
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Finalidade do consentimento. Default: checkin_humor."
+      responses:
+        "200":
+          description: Situação atual do consentimento.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsentStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: grantConsent
+      summary: Concede consentimento (versionado). Idempotente para o mesmo termo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantConsentRequest"
+      responses:
+        "200":
+          description: Consentimento ativo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsentStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/consent/revoke:
+    post:
+      operationId: revokeConsent
+      summary: Revoga o consentimento ativo da finalidade. Idempotente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeConsentRequest"
+      responses:
+        "200":
+          description: Consentimento revogado (ou já ausente).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsentStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  # ---------------------------------------------------------------------------
   # Agendamento: especialidade -> profissional -> horário -> consulta -> entrar.
   #
   # SEM motor de elegibilidade nesta fase: quem decide "pode agendar?" ainda é só
@@ -1323,6 +1390,45 @@ components:
         email:
           type: string
           format: email
+    ConsentStatus:
+      description: >
+        Situação do consentimento do paciente para uma finalidade. `active`
+        resume: o front só grava check-in quando há consentimento ativo.
+      type: object
+      required: [finalidade, active]
+      properties:
+        finalidade:
+          type: string
+          example: checkin_humor
+        active:
+          type: boolean
+          description: true quando há consentimento ativo para a finalidade.
+        versao_termo:
+          type: string
+          nullable: true
+          description: Versão do termo aceito (presente quando ativo).
+        concedido_em:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando o consentimento ativo foi concedido.
+    GrantConsentRequest:
+      type: object
+      required: [finalidade, versao_termo]
+      properties:
+        finalidade:
+          type: string
+          example: checkin_humor
+        versao_termo:
+          type: string
+          example: v1
+    RevokeConsentRequest:
+      type: object
+      required: [finalidade]
+      properties:
+        finalidade:
+          type: string
+          example: checkin_humor
     HealthStatus:
       type: object
       required: [status, service, version]
