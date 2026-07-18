@@ -386,24 +386,6 @@ func (e JourneyEventEventType) Valid() bool {
 	}
 }
 
-// Defines values for RecurrenceRuleFreq.
-const (
-	MONTHLY RecurrenceRuleFreq = "MONTHLY"
-	WEEKLY  RecurrenceRuleFreq = "WEEKLY"
-)
-
-// Valid indicates whether the value is a known member of the RecurrenceRuleFreq enum.
-func (e RecurrenceRuleFreq) Valid() bool {
-	switch e {
-	case MONTHLY:
-		return true
-	case WEEKLY:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for RenewEnrollmentRequestMonths.
 const (
 	RenewEnrollmentRequestMonthsN1 RenewEnrollmentRequestMonths = 1
@@ -630,8 +612,10 @@ type CareLineItem struct {
 	Kind CareLineItemKind `json:"kind"`
 
 	// Label Rótulo em PT-BR exibido ao paciente. Ex.: "Avaliação inicial".
-	Label      string          `json:"label"`
-	Recurrence *RecurrenceRule `json:"recurrence,omitempty"`
+	Label string `json:"label"`
+
+	// Recurrence Cadência em TEXTO LIVRE, só informativa (ex.: "4x por mês") — o que o paciente lê. NÃO é avaliada pelo motor: as regras que de fato valem estão em `rules`. Nula quando não há cadência a exibir.
+	Recurrence *string `json:"recurrence,omitempty"`
 
 	// Ref Código do item dentro da linha (estável entre versões), referenciado pelas regras de pré-requisito.
 	Ref   string         `json:"ref"`
@@ -686,10 +670,12 @@ type CreateCareAppointmentRequest struct {
 
 // CreateCareLineItemRequest defines model for CreateCareLineItemRequest.
 type CreateCareLineItemRequest struct {
-	Kind       CreateCareLineItemRequestKind `json:"kind"`
-	Label      string                        `json:"label"`
-	Recurrence *RecurrenceRule               `json:"recurrence,omitempty"`
-	Ref        string                        `json:"ref"`
+	Kind  CreateCareLineItemRequestKind `json:"kind"`
+	Label string                        `json:"label"`
+
+	// Recurrence Cadência em texto livre, informativa (ex.: "4x por mês"). As regras aplicadas ficam em `rules`, não aqui.
+	Recurrence *string `json:"recurrence,omitempty"`
+	Ref        string  `json:"ref"`
 
 	// SortOrder Ordem na linha. Default a cargo do servidor quando ausente.
 	SortOrder     *int   `json:"sort_order,omitempty"`
@@ -936,20 +922,6 @@ type Reason struct {
 	Code   string  `json:"code"`
 	Detail *string `json:"detail,omitempty"`
 }
-
-// RecurrenceRule Cadência do item (RRULE simplificada, SPEC §3.2a). É a REGRA de repetição ("1 vez por semana"), não a lista de datas: o motor deriva as janelas dela. Nula quando o item é de ocorrência única.
-type RecurrenceRule struct {
-	Freq RecurrenceRuleFreq `json:"freq"`
-
-	// Interval A cada quantas unidades de `freq` a janela reabre (1 = toda).
-	Interval int `json:"interval"`
-
-	// Quota Quantas ocorrências a janela permite.
-	Quota int `json:"quota"`
-}
-
-// RecurrenceRuleFreq defines model for RecurrenceRule.Freq.
-type RecurrenceRuleFreq string
 
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {

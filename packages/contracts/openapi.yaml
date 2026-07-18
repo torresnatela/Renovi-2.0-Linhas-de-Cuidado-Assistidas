@@ -1643,25 +1643,6 @@ components:
     # veredito do motor de elegibilidade. Admin monta o template; paciente lê a
     # jornada e agenda o que o motor liberar.
     # -------------------------------------------------------------------------
-    RecurrenceRule:
-      description: >
-        Cadência do item (RRULE simplificada, SPEC §3.2a). É a REGRA de repetição
-        ("1 vez por semana"), não a lista de datas: o motor deriva as janelas dela.
-        Nula quando o item é de ocorrência única.
-      type: object
-      required: [freq, interval, quota]
-      properties:
-        freq:
-          type: string
-          enum: [WEEKLY, MONTHLY]
-        interval:
-          type: integer
-          minimum: 1
-          description: A cada quantas unidades de `freq` a janela reabre (1 = toda).
-        quota:
-          type: integer
-          minimum: 1
-          description: Quantas ocorrências a janela permite.
     EligibilityBlock:
       description: >
         Um motivo, JÁ PRONTO PARA EXIBIR, de o motor ter barrado um item. Vem em
@@ -1751,9 +1732,12 @@ components:
           type: string
           description: 'Rótulo em PT-BR exibido ao paciente. Ex.: "Avaliação inicial".'
         recurrence:
+          type: string
           nullable: true
-          allOf:
-            - $ref: "#/components/schemas/RecurrenceRule"
+          description: >
+            Cadência em TEXTO LIVRE, só informativa (ex.: "4x por mês") — o que o
+            paciente lê. NÃO é avaliada pelo motor: as regras que de fato valem
+            estão em `rules`. Nula quando não há cadência a exibir.
         sort_order:
           type: integer
           description: Ordem de exibição do item na linha.
@@ -2061,9 +2045,11 @@ components:
         label:
           type: string
         recurrence:
+          type: string
           nullable: true
-          allOf:
-            - $ref: "#/components/schemas/RecurrenceRule"
+          description: >
+            Cadência em texto livre, informativa (ex.: "4x por mês"). As regras
+            aplicadas ficam em `rules`, não aqui.
         sort_order:
           type: integer
           description: Ordem na linha. Default a cargo do servidor quando ausente.
