@@ -370,3 +370,51 @@ recalcula regra: exibe `Reason`/`AvailableFrom` que o motor mandou.
 calendário civil (semana ISO/mês civil, sem acúmulo)" caiu — o martelo bateu em
 janela móvel. Os demais pontos do ADR-009 (auto-conclusão, antecedência de
 cancelamento, ativação manual) seguem valendo até serem martelados.
+
+## ADR-021 — Jornada do paciente: elegibilidade no servidor, agendamento idempotente com compensação, expiração lazy
+
+**Contexto:** a Fase 6 do Slice 1 liga o motor puro (`models/careline`) ao
+booking existente (`models/appointment.go`) nas rotas `/me/*`. Três problemas
+inevitáveis: (1) o front poderia "confiar" no veredito que ele mesmo exibiu;
+(2) o POST de agendamento fala com a DAV (lenta, insondável) e o duplo-clique
+criaria duas consultas REAIS; (3) matrícula vencida só é verdade depois que
+alguém a expira — e não há cron ainda.
+
+**Decisão:**
+- **Elegibilidade é SEMPRE reavaliada no servidor**, no instante do slot
+  (`Evaluate(intendedAt = slot.StartsAt)`), ANTES de tocar o booking. Motor
+  barrou → 422 com `blocks[]` completos e reason `ELIGIBILITY_BLOCKED`; o front
+  só exibe.
+- **Idempotência por `Idempotency-Key`** (header obrigatório, 400 sem ele) via
+  índice único parcial `ux_care_appt_idem (enrollment_id, idempotency_key)`.
+  Replay → 200 com a MESMA consulta. **Corrida** de duas requisições com a mesma
+  key: o índice escolhe o vencedor dentro do `CreateScheduled`; o perdedor
+  **compensa o booking que criou** (`BookingStore.Cancel`, log ERROR se falhar)
+  e devolve o vencedor como replay. A corrida é reconhecida PELO NOME da
+  constraint — outra unique violation é bug, não replay.
+- **Expiração LAZY**: toda leitura da jornada que encontra matrícula `ativa` com
+  `valid_until` no passado a expira na hora (`ExpireEnrollment` + evento
+  `matricula_expirada` actor=`sistema`, na MESMA TX, `FOR UPDATE` contra
+  corrida; idempotente — 0 linhas = sem evento). O futuro cron do worker vira
+  otimização, não requisito de corretude.
+- **Toda escrita da jornada grava linha+evento na MESMA transação**
+  (`consulta_agendada`, `consulta_cancelada`, `consulta_status_forcado`), com
+  payloads como structs nomeadas (contrato de auditoria). O cancelamento grava o
+  bookkeeping (`hours_before`, `counts_for_quota` — a MESMA semântica do
+  `counts()` do motor, `dav_cancelled`/`dav_error`); dessincronia com o booking
+  (já cancelado lá) é tolerada com log ERROR: o paciente não fica preso.
+- **`/internal/appointments/{id}/force-status`** só EXISTE quando
+  `RENOVI_TEST_ENDPOINTS` (proibido em produção pela config); sem sessão — o
+  gate é o ambiente. Ganhou a única query por id sem dono
+  (`GetCareAppointment`), exclusiva dessa rota.
+- **Rate limit do POST /me/appointments por CONTA** (`rateLimitByAccount`,
+  mesmos parâmetros do POST /appointments), pela razão do ADR-019 — a rota é
+  autenticada e IP sob NAT pune inocentes.
+
+**Consequência:** `JourneyStore` declara as duas interfaces que consome
+(ADR-012): `BookingService` (implementada pelo `*BookingStore` real — a jornada
+agenda PELO booking, um store só) e `journeyStorage` (implementada por
+`JourneyRepo` e por um fake em memória nos testes). O 422 de elegibilidade, o
+replay 200 e a compensação da corrida têm testes de unidade; atomicidade
+linha+evento, keyset de auditoria com empate de `occurred_at` e a expiração
+idempotente têm testes de integração contra Postgres real.

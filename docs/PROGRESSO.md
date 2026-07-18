@@ -3,7 +3,7 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 1 concluída:** motor de regras puro `models/careline` por TDD._
+_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 6 concluída:** jornada do paciente (`JourneyStore` + rotas `/me/*` + endpoint interno de teste), ADR-021._
 
 ## 🚧 Slice 1 — Linhas de Cuidado Assistidas (em andamento)
 
@@ -12,8 +12,31 @@ _Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 1 con
   PREREQUISITE), `ParseRuleParams` (params tipados, `DisallowUnknownFields`) e
   `ValidatePublish` (itens, ciclos de pré-requisito, especialidades do legado).
   A tabela T1–T19 em `evaluate_test.go` é a **especificação normativa** do slice.
-- [ ] Próximas fases: schema/migrations do domínio, queries, wiring nos
-  controllers e front (o pacote ainda não é importado por ninguém — de propósito).
+- [x] **Schema + queries** (migrations 0005–0008): `care_line/care_line_item/
+  care_line_rule` (catálogo versionado e imutável por versão), `enrollment` +
+  `enrollment_period`, `care_appointment` + `journey_event` (append-only, role
+  `renovi_app` sem UPDATE/DELETE) e as queries sqlc de tudo.
+- [x] **Contrato**: `/admin/care-lines*`, `/admin/enrollments*`, `/me/journey`,
+  `/me/eligibility`, `/me/availability`, `/me/appointments` (+cancel), `/me/audit`
+  e `/internal/.../force-status` no `openapi.yaml`, com tipos gerados.
+- [x] **Admin** (token estático `X-Admin-Token`): `CareLineStore` (draft → itens
+  → regras → publish validando especialidades no legado) e `EnrollmentStore`
+  (matricular/renovar/encerrar com eventos), rotas montadas.
+- [x] **`BookingStore.Cancel`** (paciente): CANCELLED + devolve o horário ao
+  legado + cancel best-effort na DAV (que responde 500 em HML — tolerado).
+- [x] **Fase 6 — jornada do paciente** (ADR-021): `models/care_journey.go`
+  (`JourneyStore`, interfaces `BookingService`/`journeyStorage` no consumidor) +
+  `care_journey_repo.go` (linha+evento SEMPRE na mesma TX). Rotas `/me/journey`
+  (matrículas com itens já avaliados + eventos recentes, **expiração lazy**),
+  `/me/eligibility` (com `date` simulada), `/me/availability` (slots dos
+  profissionais da especialidade anotados com o veredito por instante),
+  `POST /me/appointments` (**Idempotency-Key obrigatória**, motor ANTES do
+  booking → 422 `blocks[]`, replay 200, corrida de key compensa o booking),
+  cancel com bookkeeping de cota, `/me/audit` (keyset por cursor opaco) e
+  `POST /internal/appointments/{id}/force-status` (só com
+  `RENOVI_TEST_ENDPOINTS`).
+- [ ] Próximas fases: front (telas da jornada), auto-conclusão via worker/cron,
+  seed `saude-mental-v1`.
 
 ## ✅ Agendamento — CONCLUÍDO (backend + front)
 
