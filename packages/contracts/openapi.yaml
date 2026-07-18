@@ -330,6 +330,16 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            A conta ainda não está vinculada à Doutor ao Vivo, então não há
+            paciente para pôr na consulta. Não deveria acontecer (só conta ACTIVE
+            autentica, e ACTIVE exige o vínculo), mas o servidor confere antes de
+            criar consulta órfã lá.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -344,9 +354,10 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        # Só 502. O 504 do gateway da DAV é traduzido pelo model em
+        # BOOKING_UNCONFIRMED e sai como 502 — o cliente nunca recebe 504 daqui,
+        # então declará-lo seria prometer uma resposta que não existe.
         "502":
-          $ref: "#/components/responses/BookingUnconfirmed"
-        "504":
           $ref: "#/components/responses/BookingUnconfirmed"
   /appointments/{appointment_id}:
     get:

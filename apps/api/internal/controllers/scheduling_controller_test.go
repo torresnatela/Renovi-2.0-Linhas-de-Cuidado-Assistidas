@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -379,6 +380,24 @@ func TestListSlots_RecusaDataMalformada(t *testing.T) {
 	}
 }
 
+// A borda do teto de 60 dias, que antes tinha off-by-one (from..to a 60 dias
+// consultava 61). A janela real é [from, to+1d): 59 dias de distância = 60 de
+// janela (ok); 60 de distância = 61 de janela (recusa).
+func TestListSlots_LimiteDe60Dias(t *testing.T) {
+	// from=01/01, to=01/03 → 59 dias de distância, janela de 60 → passa.
+	ok := serve(t, &fakeBookings{}, http.MethodGet, "",
+		"/professionals/p1/slots?from=2026-01-01&to=2026-03-01", "")
+	if ok.Code != http.StatusOK {
+		t.Errorf("59 dias de distância (janela de 60) devia passar; veio %d", ok.Code)
+	}
+	// from=01/01, to=02/03 → 60 dias de distância, janela de 61 → recusa.
+	nok := serve(t, &fakeBookings{}, http.MethodGet, "",
+		"/professionals/p1/slots?from=2026-01-01&to=2026-03-02", "")
+	if nok.Code != http.StatusBadRequest {
+		t.Errorf("60 dias de distância (janela de 61) devia recusar; veio %d", nok.Code)
+	}
+}
+
 func TestGet_ConsultaDeTerceiroEh404(t *testing.T) {
 	f := &fakeBookings{getErr: models.ErrAppointmentNotFound}
 	w := serve(t, f, http.MethodGet, "", "/appointments/"+uuid.NewString(), "")
@@ -392,5 +411,16 @@ func TestGet_IdMalformadoTambemEh404(t *testing.T) {
 	w := serve(t, &fakeBookings{appt: consultaConfirmada()}, http.MethodGet, "", "/appointments/nao-e-uuid", "")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, quero 404: um 400 diria 'este formato existe'", w.Code)
+	}
+}
+
+// Falha de infra NÃO pode virar 404. "Sua consulta não existe" quando o banco
+// caiu manda o paciente embora de algo que está lá. 404 é só para
+// ErrAppointmentNotFound; o resto é 500.
+func TestGet_FalhaDeInfraEh500NaoEh404(t *testing.T) {
+	f := &fakeBookings{getErr: errors.New("banco fora do ar")}
+	w := serve(t, f, http.MethodGet, "", "/appointments/"+uuid.NewString(), "")
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, quero 500 (não 404)", w.Code)
 	}
 }

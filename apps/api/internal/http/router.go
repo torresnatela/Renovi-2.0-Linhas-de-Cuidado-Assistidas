@@ -113,12 +113,19 @@ func mountScheduling(r chi.Router, s controllers.SchedulingController, auth cont
 		})
 
 		// Agendar tem timeout próprio, pelo mesmo motivo do cadastro: fala com a
-		// DAV de forma síncrona, e ela é lenta e IMPREVISÍVEL (3s a 17s medidos em
-		// sondagens do mesmo dia, contra o teto de 29s do gateway dela). Com o teto
-		// normal de 30s, a requisição morreria antes da DAV responder — e aí o
-		// paciente fica sem saber se marcou, que é o pior desfecho possível nesta
-		// rota: não dá para reconciliar depois.
+		// DAV de forma síncrona, e ela é lenta e IMPREVISÍVEL (3s a 29s medidos em
+		// sondagens do mesmo dia, contra o teto do gateway dela). Com o teto normal
+		// de 30s, a requisição morreria antes da DAV responder — e aí o paciente
+		// fica sem saber se marcou, que é o pior desfecho possível nesta rota: não
+		// dá para reconciliar depois.
+		//
+		// E tem rate limit, como o /auth/register — é a rota MAIS cara e perigosa
+		// (escrita não idempotente e insondável, segurando até bookTimeout e
+		// queimando orçamento da DAV). Sem isto, uma única sessão dispara N
+		// agendamentos concorrentes sem freio. O contrato promete o 429; é aqui que
+		// ele passa a existir de verdade.
 		r.Group(func(r chi.Router) {
+			r.Use(rateLimitByIP(20, 1.0/3.0))
 			r.Use(middleware.Timeout(bookTimeout))
 			r.Post("/appointments", s.Create)
 		})

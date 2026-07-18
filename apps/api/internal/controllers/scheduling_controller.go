@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -37,7 +36,16 @@ type SchedulingController struct {
 	Bookings Booking
 	// Now é injetável para o teste não depender do relógio da máquina.
 	Now func() time.Time
+	// BookDeadline é quanto o handler de agendamento pode escrever. Precisa cobrir
+	// a chamada síncrona à DAV com folga. DERIVA da config (main), como o
+	// RegisterDeadline do cadastro — cravar um literal aqui reintroduz a
+	// divergência que já cortou a última tentativa do cadastro no meio. Zero cai
+	// num default seguro.
+	BookDeadline time.Duration
 }
+
+// defaultBookDeadline é o piso quando BookDeadline não é injetado (testes).
+const defaultBookDeadline = 90 * time.Second
 
 func (c SchedulingController) now() time.Time {
 	if c.Now != nil {
@@ -110,13 +118,17 @@ func (c SchedulingController) ListSlots(w http.ResponseWriter, r *http.Request) 
 		WriteProblem(w, http.StatusBadRequest, "Requisição inválida", "O fim do intervalo é anterior ao início.")
 		return
 	}
-	if to.Sub(from) > maxSlotRange {
+	// `to` é inclusivo no contrato, mas a query é semiaberta: somamos um dia. O
+	// teto de 60 dias mede a JANELA de fato consultada (from até to+1d exclusivo),
+	// não a distância from..to — senão `from..to` a 60 dias apart passaria e
+	// consultaria 61 dias, contradizendo a mensagem e o contrato.
+	upper := to.AddDate(0, 0, 1)
+	if upper.Sub(from) > maxSlotRange {
 		WriteProblem(w, http.StatusBadRequest, "Requisição inválida", "O intervalo não pode passar de 60 dias.")
 		return
 	}
 
-	// `to` é inclusivo no contrato, mas a query é semiaberta: somamos um dia.
-	page, err := c.Bookings.ListSlotPage(r.Context(), professionalID, from, to.AddDate(0, 0, 1), now)
+	page, err := c.Bookings.ListSlotPage(r.Context(), professionalID, from, upper, now)
 	if errors.Is(err, models.ErrProfessionalNotFound) {
 		WriteProblem(w, http.StatusNotFound, "Não encontrado", "Profissional não encontrado.")
 		return
@@ -157,20 +169,24 @@ func (c SchedulingController) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A DAV é lenta e imprevisível (3s a 17s medidos, teto de 29s do gateway).
-	// Sem estender o deadline de escrita, o servidor desiste de responder antes
-	// de a DAV responder — e o paciente fica sem saber se marcou. Mesma lição do
-	// cadastro.
-	if rc := http.NewResponseController(w); rc != nil {
-		_ = rc.SetWriteDeadline(time.Now().Add(90 * time.Second))
+	// A DAV é lenta e imprevisível (3s a 29s medidos, teto do gateway). Sem
+	// estender o deadline de escrita, o servidor desiste de responder antes de a
+	// DAV responder — e o paciente fica sem saber se marcou. Mesma lição do
+	// cadastro. O valor DERIVA da config (BookDeadline), não é literal.
+	deadline := c.BookDeadline
+	if deadline <= 0 {
+		deadline = defaultBookDeadline
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(deadline))
 
 	var body struct {
 		SlotID      string `json:"slot_id"`
 		SpecialtyID string `json:"specialty_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		WriteProblem(w, http.StatusBadRequest, "Requisição inválida", "Corpo JSON inválido.")
+	// decodeJSON limita o tamanho do corpo (MaxBytesReader) e recusa campos
+	// desconhecidos — o mesmo tratamento das rotas de auth. Numa rota não
+	// idempotente que fala com a DAV, um corpo ilimitado é munição fácil.
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.SlotID == "" || body.SpecialtyID == "" {
@@ -226,8 +242,14 @@ func (c SchedulingController) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appt, err := c.Bookings.GetForAccount(r.Context(), id, account.ID, c.now())
-	if err != nil {
+	if errors.Is(err, models.ErrAppointmentNotFound) {
 		writeNotFound(w)
+		return
+	}
+	if err != nil {
+		// Falha de infra não é "não existe": 500, não 404. Dizer "não encontrada"
+		// quando o banco caiu manda o paciente embora de algo que está lá.
+		WriteProblem(w, http.StatusInternalServerError, "Erro interno", "Não foi possível carregar a consulta.")
 		return
 	}
 	WriteJSON(w, http.StatusOK, c.toAppointmentDTO(appt))
@@ -293,6 +315,11 @@ func writeBookError(w http.ResponseWriter, err error) {
 	case errors.Is(err, models.ErrSpecialtyMismatch):
 		WriteProblem(w, http.StatusBadRequest, "Requisição inválida",
 			"Este profissional não atende a especialidade escolhida.")
+	case errors.Is(err, models.ErrSpecialtyInactive):
+		// Frase honesta: ele atende, mas a especialidade saiu do ar. Dizer
+		// "não atende" (o mismatch acima) seria mentira.
+		WriteProblem(w, http.StatusBadRequest, "Especialidade indisponível",
+			"Esta especialidade não está mais disponível para agendamento.")
 	case errors.Is(err, models.ErrAccountNotLinked):
 		WriteProblem(w, http.StatusForbidden, "Cadastro incompleto",
 			"Sua conta ainda não está vinculada à Doutor ao Vivo.")
@@ -323,7 +350,12 @@ func writeJoinError(w http.ResponseWriter, err error) {
 			Reason{Code: denied.Reason, Detail: denied.OpensAt.Format(time.RFC3339)})
 		return
 	}
-	writeNotFound(w)
+	if errors.Is(err, models.ErrAppointmentNotFound) {
+		writeNotFound(w)
+		return
+	}
+	// Falha de infra: 500, não 404 (mesma razão do Get).
+	WriteProblem(w, http.StatusInternalServerError, "Erro interno", "Não foi possível abrir a consulta.")
 }
 
 // ---------------------------------------------------------------------------

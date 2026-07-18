@@ -212,5 +212,12 @@ func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog
 	policy := scheduling.Policy{OpensBefore: cfg.JoinOpensBefore, ClosesAfter: cfg.JoinClosesAfter}
 
 	store := models.NewBookingStore(pool, agendaClient, davClient, policy, logger)
-	return &controllers.SchedulingController{Bookings: store}, func() { _ = agendaClient.Close() }, nil
+	return &controllers.SchedulingController{
+		Bookings: store,
+		// Deriva do timeout da DAV com folga, como o RegisterDeadline do cadastro:
+		// o deadline de escrita precisa ser > que o timeout da rota (DAVTimeout+10s,
+		// ver router), senão o servidor corta a resposta de um agendamento que deu
+		// certo. Manter os dois derivados da mesma fonte evita que divirjam.
+		BookDeadline: cfg.DAVTimeout + 30*time.Second,
+	}, func() { _ = agendaClient.Close() }, nil
 }
