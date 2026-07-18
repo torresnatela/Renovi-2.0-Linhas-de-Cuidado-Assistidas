@@ -81,9 +81,10 @@ func run() error {
 
 	careAdmin := newCareAdminController(cfg, pool, agendaClient, logger)
 
-	// Verificador de Humor (Anexo C): o consentimento só precisa do Postgres
-	// próprio. As rotas /me/consent só sobem junto com o Auth (ver router).
+	// Verificador de Humor (Anexo C): consentimento e instrumentos só precisam do
+	// Postgres próprio. As rotas /me/* só sobem junto com o Auth (ver router).
 	consent := &controllers.ConsentController{Consents: models.NewConsentStore(pool)}
+	mood := &controllers.MoodController{Instruments: models.NewInstrumentStore(pool)}
 
 	router := apihttp.NewRouter(apihttp.Deps{
 		Logger:  logger,
@@ -103,6 +104,7 @@ func run() error {
 		Auth:       auth,
 		Scheduling: scheduling,
 		Consent:    consent,
+		Mood:       mood,
 		CareAdmin:  careAdmin,
 		AdminToken: cfg.AdminToken,
 		// O cadastro precisa de um teto maior que o de uma rota normal: ele

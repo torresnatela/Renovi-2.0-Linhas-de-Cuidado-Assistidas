@@ -220,6 +220,32 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /me/mood/instruments/{codigo}:
+    get:
+      operationId: getMoodInstrument
+      summary: Configuração de um instrumento (dimensões, rótulos, tags de contexto).
+      description: >
+        Config que o front usa para desenhar a captura. Para o GRID (anel diário),
+        traz as dimensões e os rótulos de emoção por quadrante + as tags de contexto.
+        Cortes e polaridades são parâmetros versionados (instrument_cutoff).
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "Código do instrumento: GRID, WHO5 ou PHQ4."
+      responses:
+        "200":
+          description: Configuração do instrumento ativo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstrumentConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   # ---------------------------------------------------------------------------
   # Agendamento: especialidade -> profissional -> horário -> consulta -> entrar.
   #
@@ -1429,6 +1455,68 @@ components:
         finalidade:
           type: string
           example: checkin_humor
+    InstrumentConfig:
+      description: >
+        Config de um instrumento para o front desenhar a captura. Cortes e
+        polaridades são parâmetros versionados; o front não os recalcula.
+      type: object
+      required: [codigo, versao, anel, dimensions, emotion_labels, context_tags]
+      properties:
+        codigo:
+          type: string
+          example: GRID
+        versao:
+          type: string
+          example: "1"
+        anel:
+          type: string
+          enum: [diario, semanal, gatilhado]
+        dimensions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InstrumentDimension"
+        emotion_labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmotionLabel"
+        context_tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContextTag"
+    InstrumentDimension:
+      type: object
+      required: [dimensao, polaridade, min_score, max_score]
+      properties:
+        dimensao:
+          type: string
+          example: valencia
+        polaridade:
+          type: string
+          enum: [positiva, negativa]
+        min_score:
+          type: number
+        max_score:
+          type: number
+    EmotionLabel:
+      type: object
+      required: [quadrante, rotulo]
+      properties:
+        quadrante:
+          type: string
+          example: desagradavel_calmo
+        rotulo:
+          type: string
+          example: Desanimado
+    ContextTag:
+      type: object
+      required: [chave, rotulo]
+      properties:
+        chave:
+          type: string
+          example: sono
+        rotulo:
+          type: string
+          example: Sono
     HealthStatus:
       type: object
       required: [status, service, version]

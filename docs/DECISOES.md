@@ -430,3 +430,28 @@ não conectada).
 **Consequência:** o consentimento é rastreável e revogável, com histórico
 preservado (linhas revogadas não são apagadas). O front do check-in coleta o
 aceite do termo antes da primeira captura; sem consentimento ativo, nada é gravado.
+
+## ADR-032 — Pontuação pura com cortes versionados como reference data
+
+**Contexto:** o Verificador de Humor pontua grade (quadrante), WHO-5 e PHQ-4. O
+Anexo C exige pontuação DETERMINÍSTICA e cortes da validação BRASILEIRA mantidos
+como parâmetro configurável — nunca constante de código.
+
+**Decisão:**
+- Pacote **puro** `internal/models/mood/scoring` (sem I/O, sem `time.Now()`):
+  `Quadrant`/`IsQuadranteRisco` (circumplexo, corte determinístico em 50, >= é o
+  lado alto), `ScoreWHO5` (índice = bruto×4), `ScorePHQ4` (subescalas PHQ-2/GAD-2).
+  Os **cortes entram por parâmetro** (`WHO5Cutoffs`/`PHQ4Cutoffs`). A tabela de
+  testes é a especificação, como no motor `careline`.
+- Cortes, dimensões e polaridades vivem em **reference data VERSIONADA**
+  (`instrument`/`instrument_dimension`/`instrument_cutoff`), semeada na migration
+  `0011` com os valores BR (WHO-5 <50/<28 — de Souza & Hidalgo 2012; PHQ-4
+  subescala ≥3 — Santos 2013/Moreno 2016; total ≥6 — Kroenke 2009). Mudar um corte
+  = migration nova, não deploy de código.
+- Paleta e vocabulário (rótulos de emoção por quadrante) são **próprios da Renovi**
+  — a nomenclatura do Mood Meter é marca da Yale (Anexo C.4).
+
+**Consequência:** o algoritmo (pacote puro) e os parâmetros (banco) têm fontes da
+verdade separadas: o Módulo 4 carregará os cortes do banco e os passará ao scorer.
+Instrumentos são semeados em toda migração/ambiente (inclusive testcontainers),
+então o feature funciona sem passo de seed manual.

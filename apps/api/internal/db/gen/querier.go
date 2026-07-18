@@ -79,6 +79,7 @@ type Querier interface {
 	// consulta na DAV sem paciente.
 	GetAccountDavPersonID(ctx context.Context, id uuid.UUID) (pgtype.Text, error)
 	GetActiveConsent(ctx context.Context, arg GetActiveConsentParams) (Consent, error)
+	GetActiveInstrument(ctx context.Context, codigo string) (Instrument, error)
 	// Sempre por (id, dono). Nunca só por id: um SELECT por id sozinho é um convite a
 	// alguém esquecer o WHERE do dono na próxima rota e devolver a consulta de
 	// terceiro — e aqui a consulta carrega o link da sala.
@@ -155,9 +156,13 @@ type Querier interface {
 	ListCareLines(ctx context.Context) ([]CareLine, error)
 	// Todas as versões de um code, da mais nova para a mais antiga.
 	ListCareLinesByCode(ctx context.Context, code string) ([]CareLine, error)
+	ListContextTags(ctx context.Context) ([]ContextTag, error)
+	ListEmotionLabels(ctx context.Context) ([]EmotionLabel, error)
 	ListEnrollmentPeriods(ctx context.Context, enrollmentID uuid.UUID) ([]EnrollmentPeriod, error)
 	ListEnrollmentsByPatient(ctx context.Context, patientID uuid.UUID) ([]Enrollment, error)
 	ListExampleWidgets(ctx context.Context) ([]ExampleWidget, error)
+	ListInstrumentCutoffs(ctx context.Context, instrumentID uuid.UUID) ([]InstrumentCutoff, error)
+	ListInstrumentDimensions(ctx context.Context, instrumentID uuid.UUID) ([]InstrumentDimension, error)
 	ListItemsByCareLine(ctx context.Context, careLineID uuid.UUID) ([]CareLineItem, error)
 	// A tela de jornada, paginada por KEYSET (não OFFSET): a página seguinte pede tudo
 	// ANTERIOR ao último (occurred_at, id) que já viu. O índice

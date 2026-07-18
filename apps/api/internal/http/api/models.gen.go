@@ -314,6 +314,45 @@ func (e HealthStatusStatus) Valid() bool {
 	}
 }
 
+// Defines values for InstrumentConfigAnel.
+const (
+	Diario    InstrumentConfigAnel = "diario"
+	Gatilhado InstrumentConfigAnel = "gatilhado"
+	Semanal   InstrumentConfigAnel = "semanal"
+)
+
+// Valid indicates whether the value is a known member of the InstrumentConfigAnel enum.
+func (e InstrumentConfigAnel) Valid() bool {
+	switch e {
+	case Diario:
+		return true
+	case Gatilhado:
+		return true
+	case Semanal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InstrumentDimensionPolaridade.
+const (
+	Negativa InstrumentDimensionPolaridade = "negativa"
+	Positiva InstrumentDimensionPolaridade = "positiva"
+)
+
+// Valid indicates whether the value is a known member of the InstrumentDimensionPolaridade enum.
+func (e InstrumentDimensionPolaridade) Valid() bool {
+	switch e {
+	case Negativa:
+		return true
+	case Positiva:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for JoinWindowStatus.
 const (
 	OPEN        JoinWindowStatus = "OPEN"
@@ -667,6 +706,12 @@ type ConsentStatus struct {
 	VersaoTermo *string `json:"versao_termo,omitempty"`
 }
 
+// ContextTag defines model for ContextTag.
+type ContextTag struct {
+	Chave  string `json:"chave"`
+	Rotulo string `json:"rotulo"`
+}
+
 // CreateAppointmentRequest defines model for CreateAppointmentRequest.
 type CreateAppointmentRequest struct {
 	// SlotId O horário escolhido. Ele já determina o PROFISSIONAL (slot -> shift -> profissional), então o profissional não vem no corpo: mandar de novo o que o servidor já sabe criaria uma segunda verdade para conferir.
@@ -759,6 +804,12 @@ type EligibilityBlock struct {
 // EligibilityBlockRuleType Qual regra barrou. VIGENCIA é da MATRÍCULA (fora do período de validade) e por isso não é uma regra armazenada como as outras quatro.
 type EligibilityBlockRuleType string
 
+// EmotionLabel defines model for EmotionLabel.
+type EmotionLabel struct {
+	Quadrante string `json:"quadrante"`
+	Rotulo    string `json:"rotulo"`
+}
+
 // EndEnrollmentRequest defines model for EndEnrollmentRequest.
 type EndEnrollmentRequest struct {
 	// Reason Justificativa registrada no event log (auditoria).
@@ -826,6 +877,30 @@ type HealthStatus struct {
 
 // HealthStatusStatus defines model for HealthStatus.Status.
 type HealthStatusStatus string
+
+// InstrumentConfig Config de um instrumento para o front desenhar a captura. Cortes e polaridades são parâmetros versionados; o front não os recalcula.
+type InstrumentConfig struct {
+	Anel          InstrumentConfigAnel  `json:"anel"`
+	Codigo        string                `json:"codigo"`
+	ContextTags   []ContextTag          `json:"context_tags"`
+	Dimensions    []InstrumentDimension `json:"dimensions"`
+	EmotionLabels []EmotionLabel        `json:"emotion_labels"`
+	Versao        string                `json:"versao"`
+}
+
+// InstrumentConfigAnel defines model for InstrumentConfig.Anel.
+type InstrumentConfigAnel string
+
+// InstrumentDimension defines model for InstrumentDimension.
+type InstrumentDimension struct {
+	Dimensao   string                        `json:"dimensao"`
+	MaxScore   float32                       `json:"max_score"`
+	MinScore   float32                       `json:"min_score"`
+	Polaridade InstrumentDimensionPolaridade `json:"polaridade"`
+}
+
+// InstrumentDimensionPolaridade defines model for InstrumentDimension.Polaridade.
+type InstrumentDimensionPolaridade string
 
 // JoinTicket O link de acesso do paciente à sala da DAV. É uma CAPACIDADE, não um dado: não guarde em cache, não coloque em log, não mande por e-mail.
 type JoinTicket struct {

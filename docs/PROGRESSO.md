@@ -21,7 +21,12 @@ Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
   `ConsentStore` (Grant idempotente por termo, reconcessão versionada, Revoke,
   `Active`), controller + rotas `/me/consent` (GET/POST/revoke) sob `RequireSession`.
   Testes de controller (fakes) + integração verdes.
-- [ ] Módulo 2 — Catálogo de instrumentos + pontuação pura (`models/mood/scoring`).
+- [x] **Módulo 2 — Instrumentos + pontuação pura** (ADR-032): pacote PURO
+  `models/mood/scoring` (`Quadrant`/`IsQuadranteRisco`, `ScoreWHO5`, `ScorePHQ4`,
+  cortes por parâmetro) table-driven; migration `0011_instrument`
+  (instrument/dimension/cutoff + lookups) com seed dos 3 instrumentos e cortes BR;
+  `InstrumentStore.Config` + `GET /me/mood/instruments/{codigo}`. Unit + controller
+  + integração verdes.
 - [ ] Módulo 3 — Anel diário (grade valência×energia) ponta a ponta + front mínimo.
 - [ ] Módulo 4 — Anel semanal WHO-5 via `MIN_INTERVAL` (reusa o motor).
 - [ ] Módulo 5 — Anel gatilhado PHQ-4 + gatilho puro (`models/mood/trigger`).

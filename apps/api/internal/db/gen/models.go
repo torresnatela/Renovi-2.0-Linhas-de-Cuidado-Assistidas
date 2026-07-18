@@ -91,6 +91,13 @@ type Consent struct {
 	CreatedAt        time.Time          `json:"created_at"`
 }
 
+type ContextTag struct {
+	ID     uuid.UUID `json:"id"`
+	Chave  string    `json:"chave"`
+	Rotulo string    `json:"rotulo"`
+	Ativo  bool      `json:"ativo"`
+}
+
 type DavLinkAudit struct {
 	ID          uuid.UUID   `json:"id"`
 	AccountID   uuid.UUID   `json:"account_id"`
@@ -98,6 +105,13 @@ type DavLinkAudit struct {
 	Origin      string      `json:"origin"`
 	RequestIp   *netip.Addr `json:"request_ip"`
 	CreatedAt   time.Time   `json:"created_at"`
+}
+
+type EmotionLabel struct {
+	ID        uuid.UUID `json:"id"`
+	Quadrante string    `json:"quadrante"`
+	Rotulo    string    `json:"rotulo"`
+	Ativo     bool      `json:"ativo"`
 }
 
 type Enrollment struct {
@@ -129,6 +143,36 @@ type ExampleWidget struct {
 	Config    []byte    `json:"config"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Instrument struct {
+	ID        uuid.UUID `json:"id"`
+	Codigo    string    `json:"codigo"`
+	Versao    string    `json:"versao"`
+	Anel      string    `json:"anel"`
+	Licenca   string    `json:"licenca"`
+	Ativo     bool      `json:"ativo"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type InstrumentCutoff struct {
+	ID              uuid.UUID      `json:"id"`
+	InstrumentID    uuid.UUID      `json:"instrument_id"`
+	Dimensao        string         `json:"dimensao"`
+	Faixa           string         `json:"faixa"`
+	Operador        string         `json:"operador"`
+	Valor           pgtype.Numeric `json:"valor"`
+	ValorMax        pgtype.Numeric `json:"valor_max"`
+	OrigemValidacao string         `json:"origem_validacao"`
+}
+
+type InstrumentDimension struct {
+	ID           uuid.UUID      `json:"id"`
+	InstrumentID uuid.UUID      `json:"instrument_id"`
+	Dimensao     string         `json:"dimensao"`
+	Polaridade   string         `json:"polaridade"`
+	MinScore     pgtype.Numeric `json:"min_score"`
+	MaxScore     pgtype.Numeric `json:"max_score"`
 }
 
 type JourneyEvent struct {
