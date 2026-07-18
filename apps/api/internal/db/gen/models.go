@@ -33,6 +33,52 @@ type Appointment struct {
 	UpdatedAt            time.Time          `json:"updated_at"`
 }
 
+type CareAppointment struct {
+	ID             uuid.UUID          `json:"id"`
+	EnrollmentID   uuid.UUID          `json:"enrollment_id"`
+	CareLineItemID uuid.UUID          `json:"care_line_item_id"`
+	ItemRef        string             `json:"item_ref"`
+	BookingID      uuid.UUID          `json:"booking_id"`
+	ScheduledAt    time.Time          `json:"scheduled_at"`
+	Status         string             `json:"status"`
+	CancelledAt    pgtype.Timestamptz `json:"cancelled_at"`
+	IdempotencyKey pgtype.Text        `json:"idempotency_key"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
+}
+
+type CareLine struct {
+	ID          uuid.UUID          `json:"id"`
+	Code        string             `json:"code"`
+	Version     int32              `json:"version"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Status      string             `json:"status"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+}
+
+type CareLineItem struct {
+	ID            uuid.UUID   `json:"id"`
+	CareLineID    uuid.UUID   `json:"care_line_id"`
+	Ref           string      `json:"ref"`
+	Kind          string      `json:"kind"`
+	SpecialtyCode string      `json:"specialty_code"`
+	Label         string      `json:"label"`
+	Recurrence    pgtype.Text `json:"recurrence"`
+	SortOrder     int32       `json:"sort_order"`
+	CreatedAt     time.Time   `json:"created_at"`
+}
+
+type CareLineRule struct {
+	ID             uuid.UUID `json:"id"`
+	CareLineItemID uuid.UUID `json:"care_line_item_id"`
+	RuleType       string    `json:"rule_type"`
+	Params         []byte    `json:"params"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 type DavLinkAudit struct {
 	ID          uuid.UUID   `json:"id"`
 	AccountID   uuid.UUID   `json:"account_id"`
@@ -42,6 +88,28 @@ type DavLinkAudit struct {
 	CreatedAt   time.Time   `json:"created_at"`
 }
 
+type Enrollment struct {
+	ID               uuid.UUID   `json:"id"`
+	PatientID        uuid.UUID   `json:"patient_id"`
+	CareLineID       uuid.UUID   `json:"care_line_id"`
+	CareLineCode     string      `json:"care_line_code"`
+	Status           string      `json:"status"`
+	ValidFrom        time.Time   `json:"valid_from"`
+	ValidUntil       time.Time   `json:"valid_until"`
+	GestaoContractID pgtype.Text `json:"gestao_contract_id"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
+}
+
+type EnrollmentPeriod struct {
+	ID           uuid.UUID `json:"id"`
+	EnrollmentID uuid.UUID `json:"enrollment_id"`
+	StartsAt     time.Time `json:"starts_at"`
+	EndsAt       time.Time `json:"ends_at"`
+	Source       string    `json:"source"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 type ExampleWidget struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
@@ -49,6 +117,18 @@ type ExampleWidget struct {
 	Config    []byte    `json:"config"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type JourneyEvent struct {
+	ID           uuid.UUID   `json:"id"`
+	EnrollmentID uuid.UUID   `json:"enrollment_id"`
+	PatientID    uuid.UUID   `json:"patient_id"`
+	EventType    string      `json:"event_type"`
+	Actor        string      `json:"actor"`
+	RefTable     pgtype.Text `json:"ref_table"`
+	RefID        pgtype.UUID `json:"ref_id"`
+	Payload      []byte      `json:"payload"`
+	OccurredAt   time.Time   `json:"occurred_at"`
 }
 
 type PatientAccount struct {
