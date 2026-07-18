@@ -257,6 +257,10 @@ func (c SchedulingController) Get(w http.ResponseWriter, r *http.Request) {
 
 // Join entrega o link da sala. É a única rota que o faz.
 func (c SchedulingController) Join(w http.ResponseWriter, r *http.Request) {
+	// Não lemos o corpo, mas limitamos por uniformidade com o resto da API: toda
+	// rota tem um teto de corpo, sem exceção que alguém tenha que lembrar.
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+
 	account, ok := AccountFrom(r.Context())
 	if !ok {
 		WriteProblem(w, http.StatusUnauthorized, "Não autenticado", "Sessão ausente ou expirada.")

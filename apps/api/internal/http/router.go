@@ -125,7 +125,9 @@ func mountScheduling(r chi.Router, s controllers.SchedulingController, auth cont
 		// agendamentos concorrentes sem freio. O contrato promete o 429; é aqui que
 		// ele passa a existir de verdade.
 		r.Group(func(r chi.Router) {
-			r.Use(rateLimitByIP(20, 1.0/3.0))
+			// Por CONTA, não por IP: a rota é autenticada (RequireSession já rodou),
+			// e a conta é chave justa sob NAT e imune ao spoofing de IP por header.
+			r.Use(rateLimitByAccount(20, 1.0/3.0))
 			r.Use(middleware.Timeout(bookTimeout))
 			r.Post("/appointments", s.Create)
 		})

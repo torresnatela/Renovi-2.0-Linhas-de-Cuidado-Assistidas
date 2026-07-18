@@ -299,3 +299,37 @@ O fuso entra na mesma conta: as colunas são `DATETIME` ingênuo em
 `America/Sao_Paulo`, e o adapter **força** `parseTime=true&loc=America/Sao_Paulo`
 em vez de confiar no DSN — recusando subir se alguém pedir outro fuso. Com o
 default (UTC), 09:00 viraria 06:00 em silêncio.
+
+---
+
+## ADR-019 — Rate limit do agendamento por CONTA; RealIP por header é risco aberto
+
+**Contexto:** revisão de segurança do PR #11 (CodeRabbit + passe adversarial)
+apontou que o `middleware.RealIP` do chi (usado em `internal/http/router.go`)
+sobrescreve o IP do cliente a partir de cabeçalhos que o próprio cliente controla
+(`True-Client-IP`, `X-Real-IP`, `X-Forwarded-For`), **sem allowlist de proxy
+confiável**. O chi v5.3.1 marca essa função como *deprecated: vulnerable to IP
+spoofing*. O `Caddyfile` da topologia (Caddy → API) não remove esses cabeçalhos
+de entrada. Como o `rateLimitByIP` e o IP da auditoria do vínculo
+(`dav_link_audit`) leem esse valor, um atacante que rotaciona o cabeçalho:
+- fura o rate limit de **brute-force de login** (a senha é o único fator — não há
+  2FA), de **enumeração de CPF** no cadastro e de **flood de agendamento**;
+- **falsifica o IP** que vai para a auditoria LGPD do vínculo.
+
+**Decisão (parcial, aplicada agora):** a rota mais cara e perigosa
+(`POST /appointments`) passa a ser limitada por **CONTA da sessão**
+(`rateLimitByAccount`), não por IP. A conta vem da sessão validada
+(`RequireSession` roda antes), então **não é spoofável** — o flood de agendamento
+fica fechado independentemente do RealIP. É também mais justo sob NAT corporativo.
+
+**Decisão (pendente, precisa de infra):** trocar o `middleware.RealIP` por
+derivação de IP com **proxy confiável explícito** (o hop que o Caddy de fato
+adiciona ao `X-Forwarded-For`, da direita para a esquerda) **e** configurar o
+Caddy para **remover** `True-Client-IP`/`X-Real-IP` de entrada. Enquanto isso não
+for feito, os limites de **login** e **cadastro** (rotas não autenticadas, que
+só têm o IP como chave) continuam contornáveis, e o IP da auditoria continua
+forjável. **Tratar antes do go-live**, junto do ajuste do `deploy/Caddyfile`.
+
+**Consequência:** o agendamento está protegido; auth e a auditoria não, até o
+ajuste do Caddy. Registrado aqui para não se perder — é o maior item aberto de
+segurança do piloto, ao lado do fator de posse do ADR-013.

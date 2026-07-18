@@ -28,6 +28,30 @@ import (
 //   - Por IP: NAT corporativo faz muitos colaboradores compartilharem um IP.
 //     Por isso o burst é generoso — a trava é contra script, não contra gente.
 func rateLimitByIP(burst int, perSecond float64) func(http.Handler) http.Handler {
+	return rateLimitBy(func(r *http.Request) string { return "ip:" + clientIP(r) }, burst, perSecond)
+}
+
+// rateLimitByAccount limita por CONTA da sessão, não por IP.
+//
+// Para uma rota autenticada e cara (o agendamento fala com a DAV por ~30s e faz
+// escrita não idempotente), a conta é a chave certa: é justa sob NAT corporativo
+// (colaboradores não dividem o mesmo balde) e — o que mais importa — NÃO é
+// spoofável, ao contrário do IP derivado de header (ver o risco do RealIP em
+// docs/DECISOES.md). Exige que RequireSession rode ANTES deste middleware, o que
+// o router garante.
+func rateLimitByAccount(burst int, perSecond float64) func(http.Handler) http.Handler {
+	return rateLimitBy(func(r *http.Request) string {
+		if acc, ok := controllers.AccountFrom(r.Context()); ok {
+			return "acct:" + acc.ID.String()
+		}
+		// Sem sessão aqui não deveria acontecer (RequireSession roda antes). Cai no
+		// IP: pior, mas melhor que não limitar nada.
+		return "ip:" + clientIP(r)
+	}, burst, perSecond)
+}
+
+// rateLimitBy é o núcleo: limita por uma chave qualquer extraída da requisição.
+func rateLimitBy(key func(*http.Request) string, burst int, perSecond float64) func(http.Handler) http.Handler {
 	l := &ipLimiter{
 		limiters:   make(map[string]*visitor),
 		burst:      burst,
@@ -38,7 +62,7 @@ func rateLimitByIP(burst int, perSecond float64) func(http.Handler) http.Handler
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !l.allow(clientIP(r)) {
+			if !l.allow(key(r)) {
 				controllers.WriteProblem(w, http.StatusTooManyRequests, "tentativas demais",
 					"aguarde alguns instantes e tente novamente")
 				return
