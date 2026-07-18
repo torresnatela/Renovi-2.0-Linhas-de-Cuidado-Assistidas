@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+
 import { HealthBadge } from '../health/HealthBadge';
 import { useLogout, useSession } from '../auth/useSession';
 
@@ -30,6 +32,19 @@ export function HomePage() {
           Sua conta está criada e vinculada à Doutor ao Vivo. Suas linhas de cuidado aparecem aqui
           assim que forem liberadas.
         </p>
+
+        <div className="mb-6 flex flex-wrap gap-3">
+          <Link
+            to="/agendar"
+            className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white"
+          >
+            Agendar consulta
+          </Link>
+          <Link to="/consultas" className="rounded border px-4 py-2 text-sm">
+            Minhas consultas
+          </Link>
+        </div>
+
         <HealthBadge />
       </section>
     </main>

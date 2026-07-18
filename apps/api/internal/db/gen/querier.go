@@ -8,10 +8,29 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	// Passo 3: a DAV criou e temos o link. O CHECK confirmed_exige_dav garante que
+	// não dá para chegar em CONFIRMED sem os dois.
+	ConfirmAppointment(ctx context.Context, arg ConfirmAppointmentParams) error
+	// Quantas consultas estão em DAV_UNKNOWN. Se esta lista cresce, alguém precisa
+	// olhar: a máquina não consegue resolver sozinha.
+	CountAppointmentsNeedingReview(ctx context.Context) (int64, error)
+	// Consultas do agendamento (tabela appointment, migration 0003).
+	//
+	// Cada UPDATE aqui é um passo da saga, e todos são estreitos de propósito: um
+	// "UpdateAppointment" genérico deixaria o próximo model escrever qualquer
+	// transição, inclusive as que os CHECK do banco existem para impedir.
+	// Passo 1 da saga: registra a INTENÇÃO antes de tocar em qualquer sistema
+	// externo. O índice único parcial decide a corrida entre dois pacientes nossos.
+	CreateAppointmentIntent(ctx context.Context, arg CreateAppointmentIntentParams) (Appointment, error)
 	CreateExampleWidget(ctx context.Context, arg CreateExampleWidgetParams) (ExampleWidget, error)
+	// A consulta comprovadamente NÃO aconteceu (a DAV recusou o payload, ou nem
+	// chegamos a reservar). Só use quando houver certeza: FAILED tira a linha do
+	// índice de reservas vivas e libera o horário para outro paciente.
+	FailAppointment(ctx context.Context, id uuid.UUID) error
 	// Queries de autenticação e vínculo com a DAV (ver migration 0002_auth).
 	// O CPF é a chave de identidade: mora em patient_identity (LGPD, ver CLAUDE.md).
 	FindAccountByCPF(ctx context.Context, cpf string) (PatientAccount, error)
@@ -20,6 +39,17 @@ type Querier interface {
 	// ganho concreto de sessão opaca sobre JWT (ADR-010).
 	FindLiveSession(ctx context.Context, tokenHash []byte) (FindLiveSessionRow, error)
 	GetAccountByID(ctx context.Context, id uuid.UUID) (PatientAccount, error)
+	// O id do paciente na DAV, que vira o participante PAT do appointment.
+	//
+	// Filtra por ACTIVE porque conta PENDING_DAV não tem vínculo (é o que o CHECK
+	// active_exige_vinculo_dav garante). Na prática ela nem chega aqui — a sessão só
+	// valida conta ACTIVE — mas o agendamento não deve depender disso para não criar
+	// consulta na DAV sem paciente.
+	GetAccountDavPersonID(ctx context.Context, id uuid.UUID) (pgtype.Text, error)
+	// Sempre por (id, dono). Nunca só por id: um SELECT por id sozinho é um convite a
+	// alguém esquecer o WHERE do dono na próxima rota e devolver a consulta de
+	// terceiro — e aqui a consulta carrega o link da sala.
+	GetAppointmentForAccount(ctx context.Context, arg GetAppointmentForAccountParams) (Appointment, error)
 	// Queries de EXEMPLO para a tabela example_widget (ver migration 0001).
 	// Demonstram o fluxo sqlc: SQL escrito à mão aqui -> `make generate` -> Go tipado
 	// em internal/db/gen. Ao criar as tabelas reais, substitua estas queries.
@@ -39,7 +69,30 @@ type Querier interface {
 	// dav_person_id numa conta já ACTIVE. Devolve o nº de linhas para quem chama
 	// perceber que não aplicou, em vez de auditar um vínculo que não aconteceu.
 	LinkAccountToDav(ctx context.Context, arg LinkAccountToDavParams) (int64, error)
+	// "Minhas consultas". FAILED não aparece: consulta que comprovadamente não
+	// aconteceu não é informação para o paciente. DAV_UNKNOWN aparece — ele pode ter
+	// uma consulta de verdade marcada.
+	ListAppointmentsByAccount(ctx context.Context, accountID uuid.UUID) ([]Appointment, error)
 	ListExampleWidgets(ctx context.Context) ([]ExampleWidget, error)
+	// A fila de compensação do worker: falhou, o horário é nosso e ainda não voltou.
+	// É uma consulta ao banco, e não um estado em memória, para sobreviver a um
+	// restart no meio.
+	ListPendingSlotRelease(ctx context.Context, limit int32) ([]Appointment, error)
+	// Agendamentos que ficaram no meio do caminho (o processo morreu). O worker
+	// decide o destino de cada um consultando o legado.
+	ListStaleInFlight(ctx context.Context, arg ListStaleInFlightParams) ([]Appointment, error)
+	// Passo 2: o horário é nosso e estamos prestes a fazer a escrita insondável.
+	// Gravar ANTES do POST é o que separa "sabemos que a DAV nunca foi chamada" de
+	// "a DAV pode ter sido chamada". Custa ~1ms e é o que torna o crash recuperável.
+	MarkAppointmentSlotHeld(ctx context.Context, id uuid.UUID) error
+	// O ErrMaybeApplied virando estado. A consulta PODE existir na DAV e nunca
+	// saberemos sozinhos (id é deles, não há rota de busca). O horário fica retido —
+	// o CHECK desconhecido_nao_libera impede que alguém o solte por engano.
+	MarkAppointmentUnknown(ctx context.Context, id uuid.UUID) error
+	// Registra que o horário voltou ao mercado no legado. Separado do FailAppointment
+	// porque são dois sistemas: entre marcar FAILED aqui e soltar o booked lá pode
+	// haver um crash, e é essa diferença que o worker usa como fila de compensação.
+	MarkSlotReleased(ctx context.Context, id uuid.UUID) error
 	// Reaproveita a linha de uma tentativa que morreu antes da DAV confirmar.
 	// O filtro por status é a trava: uma conta ACTIVE nunca pode ser sobrescrita por
 	// quem apenas conhece o CPF.

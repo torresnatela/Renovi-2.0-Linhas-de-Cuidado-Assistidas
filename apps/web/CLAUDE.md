@@ -14,7 +14,7 @@ jornada e elegibilidade) · Vitest + Testing Library. Consumo da API via proxy
 src/
   main.tsx           # bootstrap + QueryClientProvider
   App.tsx            # shell
-  features/<feat>/   # cada tela/feature (auth/, home/, health/; no MVP: journey/, scheduling/)
+  features/<feat>/   # cada tela/feature (auth/, home/, health/, scheduling/; no MVP: journey/)
   shared/            # api client, helpers, componentes compartilhados
   setupTests.ts      # matchers do Testing Library
 ```
@@ -33,6 +33,14 @@ src/
   recarregar no meio.
 - **Regra de ouro de UX (do motor):** nunca mostre botão só desabilitado — mostre o
   motivo traduzido do `reason` (ex.: "Você já usou sua consulta desta semana").
+  A tabela de tradução é `features/scheduling/reasons.ts` — uma só, servindo erro e veredito.
+- **Data/hora SEMPRE via `shared/datetime`**, que exige o `timeZone` como parâmetro.
+  Nunca `toLocaleTimeString()` solto: ele usa o fuso do BROWSER, e os horários vêm
+  do legado como hora de parede de São Paulo — um paciente viajando veria 12:00
+  numa consulta das 09:00, sem erro nenhum aparecer.
+- **Regra que o servidor calcula, o front NÃO recalcula.** A janela de entrada
+  chega como `join.opens_at`, já pronto: "30 minutos" não existe no front (ADR-017).
+  Vale para tudo o que vier do motor de elegibilidade também.
 
 ## Comandos
 

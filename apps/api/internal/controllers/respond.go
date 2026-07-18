@@ -21,17 +21,41 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
+// Reason é o motivo máquina-legível de um erro.
+//
+// Existe porque "cedo demais" e "horário tomado" podem ser o MESMO status HTTP, e
+// o front reage diferente a cada um. Casar pelo `detail` seria casar por frase
+// escrita para humano — que muda no dia em que alguém melhorar o texto. É o mesmo
+// `Reason` do motor de elegibilidade: uma tabela de tradução só no front, servindo
+// erro e veredito.
+type Reason struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+}
+
 // Problem é o corpo de erro no formato RFC 7807 (application/problem+json).
 type Problem struct {
 	Type   string `json:"type,omitempty"`
 	Title  string `json:"title"`
 	Status int    `json:"status"`
 	Detail string `json:"detail,omitempty"`
+	// Membro de extensão, previsto pela própria RFC 7807 (§3.2).
+	Reason *Reason `json:"reason,omitempty"`
 }
 
 // WriteProblem escreve um erro padronizado (RFC 7807).
 func WriteProblem(w http.ResponseWriter, status int, title, detail string) {
+	writeProblem(w, Problem{Title: title, Status: status, Detail: detail})
+}
+
+// WriteProblemReason é o WriteProblem com um motivo máquina-legível. Use quando o
+// cliente precisar DECIDIR algo a partir do erro, e não só exibi-lo.
+func WriteProblemReason(w http.ResponseWriter, status int, title, detail string, reason Reason) {
+	writeProblem(w, Problem{Title: title, Status: status, Detail: detail, Reason: &reason})
+}
+
+func writeProblem(w http.ResponseWriter, p Problem) {
 	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(Problem{Title: title, Status: status, Detail: detail})
+	w.WriteHeader(p.Status)
+	_ = json.NewEncoder(w).Encode(p)
 }

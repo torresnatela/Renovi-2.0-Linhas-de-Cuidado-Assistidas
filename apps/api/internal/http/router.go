@@ -24,9 +24,15 @@ type Deps struct {
 	// Auth monta /auth/* e /me. Nil desliga essas rotas (útil em testes que só
 	// exercitam saúde, e no boot sem banco).
 	Auth *controllers.AuthController
+	// Scheduling monta o agendamento. Nil desliga (ex.: sem DSN do legado no
+	// ambiente local). Depende de Auth: tudo aqui exige sessão.
+	Scheduling *controllers.SchedulingController
 	// RegisterTimeout é o teto da rota de cadastro, que fala com a DAV de forma
 	// síncrona. Deve vir de config.DAVBudget() + folga; zero cai num default.
 	RegisterTimeout time.Duration
+	// BookTimeout é o teto da rota de agendamento, que também fala com a DAV.
+	// Zero cai num default.
+	BookTimeout time.Duration
 }
 
 // NewRouter monta o *chi.Mux com middleware e rotas.
@@ -40,6 +46,12 @@ func NewRouter(d Deps) *chi.Mux {
 
 	if d.RegisterTimeout <= 0 {
 		d.RegisterTimeout = 75 * time.Second
+	}
+	// O agendamento faz UMA tentativa contra a DAV (escrita nunca repete), então o
+	// orçamento é menor que o do cadastro. Mas continua bem acima do teto normal:
+	// só a chamada dela já pode levar 17s, e o gateway dela corta em 29s.
+	if d.BookTimeout <= 0 {
+		d.BookTimeout = 45 * time.Second
 	}
 
 	r := chi.NewRouter()
@@ -69,13 +81,55 @@ func NewRouter(d Deps) *chi.Mux {
 
 		if d.Auth != nil {
 			mountAuth(r, *d.Auth, d.RegisterTimeout)
+
+			// O agendamento inteiro exige sessão, então depende do Auth estar
+			// montado: sem ele não há RequireSession, e sem RequireSession não há
+			// dono para a consulta.
+			if d.Scheduling != nil {
+				mountScheduling(r, *d.Scheduling, *d.Auth, d.BookTimeout)
+			}
 		}
-		// TODO(mvp): montar aqui as demais rotas de negócio (/me/eligibility,
-		// /slots, /appointments...) atrás de controllers.RequireSession.
+		// TODO(mvp): /me/eligibility entra aqui, filtrando ANTES do agendamento.
 		// Ver packages/contracts/openapi.yaml e docs/PROGRESSO.md.
 	})
 
 	return r
+}
+
+// mountScheduling monta o agendamento, todo atrás de sessão.
+func mountScheduling(r chi.Router, s controllers.SchedulingController, auth controllers.AuthController, bookTimeout time.Duration) {
+	r.Group(func(r chi.Router) {
+		r.Use(controllers.RequireSession(auth.Sessions))
+
+		// Catálogo e leitura: rápidos, só o MySQL legado.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(defaultRouteTimeout))
+			r.Get("/specialties", s.ListSpecialties)
+			r.Get("/specialties/{specialty_id}/professionals", s.ListProfessionals)
+			r.Get("/professionals/{professional_id}/slots", s.ListSlots)
+			r.Get("/appointments", s.List)
+			r.Get("/appointments/{appointment_id}", s.Get)
+			r.Post("/appointments/{appointment_id}/join", s.Join)
+		})
+
+		// Agendar tem timeout próprio, pelo mesmo motivo do cadastro: fala com a
+		// DAV de forma síncrona, e ela é lenta e IMPREVISÍVEL (3s a 29s medidos em
+		// sondagens do mesmo dia, contra o teto do gateway dela). Com o teto normal
+		// de 30s, a requisição morreria antes da DAV responder — e aí o paciente
+		// fica sem saber se marcou, que é o pior desfecho possível nesta rota: não
+		// dá para reconciliar depois.
+		//
+		// E tem rate limit, como o /auth/register — é a rota MAIS cara e perigosa
+		// (escrita não idempotente e insondável, segurando até bookTimeout e
+		// queimando orçamento da DAV). Sem isto, uma única sessão dispara N
+		// agendamentos concorrentes sem freio. O contrato promete o 429; é aqui que
+		// ele passa a existir de verdade.
+		r.Group(func(r chi.Router) {
+			r.Use(rateLimitByIP(20, 1.0/3.0))
+			r.Use(middleware.Timeout(bookTimeout))
+			r.Post("/appointments", s.Create)
+		})
+	})
 }
 
 // mountAuth monta as rotas de autenticação.

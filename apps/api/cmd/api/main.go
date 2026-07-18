@@ -11,14 +11,22 @@ import (
 	"syscall"
 	"time"
 
+	// Embute a base de fusos no binário. O adapter da agenda precisa carregar
+	// America/Sao_Paulo para interpretar os DATETIME ingênuos do legado, e uma
+	// imagem scratch/distroless não tem tzdata — sem isto, a API sobe em dev e
+	// morre no boot em produção, no lugar mais caro possível.
+	_ "time/tzdata"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/renovisaude/renovi-care/internal/adapters/agenda"
 	"github.com/renovisaude/renovi-care/internal/adapters/dav"
 	"github.com/renovisaude/renovi-care/internal/config"
 	"github.com/renovisaude/renovi-care/internal/controllers"
 	"github.com/renovisaude/renovi-care/internal/db"
 	apihttp "github.com/renovisaude/renovi-care/internal/http"
 	"github.com/renovisaude/renovi-care/internal/models"
+	"github.com/renovisaude/renovi-care/internal/models/scheduling"
 )
 
 // version é sobrescrita no build via -ldflags "-X main.version=...".
@@ -55,17 +63,30 @@ func run() error {
 		return err
 	}
 
+	scheduling, closeAgenda, err := newSchedulingController(cfg, pool, logger)
+	if err != nil {
+		return err
+	}
+	if closeAgenda != nil {
+		defer closeAgenda()
+	}
+
 	router := apihttp.NewRouter(apihttp.Deps{
 		Logger:  logger,
 		Version: version,
 		Ready: func(ctx context.Context) error {
 			return db.Ping(ctx, pool)
 		},
-		Auth: auth,
+		Auth:       auth,
+		Scheduling: scheduling,
 		// O cadastro precisa de um teto maior que o de uma rota normal: ele
 		// espera a DAV de forma síncrona. Derivar do orçamento evita que os dois
 		// números divirjam e a última tentativa seja sempre cortada.
 		RegisterTimeout: cfg.DAVBudget() + 10*time.Second,
+		// O agendamento faz UMA tentativa (escrita na DAV nunca repete), então o
+		// orçamento dele é um timeout + folga, e não o DAVBudget inteiro. Prometer
+		// 62s ao paciente numa rota que faz uma tentativa só seria mentira.
+		BookTimeout: cfg.DAVTimeout + 10*time.Second,
 	})
 
 	srv := &http.Server{
@@ -152,4 +173,51 @@ func newLogger(cfg config.Config) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stdout, opts))
+}
+
+// newSchedulingController monta a cadeia do agendamento: legado + DAV -> models
+// -> controller. Devolve também o fechador do pool do legado.
+//
+// Sem DSN do legado, devolve nil e o agendamento não sobe — mesma política do
+// cadastro sem credencial da DAV. Só acontece em `local`.
+func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*controllers.SchedulingController, func(), error) {
+	if cfg.LegacyDatabaseURL == "" || cfg.DAVBaseURL == "" || cfg.DAVAPIKey == "" {
+		logger.Warn("rotas de agendamento DESLIGADAS: faltam RENOVI_LEGACY_DATABASE_URL ou credenciais da DAV")
+		return nil, nil, nil
+	}
+
+	agendaClient, err := agenda.New(agenda.Config{
+		DSN:    cfg.LegacyDatabaseURL,
+		Logger: logger,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	davClient, err := dav.New(dav.Config{
+		BaseURL:     cfg.DAVBaseURL,
+		APIKey:      cfg.DAVAPIKey,
+		Timeout:     cfg.DAVTimeout,
+		MaxAttempts: cfg.DAVMaxAttempts,
+		Logger:      logger,
+	})
+	if err != nil {
+		_ = agendaClient.Close()
+		return nil, nil, err
+	}
+
+	// A política da janela é montada AQUI, e não na config, para que o pacote de
+	// config não precise conhecer tipo de model — a dependência correria ao
+	// contrário. O main é justamente o lugar onde as camadas se encontram.
+	policy := scheduling.Policy{OpensBefore: cfg.JoinOpensBefore, ClosesAfter: cfg.JoinClosesAfter}
+
+	store := models.NewBookingStore(pool, agendaClient, davClient, policy, logger)
+	return &controllers.SchedulingController{
+		Bookings: store,
+		// Deriva do timeout da DAV com folga, como o RegisterDeadline do cadastro:
+		// o deadline de escrita precisa ser > que o timeout da rota (DAVTimeout+10s,
+		// ver router), senão o servidor corta a resposta de um agendamento que deu
+		// certo. Manter os dois derivados da mesma fonte evita que divirjam.
+		BookDeadline: cfg.DAVTimeout + 30*time.Second,
+	}, func() { _ = agendaClient.Close() }, nil
 }

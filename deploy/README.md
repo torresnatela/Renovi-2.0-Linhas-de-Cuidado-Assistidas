@@ -12,9 +12,26 @@ Infraestrutura do Renovi 2.0.
 | `pg-gestao` | Postgres `gestao` (mock) | 5433 | Gestão 2.0 — leitura (adapter) |
 | `mysql-legacy` | MySQL `renovi_legacy` (mock) | 3306 | Escala/slots legado (adapter) |
 
-Os mocks (`pg-gestao/init.sql`, `mysql-legacy/init.sql`) têm schemas plausíveis +
-dados de exemplo para desenvolver os adapters antes do levantamento da Sprint 0
-(SPEC §9). **Não representam o schema real** — serão substituídos.
+`mysql-legacy/init.sql` é **cópia fiel do schema real**, extraída de `homl_renovi`
+em 2026-07-16 (só as tabelas do agendamento; o banco real tem 34). Os dados são
+sintéticos e as datas dos slots são **relativas a `CURDATE()`** — slot com data
+fixa apodrece, que é o estado atual da HML de verdade (nenhum horário futuro
+desde 03/2025).
+
+Duas coisas nele merecem atenção:
+
+- **A trava do double-booking é comportamental, não estrutural.** O schema real
+  não tem unique nem FK ligando consulta a slot: `booked` é um flag solto. O que
+  segura é o app legado virar `booked=1` ao agendar (medido: 84 de 85 consultas
+  ativas na HML) — logo o adapter reserva com CAS (`UPDATE ... WHERE booked = 0`)
+  e confere `RowsAffected`.
+- **O usuário `renovi` é rebaixado pelo próprio init.sql** para `SELECT` em tudo +
+  `UPDATE (booked, updatedAt)` só em `tb_slots`. É o ADR-004 virando regra do
+  banco em vez de promessa: um `INSERT` em `tb_appointments` recebe
+  "ERROR 1142 command denied" na hora, no dev, e não em produção.
+
+`pg-gestao/init.sql` ainda é **inventado** — schema plausível para desenvolver o
+adapter antes do levantamento (SPEC §9.3). **Não representa o schema real.**
 
 ```bash
 make up            # sobe os bancos

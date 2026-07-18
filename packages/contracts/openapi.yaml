@@ -5,8 +5,9 @@ info:
     Contrato da API do renovi-care. Esta é a FONTE DA VERDADE: altere aqui
     primeiro, rode `make generate` e só então implemente (fluxo API-first,
     ver docs/DESENVOLVIMENTO.md). Hoje estão contratados /healthz, /readyz,
-    /auth/* e /me; as demais rotas do SPEC entram nas fases seguintes sem
-    breaking change (versionamento /api/v1).
+    /auth/*, /me e o agendamento (/specialties, /professionals, /appointments);
+    as demais rotas do SPEC — a começar por /me/eligibility — entram nas fases
+    seguintes sem breaking change (versionamento /api/v1).
   version: 0.1.0
 servers:
   - url: /api/v1
@@ -150,9 +151,284 @@ paths:
                 $ref: "#/components/schemas/Account"
         "401":
           $ref: "#/components/responses/Unauthorized"
-  # Rotas de negócio (/me/eligibility, /slots, /appointments) entram nas fases
-  # seguintes JUNTO com sua implementação — o contrato só descreve o que já
-  # existe (ver docs/PROGRESSO.md).
+  # ---------------------------------------------------------------------------
+  # Agendamento: especialidade -> profissional -> horário -> consulta -> entrar.
+  #
+  # SEM motor de elegibilidade nesta fase: quem decide "pode agendar?" ainda é só
+  # a agenda do profissional. Quando /me/eligibility entrar, ele filtra ANTES
+  # destas rotas, sem precisar mudá-las.
+  #
+  # Duas notas de nomenclatura:
+  #
+  # 1. "professional", não "doctor". Psicólogo não é médico, e metade do piloto é
+  #    psicologia. É também o vocabulário dos dois sistemas com que falamos:
+  #    tb_professionals no legado e /professional na DAV.
+  # 2. A fundação reservou "/slots" solto. Era placeholder, não decisão (como o
+  #    bearerAuth antes do ADR-010). Horário só existe dentro da agenda de um
+  #    profissional: em /slots?professional_id= o parâmetro seria obrigatório mas
+  #    pareceria opcional. O caminho aninhado diz a verdade.
+  # ---------------------------------------------------------------------------
+  /specialties:
+    get:
+      operationId: listSpecialties
+      summary: Especialidades com atendimento disponível.
+      description: >
+        Primeiro passo. Vem do legado (tb_specialities, active = 1) e traz só o
+        que leva a algum lugar: especialidade sem profissional com horário livre
+        é beco sem saída, e o paciente não tem como saber que o problema não é
+        dele.
+
+        Lista vazia é resposta legítima (200). Legado fora do ar é 503. A
+        diferença não é purismo: dizer "não há especialidades" quando o banco caiu
+        faz o paciente desistir de algo que estava disponível.
+      responses:
+        "200":
+          description: Especialidades disponíveis.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecialtyList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/LegacyUnavailable"
+  /specialties/{specialty_id}/professionals:
+    get:
+      operationId: listProfessionalsBySpecialty
+      summary: Profissionais que atendem a especialidade.
+      description: >
+        Segundo passo. Só profissionais com horário livre futuro, pelo mesmo
+        motivo do beco sem saída de /specialties.
+      parameters:
+        - $ref: "#/components/parameters/SpecialtyId"
+      responses:
+        "200":
+          description: Profissionais da especialidade. Lista vazia é legítima.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfessionalList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/LegacyUnavailable"
+  /professionals/{professional_id}/slots:
+    get:
+      operationId: listProfessionalSlots
+      summary: Horários livres do profissional.
+      description: >
+        Terceiro passo. Devolve só horários LIVRES e FUTUROS (tb_slots.booked = 0
+        e início no futuro). Horário ocupado não é escondido por segurança, é
+        escondido porque não serve para nada; e horário no passado a própria DAV
+        recusa (422 — ver achado #18 em docs/DAV-API-NOTAS.md).
+
+        `from`/`to` são DATAS e OPCIONAIS de propósito. Se fossem obrigatórias,
+        todo cliente teria que calcular "hoje" — e "hoje" só existe dentro de um
+        fuso. Quem sabe o fuso da agenda é o servidor, então é ele que resolve o
+        default (hoje .. hoje+30d). A resposta ECOA o intervalo que ele de fato
+        usou, e é com esses valores que o front pagina, em vez de recalcular
+        datas por conta própria.
+      parameters:
+        - $ref: "#/components/parameters/ProfessionalId"
+        - name: from
+          in: query
+          required: false
+          description: "Primeiro dia do intervalo, no fuso da agenda. Default: hoje."
+          schema:
+            type: string
+            format: date
+          example: "2026-07-20"
+        - name: to
+          in: query
+          required: false
+          description: >
+            Último dia, inclusive. Default: `from` + 30 dias. O intervalo é
+            limitado a 60 dias; acima disso é 400, para que um cliente distraído
+            não peça a agenda do ano inteiro ao MySQL de terceiro.
+          schema:
+            type: string
+            format: date
+          example: "2026-08-20"
+      responses:
+        "200":
+          description: Horários livres no intervalo. Lista vazia é legítima.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/LegacyUnavailable"
+  /appointments:
+    get:
+      operationId: listMyAppointments
+      summary: Minhas consultas.
+      description: >
+        Só as do portador da sessão. NÃO existe filtro por paciente, e é
+        deliberado: seria uma pergunta que esta API nunca deve aceitar.
+
+        Ordenadas por `starts_at` decrescente. Sem paginação hoje (um paciente do
+        piloto tem um punhado de consultas); o envelope `items` existe para que
+        acrescentar `next_cursor` depois não quebre ninguém — virar um array de
+        topo em objeto, sim, quebraria.
+      responses:
+        "200":
+          description: As consultas do paciente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppointmentList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createAppointment
+      summary: Agenda a consulta (reserva no legado + cria na DAV).
+      description: >
+        Reserva o horário no legado (tb_slots.booked = 1), cria a consulta na DAV
+        e espelha aqui com o link de acesso do paciente.
+
+        É LENTO e IMPREVISÍVEL: o POST da DAV variou de ~3s a ~17s entre
+        sondagens do MESMO dia, contra o teto rígido de 29s do AWS API Gateway na
+        frente deles. Não é "alguns segundos" com uma cauda rara — a média dobra
+        ou triplica de uma hora para outra. Toda tela que dispare isto PRECISA
+        avisar — spinner mudo faz o usuário recarregar no meio.
+
+        O corpo leva `slot_id` + `specialty_id`. O profissional NÃO vem: o slot já
+        o determina (slot -> shift -> profissional). A especialidade vem porque o
+        slot NÃO a determina — o vínculo profissional-especialidade é
+        muitos-para-muitos no legado e há quem atenda três.
+
+        ATENÇÃO ao 502/504, que aqui é diferente do cadastro: o
+        `POST /appointment` da DAV **não aceita id nosso** (400 "property id
+        should not exist" — achado #12) e a DAV **não tem rota de busca de
+        consulta**. Então, quando ela não responde, o resultado é DESCONHECIDO e
+        permanece desconhecido: não dá para sondar depois. O horário fica retido
+        e a consulta entra em revisão humana (status UNCONFIRMED). Repetir NÃO é
+        seguro — criaria uma segunda consulta de verdade. É o oposto do
+        /auth/register, que é idempotente pelo CPF.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAppointmentRequest"
+      responses:
+        "201":
+          description: Consulta agendada e confirmada na DAV.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            A conta ainda não está vinculada à Doutor ao Vivo, então não há
+            paciente para pôr na consulta. Não deveria acontecer (só conta ACTIVE
+            autentica, e ACTIVE exige o vínculo), mas o servidor confere antes de
+            criar consulta órfã lá.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            O horário não é mais agendável. `reason.code` diz qual caso:
+            SLOT_TAKEN (alguém reservou antes — inclusive o app legado) ou
+            SLOT_EXPIRED (já passou). Os dois pedem reações diferentes do front,
+            por isso o código vem separado do texto.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        # Só 502. O 504 do gateway da DAV é traduzido pelo model em
+        # BOOKING_UNCONFIRMED e sai como 502 — o cliente nunca recebe 504 daqui,
+        # então declará-lo seria prometer uma resposta que não existe.
+        "502":
+          $ref: "#/components/responses/BookingUnconfirmed"
+  /appointments/{appointment_id}:
+    get:
+      operationId: getAppointment
+      summary: Uma consulta minha.
+      description: >
+        Consulta de outra pessoa responde 404, nunca 403: um 403 confirmaria que
+        o id existe e a rota viraria um oráculo de ids válidos. Mesma regra do 409
+        genérico do cadastro.
+
+        NÃO devolve o link da sala em hipótese alguma — ver `join` e
+        POST /appointments/{appointment_id}/join.
+      parameters:
+        - $ref: "#/components/parameters/AppointmentId"
+      responses:
+        "200":
+          description: A consulta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /appointments/{appointment_id}/join:
+    post:
+      operationId: joinAppointment
+      summary: Devolve o link de acesso à sala — só com a janela aberta.
+      description: >
+        O link NÃO viaja no payload da consulta. Sai daqui, e só com a janela
+        aberta, decidida com o relógio DO SERVIDOR. Se viesse em
+        GET /appointments, a janela viraria regra do front: bastaria abrir o
+        DevTools — ou ter o relógio errado — para entrar a qualquer hora, e o
+        cache do cliente guardaria N links de teleconsulta que ninguém pediu. O
+        link é uma CAPACIDADE, não um dado.
+
+        É POST e não GET porque não é leitura pura (o acesso é registrado, e é o
+        que vai alimentar a auto-conclusão da jornada) e porque POST não entra em
+        cache de proxy, histórico do browser nem prefetch de link — três lugares
+        onde o link de uma teleconsulta não deveria parar.
+
+        O front NÃO usa esta rota para decidir se mostra o botão: para isso existe
+        `Appointment.join`, que já traz o estado e a hora de abertura. Aqui o 409 é
+        a rede de proteção da corrida (relógio adiantado, cache velho).
+      parameters:
+        - $ref: "#/components/parameters/AppointmentId"
+      responses:
+        "200":
+          description: Janela aberta — o link de acesso do paciente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinTicket"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            A janela não está aberta. `reason.code`: JOIN_TOO_EARLY (cedo demais —
+            `Appointment.join.opens_at` diz quando), JOIN_TOO_LATE (já terminou),
+            JOIN_CANCELLED, ou JOIN_UNAVAILABLE (a consulta não está confirmada,
+            ou a DAV não nos deu link — é falha nossa, e o paciente precisa saber
+            disso e não de um "erro inesperado").
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  # /me/eligibility entra na fase seguinte JUNTO com sua implementação — o
+  # contrato só descreve o que já existe (ver docs/PROGRESSO.md).
 components:
   securitySchemes:
     # Sessão opaca em cookie httpOnly, não JWT (ver ADR-010 em docs/DECISOES.md).
@@ -169,6 +445,40 @@ components:
       schema:
         type: string
         example: renovi_session=<opaco>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=43200
+  parameters:
+    SpecialtyId:
+      name: specialty_id
+      in: path
+      required: true
+      description: >
+        Id da especialidade no legado, OPACO. É `string` e o cliente não deve
+        supor formato: hoje é UUID, mas é chave de um banco que não é nosso.
+      schema:
+        type: string
+      example: 11111111-1111-4111-8111-111111111111
+    ProfessionalId:
+      name: professional_id
+      in: path
+      required: true
+      description: >
+        Id do profissional no legado, opaco (mesma razão de specialty_id).
+
+        Detalhe que não aparece aqui mas explica o desenho: este id é TAMBÉM o id
+        do profissional na DAV (recurso /professional). Por isso não existe
+        tabela de mapeamento em lugar nenhum — ver docs/DAV-API-NOTAS.md.
+      schema:
+        type: string
+      example: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    AppointmentId:
+      name: appointment_id
+      in: path
+      required: true
+      description: >
+        Id da consulta no renovi_care (UUID v7). NUNCA o id do slot no legado nem
+        o da consulta na DAV — id de terceiro não vaza para o cliente.
+      schema:
+        type: string
+        format: uuid
   responses:
     BadRequest:
       description: Requisição inválida (campo faltando, CPF inválido, senha fraca).
@@ -193,6 +503,46 @@ components:
         A DAV não respondeu a tempo (504) ou respondeu com erro (502). O cadastro
         NÃO foi concluído e a conta não autentica; tentar de novo é seguro — a
         operação é idempotente pelo CPF.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: >
+        Não existe — ou não é seu. Os dois respondem igual, de propósito:
+        distinguir "não existe" de "não é seu" transformaria a rota num oráculo de
+        ids válidos. Mesma razão do 409 genérico do cadastro.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    LegacyUnavailable:
+      description: >
+        A agenda do legado (MySQL) não respondeu. É 503 e não lista vazia: "não há
+        horários" e "não conseguimos ler os horários" são coisas diferentes, e
+        confundir as duas faz o paciente desistir de um profissional que estava
+        livre.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    BookingUnconfirmed:
+      description: >
+        A DAV não confirmou a consulta (502 = erro dela, 504 = estourou o tempo).
+        O horário JÁ foi reservado no legado e o resultado na DAV é DESCONHECIDO —
+        nunca "falhou" (ADR-011b).
+
+        A diferença cruel para o /auth/register: lá, tentar de novo é seguro
+        porque o cadastro é idempotente pelo CPF e dá para sondar
+        `GET /person/{nosso-id}`. Aqui NÃO: a DAV recusa id nosso no appointment
+        (achado #12) e não tem rota de busca, então a consulta pode existir sem
+        que exista qualquer forma de encontrá-la. Repetir criaria uma SEGUNDA
+        consulta de verdade.
+
+        Por isso: o horário fica retido (soltá-lo entregaria dois pacientes ao
+        mesmo profissional), a consulta aparece em GET /appointments com status
+        UNCONFIRMED, e quem resolve é gente. O cliente deve mandar o paciente para
+        /appointments — não oferecer "tentar de novo".
       content:
         application/problem+json:
           schema:
@@ -340,6 +690,299 @@ components:
             QUOTA_EXHAUSTED_WEEKLY, MISSING_PREREQ:aval-psiquiatrica.
         detail:
           type: string
+    # ---- Agendamento ----
+    Specialty:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          example: 11111111-1111-4111-8111-111111111111
+        name:
+          type: string
+          example: Psicologia
+    SpecialtyList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Specialty"
+    Professional:
+      description: >
+        O profissional como o paciente o vê na hora de escolher. Sem contato, sem
+        CPF, sem agenda interna: o que não está aqui não vaza.
+      type: object
+      required: [id, full_name, license]
+      properties:
+        id:
+          type: string
+          example: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        full_name:
+          type: string
+          description: firstName + lastName do legado, já juntos.
+          example: Ana Beatriz Moura
+        image_url:
+          type: string
+          format: uri
+          nullable: true
+          description: >
+            Foto. Nula é comum — a tela cai nas iniciais, não num ícone quebrado.
+        license:
+          $ref: "#/components/schemas/ProfessionalLicense"
+    ProfessionalLicense:
+      description: >
+        Registro no conselho. É o que identifica publicamente o profissional e é
+        com isso que o paciente escolhe — por isso é obrigatório, não enfeite.
+
+        Vai em partes, e não como "CRP/SP 06/123456" pronto, porque as partes têm
+        significado próprio: a região é uma UF e o RQE só existe para especialista
+        (e por isso é exibido condicionalmente). Uma string pronta obrigaria o
+        cliente a fazer parsing para qualquer coisa além de ecoar.
+      type: object
+      required: [council, number, region]
+      properties:
+        council:
+          type: string
+          description: "Conselho (licenseCouncil). Ex.: CRM (médico), CRP (psicólogo)."
+          example: CRP
+        number:
+          type: string
+          example: 06/123456
+        region:
+          type: string
+          description: UF do registro.
+          example: SP
+        rqe:
+          type: string
+          nullable: true
+          description: Registro de Qualificação de Especialista. Nulo quando não há.
+          example: "54321"
+    ProfessionalList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Professional"
+    Slot:
+      description: >
+        Um horário livre. Autossuficiente de propósito: qualquer Slot, sozinho,
+        tem tudo para ser renderizado certo, sem depender do contexto de onde veio.
+      type: object
+      required: [id, starts_at, ends_at, time_zone]
+      properties:
+        id:
+          type: string
+          description: Id do slot no legado (tb_slots), opaco.
+          example: 50100000-0000-4000-8000-000000000001
+        starts_at:
+          type: string
+          format: date-time
+          description: >
+            Instante do início, RFC 3339 COM offset. A origem no legado é DATETIME
+            SEM fuso, que significa hora de parede de America/Sao_Paulo; quem
+            resolve para instante é a API.
+
+            Nunca mandamos "2026-07-20T09:00:00" sem offset: `new Date()` no
+            browser leria isso no fuso do USUÁRIO, e um paciente viajando (ou um
+            runner de CI em UTC) veria a hora errada — sem erro, sem aviso, só
+            errado.
+          example: "2026-07-20T09:00:00-03:00"
+        ends_at:
+          type: string
+          format: date-time
+          example: "2026-07-20T09:25:00-03:00"
+        time_zone:
+          type: string
+          description: >
+            Fuso IANA em que este horário DEVE ser exibido — o da agenda.
+
+            Não é redundante com o offset de `starts_at`: o offset é propriedade
+            de um INSTANTE, o fuso é a REGRA. A consulta é às 09:00 em São Paulo,
+            e é 09:00 que o paciente precisa ler mesmo que o relógio dele esteja
+            em Lisboa. Sem este campo o front só poderia formatar no fuso do
+            browser — que é exatamente o erro.
+          example: America/Sao_Paulo
+    SlotPage:
+      description: >
+        A tela é "os horários da Ana": o profissional vem junto porque separá-lo
+        em outra rota só acrescentaria um segundo estado de carregando e um
+        segundo modo de falhar, para um dado que o servidor já tem em mãos.
+      type: object
+      required: [professional, from, to, items]
+      properties:
+        professional:
+          $ref: "#/components/schemas/Professional"
+        from:
+          type: string
+          format: date
+          description: Primeiro dia do intervalo que o servidor de fato usou.
+          example: "2026-07-20"
+        to:
+          type: string
+          format: date
+          description: Último dia (inclusive) que o servidor de fato usou.
+          example: "2026-08-20"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Slot"
+    CreateAppointmentRequest:
+      type: object
+      required: [slot_id, specialty_id]
+      properties:
+        slot_id:
+          type: string
+          description: >
+            O horário escolhido. Ele já determina o PROFISSIONAL
+            (slot -> shift -> profissional), então o profissional não vem no
+            corpo: mandar de novo o que o servidor já sabe criaria uma segunda
+            verdade para conferir.
+          example: 50100000-0000-4000-8000-000000000001
+        specialty_id:
+          type: string
+          description: >
+            A especialidade escolhida no primeiro passo.
+
+            Precisa vir, e não é redundante: o vínculo profissional-especialidade
+            é MUITOS-PARA-MUITOS no legado (tb_professionals_specialities), e há
+            profissional com 2 e até 3 especialidades — o slot não diz para qual
+            delas a consulta é. Sem este campo teríamos que adivinhar, e a
+            especialidade errada iria parar no `appointment_specialty` da DAV e na
+            tela do paciente.
+
+            Tem que ser uma especialidade que o profissional do slot realmente
+            atende; senão, 400.
+          example: 11111111-1111-4111-8111-111111111111
+    Appointment:
+      description: >
+        A consulta como o paciente a vê. Enxuta pelo mesmo motivo de `Account`:
+        não carrega o id da DAV, nem o id do slot no legado, nem — jamais — o link
+        da sala.
+      type: object
+      required: [id, status, starts_at, ends_at, time_zone, specialty, professional, join]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id no renovi_care (UUID v7).
+        status:
+          type: string
+          enum: [PROCESSING, CONFIRMED, UNCONFIRMED, CANCELLED]
+          description: >
+            O estado que interessa ao PACIENTE, não o estado interno da saga.
+
+            - PROCESSING: reservamos o horário e estamos criando a consulta na DAV.
+            - CONFIRMED: existe na DAV e temos o link. É o caso normal.
+            - UNCONFIRMED: a DAV não respondeu e NÃO temos como descobrir se
+              criou (ela recusa id nosso e não tem rota de busca — achado #12).
+              O horário fica retido e alguém do time verifica. A tela precisa
+              dizer isso com todas as letras: esconder seria pior, porque o
+              paciente pode ter uma consulta de verdade marcada.
+            - CANCELLED.
+
+            Consulta que comprovadamente não aconteceu não aparece nesta lista.
+        starts_at:
+          type: string
+          format: date-time
+          example: "2026-07-20T09:00:00-03:00"
+        ends_at:
+          type: string
+          format: date-time
+          example: "2026-07-20T09:25:00-03:00"
+        time_zone:
+          type: string
+          description: Fuso IANA para exibição (mesma regra de Slot.time_zone).
+          example: America/Sao_Paulo
+        specialty:
+          $ref: "#/components/schemas/Specialty"
+        professional:
+          $ref: "#/components/schemas/AppointmentProfessional"
+        join:
+          $ref: "#/components/schemas/JoinWindow"
+        created_at:
+          type: string
+          format: date-time
+    AppointmentProfessional:
+      description: >
+        O profissional COMO ELE ERA quando a consulta foi marcada — e por isso é
+        mais enxuto que o `Professional` da escolha.
+
+        O motivo é honestidade: a consulta guarda uma FOTOGRAFIA do legado (nome e
+        especialidade), porque as FKs de lá são ON DELETE CASCADE e o schema é de
+        terceiro — se o profissional for renomeado ou removido, a consulta antiga
+        ainda precisa saber se descrever. Mas não fotografamos o registro no
+        conselho, então prometer o `Professional` inteiro aqui devolveria
+        `council: ""` e a tela mostraria "CRP/ ". Um campo obrigatório vazio é pior
+        que um campo ausente.
+
+        O registro no conselho é o que ajuda a ESCOLHER, e aparece lá (em
+        /specialties/{id}/professionals). Depois de marcada, o que importa é quem e
+        quando.
+      type: object
+      required: [id, full_name]
+      properties:
+        id:
+          type: string
+          example: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        full_name:
+          type: string
+          description: O nome como estava no legado no momento do agendamento.
+          example: Ana Beatriz Moura
+    AppointmentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Appointment"
+    JoinWindow:
+      description: >
+        O ESTADO da janela de acesso — nunca o link. Vem junto da consulta porque
+        é o que a tela precisa para obedecer à regra de ouro de UX do
+        apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o motivo.
+
+        Repare que "30 minutos" não existe em lugar nenhum deste contrato: o que
+        viaja é `opens_at`, JÁ CALCULADO pelo servidor. O front espera uma hora
+        que recebeu em vez de aplicar uma regra que decorou — então mudar a
+        antecedência é uma linha no servidor, sem deploy do front, e relógio
+        errado no cliente não abre a sala mais cedo.
+      type: object
+      required: [status, opens_at, closes_at]
+      properties:
+        status:
+          type: string
+          enum: [OPEN, TOO_EARLY, TOO_LATE, UNAVAILABLE]
+          description: >
+            Decidido com o relógio do SERVIDOR. UNAVAILABLE = a consulta não está
+            confirmada ou não temos link para ela — é diferente de "ainda não" e
+            merece outra frase.
+        opens_at:
+          type: string
+          format: date-time
+          description: A partir de quando o POST .../join devolve o link.
+          example: "2026-07-20T08:30:00-03:00"
+        closes_at:
+          type: string
+          format: date-time
+          example: "2026-07-20T09:25:00-03:00"
+        reason:
+          $ref: "#/components/schemas/Reason"
+    JoinTicket:
+      description: >
+        O link de acesso do paciente à sala da DAV. É uma CAPACIDADE, não um dado:
+        não guarde em cache, não coloque em log, não mande por e-mail.
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          example: https://renovisaude.atendimento.hom.dav.med.br/a/piaxwqee5f
     Problem:
       description: Erro no formato RFC 7807 (problem+json).
       type: object
@@ -355,5 +998,15 @@ components:
           type: string
         instance:
           type: string
+        # Membro de extensão, previsto pela própria RFC 7807 (§3.2). Existe para
+        # que um erro seja tratado por CÓDIGO e não por texto: "cedo demais" e
+        # "consulta cancelada" são ambos 409, e o front reage diferente a cada um.
+        # Casar pelo `detail` seria casar por frase escrita para humano — que muda
+        # no dia em que alguém melhorar o texto.
+        #
+        # Reusa o `Reason` do motor de elegibilidade DE PROPÓSITO: uma tabela de
+        # tradução só, no front, servindo erro e veredito.
+        reason:
+          $ref: "#/components/schemas/Reason"
 security:
   - cookieAuth: []
