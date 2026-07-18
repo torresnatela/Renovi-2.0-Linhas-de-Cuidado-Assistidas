@@ -5,9 +5,11 @@ info:
     Contrato da API do renovi-care. Esta é a FONTE DA VERDADE: altere aqui
     primeiro, rode `make generate` e só então implemente (fluxo API-first,
     ver docs/DESENVOLVIMENTO.md). Hoje estão contratados /healthz, /readyz,
-    /auth/*, /me e o agendamento (/specialties, /professionals, /appointments);
-    as demais rotas do SPEC — a começar por /me/eligibility — entram nas fases
-    seguintes sem breaking change (versionamento /api/v1).
+    /auth/*, /me, o agendamento (/specialties, /professionals, /appointments) e
+    as linhas de cuidado do Slice 1: administração (/admin/care-lines,
+    /admin/enrollments) e a jornada do paciente (/me/journey, /me/eligibility,
+    /me/availability, /me/appointments, /me/audit). O que faltar do SPEC entra
+    nas fases seguintes sem breaking change (versionamento /api/v1).
   version: 0.1.0
 servers:
   - url: /api/v1
@@ -440,8 +442,595 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-  # /me/eligibility entra na fase seguinte JUNTO com sua implementação — o
-  # contrato só descreve o que já existe (ver docs/PROGRESSO.md).
+  # ===========================================================================
+  # Linhas de cuidado — Slice 1 (SPEC §3). Duas audiências bem separadas:
+  #
+  #  - /admin/*  : a OPERAÇÃO monta o template (linha -> itens -> regras), publica
+  #                e matricula pacientes. Autentica por TOKEN estático (adminToken),
+  #                NUNCA pelo cookie de sessão do paciente.
+  #  - /me/*     : o PACIENTE lê a própria jornada, consulta elegibilidade, vê a
+  #                disponibilidade e agenda o que o motor liberar. Mesmo escopo-do-
+  #                próprio-usuário das rotas de agendamento (herda cookieAuth global).
+  #
+  # O motor de elegibilidade decide "pode agendar?" ANTES do booking: /me/availability
+  # já traz o veredito por horário e POST /me/appointments recusa (422) o que ele
+  # barrar. O booking em si reaproveita o fluxo /appointments — por isso
+  # CareAppointment carrega o `booking_id`.
+  # ===========================================================================
+  /admin/care-lines:
+    post:
+      operationId: createCareLine
+      summary: Cria uma linha de cuidado (draft).
+      description: >
+        Nasce sempre `draft`: um rascunho editável, sem efeito sobre matrículas. O
+        admin acrescenta itens e regras e só então publica. O `code` é a chave
+        estável da linha entre versões; duas linhas draft com o mesmo code são 409.
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCareLineRequest"
+      responses:
+        "201":
+          description: Linha criada em draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareLine"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Já existe uma linha draft com este `code`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listCareLines
+      summary: Lista as linhas de cuidado.
+      description: >
+        Todas as versões, draft e published. `code` filtra por uma linha (todas as
+        suas versões); ausente, traz o catálogo inteiro.
+      security:
+        - adminToken: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          description: Filtra por uma linha específica (todas as versões desse code).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: As linhas de cuidado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareLineList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /admin/care-lines/{care_line_id}/items:
+    post:
+      operationId: createCareLineItem
+      summary: Acrescenta um item à linha (só em draft).
+      description: >
+        Um item é um passo — no Slice 1, uma consulta de uma especialidade. Só se
+        acrescenta item a uma linha `draft`: uma linha `published` é imutável (409).
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/CareLineId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCareLineItemRequest"
+      responses:
+        "201":
+          description: Item acrescentado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareLineItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A linha já está publicada e é imutável.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /admin/care-lines/{care_line_id}/items/{item_ref}/rules:
+    post:
+      operationId: createCareLineItemRule
+      summary: Prende uma regra de elegibilidade a um item (só em draft).
+      description: >
+        A regra (QUOTA, MIN_INTERVAL, MAX_ADVANCE ou PREREQUISITE) é o que o motor
+        avalia para liberar o item. Só em linha `draft` (409 se published). O item é
+        referenciado pelo `ref`, não por UUID.
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/CareLineId"
+        - $ref: "#/components/parameters/ItemRef"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCareLineRuleRequest"
+      responses:
+        "201":
+          description: Regra prendida ao item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareLineRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A linha já está publicada e é imutável.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /admin/care-lines/{care_line_id}/publish:
+    post:
+      operationId: publishCareLine
+      summary: Publica a linha (draft -> published).
+      description: >
+        Congela o template e passa a valê-lo para novas matrículas; a versão sobe.
+        Antes de publicar, o servidor VALIDA o template inteiro (itens com
+        especialidade, pré-requisitos apontando para itens que existem, etc.). Se
+        algo estiver inconsistente, 400 com `errors[]` — a lista toda, para o admin
+        corrigir de uma vez.
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/CareLineId"
+      responses:
+        "200":
+          description: Linha publicada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareLine"
+        "400":
+          $ref: "#/components/responses/PublishInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A linha já está publicada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /admin/enrollments:
+    post:
+      operationId: createEnrollment
+      summary: Matricula um paciente numa linha.
+      description: >
+        Liga o paciente à ÚLTIMA versão publicada da linha (`care_line_code`), com
+        vigência de `months` meses. A versão é congelada na matrícula. Um paciente
+        não pode ter duas matrículas VIVAS na mesma linha (409).
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEnrollmentRequest"
+      responses:
+        "201":
+          description: Matrícula criada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrollment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Paciente inexistente ou linha sem versão publicada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: O paciente já tem uma matrícula viva nesta linha.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /admin/enrollments/{enrollment_id}/renew:
+    post:
+      operationId: renewEnrollment
+      summary: Renova a matrícula (acrescenta um período de vigência).
+      description: >
+        Acrescenta `months` meses à vigência como um NOVO período — não edita o
+        atual, para a jornada guardar por quais janelas o paciente passou. Não se
+        renova matrícula já `concluida` ou `encerrada` (409): são desfechos finais.
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenewEnrollmentRequest"
+      responses:
+        "200":
+          description: Matrícula renovada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrollment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Matrícula em desfecho final (concluida/encerrada) não renova.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /admin/enrollments/{enrollment_id}/end:
+    post:
+      operationId: endEnrollment
+      summary: Encerra a matrícula (desfecho deliberado).
+      description: >
+        Marca a matrícula como `concluida` (paciente terminou a linha) ou
+        `encerrada` (interrompida). O `reason` fica no event log. Uma matrícula já
+        em desfecho final não é encerrada de novo (409).
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EndEnrollmentRequest"
+      responses:
+        "200":
+          description: Matrícula encerrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrollment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Matrícula já em desfecho final.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  # ---- Paciente (cookieAuth global, escopo do próprio usuário) ----
+  /me/journey:
+    get:
+      operationId: getMyJourney
+      summary: A jornada do paciente (todas as matrículas, item a item).
+      description: >
+        A tela-mãe do paciente: cada matrícula com seus itens JÁ avaliados pelo
+        motor (o que pode agendar agora e por quê) e os eventos recentes. É a soma
+        de matrícula + template + elegibilidade num payload só, para a tela não
+        cruzar três chamadas.
+      responses:
+        "200":
+          description: A jornada do portador da sessão.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Journey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/eligibility:
+    get:
+      operationId: getMyEligibility
+      summary: O veredito do motor para um item, agora (ou numa data).
+      description: >
+        Responde "posso agendar ESTE item?" — sem tocar na agenda do legado. O
+        `item_id` tem que ser de um item de uma linha em que o paciente está
+        matriculado; senão 404 (nunca 403, para a rota não virar oráculo de ids). A
+        `date` é opcional: ausente, avalia AGORA; presente, simula o veredito
+        naquele instante (útil para "quando isto libera?").
+      parameters:
+        - name: item_id
+          in: query
+          required: true
+          description: Id do item da linha (UUID).
+          schema:
+            type: string
+            format: uuid
+        - name: date
+          in: query
+          required: false
+          description: "Instante da avaliação (RFC 3339). Default: agora."
+          schema:
+            type: string
+            format: date-time
+          example: "2026-08-01T12:00:00-03:00"
+      responses:
+        "200":
+          description: O veredito do motor para o item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Eligibility"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /me/availability:
+    get:
+      operationId: getMyAvailability
+      summary: Horários agendáveis para um item da linha.
+      description: >
+        Agrega os horários livres dos VÁRIOS profissionais da especialidade do item
+        e anexa, por horário, o profissional e o veredito do motor. É o passo que
+        casa a agenda do legado com a elegibilidade — o que /professionals/{id}/slots
+        faz para um profissional só, esta faz para o item inteiro. `from`/`to` são
+        datas opcionais (default a cargo do servidor, mesma razão do SlotPage).
+      parameters:
+        - name: item_id
+          in: query
+          required: true
+          description: Id do item da linha (UUID).
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          description: "Primeiro dia do intervalo, no fuso da agenda. Default: hoje."
+          schema:
+            type: string
+            format: date
+          example: "2026-07-20"
+        - name: to
+          in: query
+          required: false
+          description: "Último dia, inclusive. Default a cargo do servidor."
+          schema:
+            type: string
+            format: date
+          example: "2026-08-20"
+      responses:
+        "200":
+          description: Horários agendáveis no intervalo. Lista vazia é legítima.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailabilityPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/LegacyUnavailable"
+  /me/appointments:
+    get:
+      operationId: listMyCareAppointments
+      summary: As consultas de linha de cuidado do paciente.
+      description: >
+        As consultas do portador da sessão, na visão da jornada (amarradas ao item
+        da linha). Distinta de GET /appointments, que é o booking cru. `status`
+        filtra pelos estados da consulta na jornada.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filtra por status da consulta.
+          schema:
+            type: string
+            enum: [agendada, confirmada, em_andamento, realizada, falta, cancelada]
+      responses:
+        "200":
+          description: As consultas de linha do paciente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareAppointmentList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createMyCareAppointment
+      summary: Agenda a consulta de um item da linha.
+      description: >
+        Passa pelo motor ANTES de reservar: se a elegibilidade barrar, 422 com
+        `blocks[]` (o horário existe e está livre — o que não pode é este paciente
+        agendar este item agora). Liberado, reserva o horário no legado e cria a
+        consulta no booking (reaproveita o fluxo /appointments), devolvendo o
+        `booking_id`.
+
+        É IDEMPOTENTE pelo header `Idempotency-Key`: a MESMA key devolve a MESMA
+        resposta sem criar uma segunda consulta — a rede de proteção contra o
+        duplo-clique e o retry num POST que é lento (o booking fala com a DAV, que é
+        imprevisível). Primeira chamada: 201. Replay da mesma key: 200 com a
+        consulta já criada. Herda o 502 do booking (BOOKING_UNCONFIRMED): quando a
+        DAV não confirma, o resultado é DESCONHECIDO e repetir NÃO é seguro.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: >
+            Chave de idempotência gerada pelo cliente (UUID recomendado). A MESMA
+            key devolve a MESMA resposta sem duplicar a consulta; keys diferentes
+            são pedidos diferentes. Obrigatória: sem ela, 400.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCareAppointmentRequest"
+      responses:
+        "201":
+          description: Consulta agendada e confirmada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareAppointment"
+        "200":
+          description: >
+            Replay de uma `Idempotency-Key` já usada — a MESMA consulta da primeira
+            chamada, sem criar outra.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareAppointment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            O horário não é mais agendável. `reason.code`: SLOT_TAKEN (alguém
+            reservou antes) ou SLOT_EXPIRED (já passou) — os mesmos códigos de
+            POST /appointments.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/EligibilityBlocked"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BookingUnconfirmed"
+  /me/appointments/{care_appointment_id}/cancel:
+    post:
+      operationId: cancelMyCareAppointment
+      summary: Cancela uma consulta de linha do paciente.
+      description: >
+        Cancela a consulta e devolve a cota ao item (o motor volta a liberá-lo). Só
+        de estados canceláveis: consulta já realizada, faltada ou cancelada não
+        cancela de novo (409). Consulta de outra pessoa é 404, nunca 403.
+      parameters:
+        - $ref: "#/components/parameters/CareAppointmentId"
+      responses:
+        "200":
+          description: Consulta cancelada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareAppointment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A consulta não está num estado cancelável.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /me/audit:
+    get:
+      operationId: getMyAudit
+      summary: O event log da jornada do paciente (auditoria).
+      description: >
+        O histórico append-only dos fatos da jornada do portador da sessão,
+        paginado por cursor OPACO. `cursor` ausente começa do início; a resposta
+        traz `next_cursor` até o fim. `limit` entre 1 e 100 (default 50).
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor opaco da página anterior. Ausente = começa do início.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Quantos eventos por página (1..100).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Uma página do event log.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditPage"
+        "400":
+          description: Cursor inválido.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  # ---- Interno (dev/teste; SÓ com RENOVI_TEST_ENDPOINTS, nunca em produção) ----
+  /internal/appointments/{care_appointment_id}/force-status:
+    post:
+      operationId: forceCareAppointmentStatus
+      summary: Força o status de uma consulta (rota interna de teste).
+      description: >
+        Marca a consulta como `realizada` ou `falta` sem esperar o fluxo real —
+        atalho para testar a auto-conclusão da jornada e os lembretes de OVERDUE. A
+        rota SÓ existe quando o servidor sobe com RENOVI_TEST_ENDPOINTS habilitado;
+        em produção ela simplesmente não é registrada. Por isso `security: []`: é de
+        ambiente de teste, não de operação.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CareAppointmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForceStatusRequest"
+      responses:
+        "200":
+          description: Status forçado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CareAppointment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     # Sessão opaca em cookie httpOnly, não JWT (ver ADR-010 em docs/DECISOES.md).
@@ -451,6 +1040,18 @@ components:
       type: apiKey
       in: cookie
       name: renovi_session
+    # Token estático das rotas /admin. NÃO há tela de admin no Slice 1: quem opera
+    # é gente do time com um token fora de banda, não uma conta de paciente.
+    adminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: >
+        Token estático de operação para as rotas /admin. Vive numa variável de
+        ambiente do servidor e a rotação é MANUAL (troca a env e reinicia) — não há
+        tela de admin nem gestão de credencial no Slice 1. NUNCA é o cookie de
+        sessão do paciente: as rotas /admin exigem este header e recusam a sessão,
+        e as de paciente fazem o inverso.
   headers:
     SessionCookie:
       description: >
@@ -489,6 +1090,43 @@ components:
       description: >
         Id da consulta no renovi_care (UUID v7). NUNCA o id do slot no legado nem
         o da consulta na DAV — id de terceiro não vaza para o cliente.
+      schema:
+        type: string
+        format: uuid
+    CareLineId:
+      name: care_line_id
+      in: path
+      required: true
+      description: Id da linha de cuidado no renovi_care (UUID v7).
+      schema:
+        type: string
+        format: uuid
+    ItemRef:
+      name: item_ref
+      in: path
+      required: true
+      description: >
+        O `ref` do item DENTRO da linha (código estável), não um UUID: é assim que
+        as regras referenciam o item, e é estável entre versões da linha.
+      schema:
+        type: string
+      example: aval-inicial
+    EnrollmentId:
+      name: enrollment_id
+      in: path
+      required: true
+      description: Id da matrícula no renovi_care (UUID v7).
+      schema:
+        type: string
+        format: uuid
+    CareAppointmentId:
+      name: care_appointment_id
+      in: path
+      required: true
+      description: >
+        Id da consulta de linha de cuidado no renovi_care (UUID v7). NÃO é o
+        `booking_id` do módulo de agendamento — este amarra a consulta ao item da
+        linha e ao motor.
       schema:
         type: string
         format: uuid
@@ -556,6 +1194,27 @@ components:
         mesmo profissional), a consulta aparece em GET /appointments com status
         UNCONFIRMED, e quem resolve é gente. O cliente deve mandar o paciente para
         /appointments — não oferecer "tentar de novo".
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    EligibilityBlocked:
+      description: >
+        O motor de elegibilidade BARROU o agendamento. O `Problem` traz `blocks[]`
+        com um `EligibilityBlock` por regra violada (cada um com `reason` pronto
+        para exibir e, quando o desbloqueio é por tempo, `available_from`). É 422 e
+        não 409 de propósito: o horário existe e está livre — o que não pode é ESTE
+        paciente agendar ESTE item agora.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PublishInvalid:
+      description: >
+        A linha não pôde ser publicada porque o template está inconsistente. O
+        `Problem` traz `errors[]` com a lista de problemas (ex.: pré-requisito que
+        aponta para item inexistente, item sem especialidade). Vem a lista TODA, e
+        não um erro por vez, porque o admin quer corrigir tudo de uma vez.
       content:
         application/problem+json:
           schema:
@@ -977,6 +1636,502 @@ components:
           type: string
           format: uri
           example: https://renovisaude.atendimento.hom.dav.med.br/a/piaxwqee5f
+    # -------------------------------------------------------------------------
+    # Linhas de cuidado (Slice 1, SPEC §3). Vocabulário: a LINHA é um template
+    # versionado (draft -> published) de ITENS; a MATRÍCULA liga um paciente a uma
+    # versão publicada; a JORNADA é a matrícula vista item a item, cada um com o
+    # veredito do motor de elegibilidade. Admin monta o template; paciente lê a
+    # jornada e agenda o que o motor liberar.
+    # -------------------------------------------------------------------------
+    RecurrenceRule:
+      description: >
+        Cadência do item (RRULE simplificada, SPEC §3.2a). É a REGRA de repetição
+        ("1 vez por semana"), não a lista de datas: o motor deriva as janelas dela.
+        Nula quando o item é de ocorrência única.
+      type: object
+      required: [freq, interval, quota]
+      properties:
+        freq:
+          type: string
+          enum: [WEEKLY, MONTHLY]
+        interval:
+          type: integer
+          minimum: 1
+          description: A cada quantas unidades de `freq` a janela reabre (1 = toda).
+        quota:
+          type: integer
+          minimum: 1
+          description: Quantas ocorrências a janela permite.
+    EligibilityBlock:
+      description: >
+        Um motivo, JÁ PRONTO PARA EXIBIR, de o motor ter barrado um item. Vem em
+        lista porque um item pode esbarrar em mais de uma regra ao mesmo tempo. O
+        `rule_type` existe para o front reagir por CÓDIGO (destacar a data em
+        MAX_ADVANCE, o pré-requisito em PREREQUISITE), não por texto.
+      type: object
+      required: [rule_type, reason]
+      properties:
+        rule_type:
+          type: string
+          enum: [VIGENCIA, QUOTA, MIN_INTERVAL, MAX_ADVANCE, PREREQUISITE]
+          description: >
+            Qual regra barrou. VIGENCIA é da MATRÍCULA (fora do período de
+            validade) e por isso não é uma regra armazenada como as outras quatro.
+        reason:
+          type: string
+          description: Frase em PT-BR pronta para o paciente ler.
+        available_from:
+          type: string
+          format: date-time
+          description: >
+            Quando o item destrava, SE o desbloqueio depende do relógio (janela de
+            cota, intervalo mínimo, antecedência máxima). AUSENTE quando depende de
+            AÇÃO (um pré-requisito a cumprir), que não tem data.
+          example: "2026-08-01T00:00:00-03:00"
+    Eligibility:
+      description: >
+        O veredito do motor para UM item, no instante avaliado. `allowed` resume
+        (`blocks` vazio); `blocks` diz por que não, quando não. O front usa isto
+        para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão
+        só desabilitado, sempre o porquê.
+      type: object
+      required: [allowed, blocks]
+      properties:
+        allowed:
+          type: boolean
+        blocks:
+          type: array
+          description: Vazio quando `allowed` é true.
+          items:
+            $ref: "#/components/schemas/EligibilityBlock"
+    CareLineRule:
+      description: >
+        Uma regra de elegibilidade presa a um item do template. `params` é aberto
+        de propósito: cada `rule_type` tem sua forma (QUOTA leva janela e limite,
+        PREREQUISITE leva o item exigido e N), e travar isso no contrato agora
+        engessaria o motor antes de o SPEC estabilizar.
+      type: object
+      required: [rule_type, params]
+      properties:
+        rule_type:
+          type: string
+          enum: [QUOTA, MIN_INTERVAL, MAX_ADVANCE, PREREQUISITE]
+          description: >
+            As quatro regras ARMAZENÁVEIS. VIGENCIA não entra: é da matrícula,
+            avaliada sempre, não uma regra que o admin liga por item.
+        params:
+          type: object
+          additionalProperties: true
+          description: Parâmetros da regra, específicos de cada `rule_type`.
+    CareLineItem:
+      description: >
+        Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade.
+        `ref` é o código estável do item DENTRO da linha (o que as regras de
+        pré-requisito referenciam), distinto do `id` (UUID).
+      type: object
+      required: [id, ref, kind, specialty_code, label, sort_order, rules]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ref:
+          type: string
+          description: >
+            Código do item dentro da linha (estável entre versões), referenciado
+            pelas regras de pré-requisito.
+          example: aval-inicial
+        kind:
+          type: string
+          enum: [CONSULTA]
+          description: Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+        specialty_code:
+          type: string
+          description: A especialidade da consulta (código do catálogo do legado).
+        label:
+          type: string
+          description: 'Rótulo em PT-BR exibido ao paciente. Ex.: "Avaliação inicial".'
+        recurrence:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/RecurrenceRule"
+        sort_order:
+          type: integer
+          description: Ordem de exibição do item na linha.
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/CareLineRule"
+    CareLine:
+      description: >
+        O TEMPLATE de uma linha de cuidado, versionado. Nasce `draft` (o admin
+        monta itens e regras) e ao `published` vira imutável e passa a valer para
+        NOVAS matrículas. `version` sobe a cada publicação do mesmo `code`.
+      type: object
+      required: [id, code, version, name, description, status, items]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: Código estável da linha (constante entre versões).
+          example: saude-mental
+        version:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [draft, published]
+        published_at:
+          type: string
+          format: date-time
+          description: Quando esta versão foi publicada. Ausente enquanto `draft`.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CareLineItem"
+    CareLineList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CareLine"
+    EnrollmentPeriod:
+      description: >
+        Uma janela de validade da matrícula. A renovação NÃO edita o período
+        vigente: acrescenta outro, para a jornada guardar por quais janelas o
+        paciente passou.
+      type: object
+      required: [id, starts_at, ends_at, source]
+      properties:
+        id:
+          type: string
+          format: uuid
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [admin]
+          description: Origem da concessão. Só `admin` no Slice 1 (sem autosserviço).
+    Enrollment:
+      description: >
+        O vínculo de um paciente a uma VERSÃO publicada da linha. `care_line_version`
+        é congelado na matrícula: republicar a linha não muda a jornada de quem já
+        está matriculado. `valid_from`/`valid_until` resumem a vigência corrente; o
+        detalhe por janela está em `periods`.
+      type: object
+      required:
+        [id, patient_id, care_line_code, care_line_version, status, valid_from, valid_until, periods]
+      properties:
+        id:
+          type: string
+          format: uuid
+        patient_id:
+          type: string
+          format: uuid
+        care_line_code:
+          type: string
+        care_line_version:
+          type: integer
+        status:
+          type: string
+          enum: [ativa, pausada, concluida, encerrada, expirada]
+          description: >
+            `ativa` vale e está na vigência; `expirada` passou da vigência sem
+            renovar; `concluida`/`encerrada` são desfechos deliberados do admin;
+            `pausada` é suspensão temporária.
+        valid_from:
+          type: string
+          format: date-time
+        valid_until:
+          type: string
+          format: date-time
+        periods:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnrollmentPeriod"
+    CareAppointment:
+      description: >
+        A consulta de um item da linha, na visão da JORNADA. NÃO é o mesmo que
+        `Appointment` (o agendamento no módulo de booking): esta amarra a consulta
+        ao ITEM da linha e ao motor. O `booking_id` é a ponte — é o `id` que o
+        paciente usa nas rotas /appointments existentes para ver detalhes e entrar
+        na sala.
+      type: object
+      required: [id, item_ref, label, status, scheduled_at, time_zone, booking_id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        item_ref:
+          type: string
+          description: O `ref` do item da linha a que esta consulta atende.
+        label:
+          type: string
+          description: Rótulo do item (copiado para a tela não precisar cruzar dados).
+        status:
+          type: string
+          enum: [agendada, confirmada, em_andamento, realizada, falta, cancelada]
+        scheduled_at:
+          type: string
+          format: date-time
+          example: "2026-07-20T09:00:00-03:00"
+        time_zone:
+          type: string
+          description: Fuso IANA para exibição (mesma regra de Slot.time_zone).
+          example: America/Sao_Paulo
+        cancelled_at:
+          type: string
+          format: date-time
+          description: Quando foi cancelada. Ausente quando não foi.
+        booking_id:
+          type: string
+          format: uuid
+          description: >
+            Id da consulta no módulo de booking (o `id` de `Appointment`). O
+            paciente o usa em GET /appointments/{id} e POST .../join.
+    CareAppointmentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CareAppointment"
+    AnnotatedSlot:
+      description: >
+        Um horário livre JÁ com o profissional e o veredito do motor embutidos. A
+        disponibilidade de uma LINHA agrega horários de VÁRIOS profissionais da
+        especialidade do item — por isso o profissional vai POR SLOT (diferente do
+        SlotPage, que é a agenda de um profissional só). A elegibilidade vem junta
+        para a tela não ter que chamar /me/eligibility por horário.
+      allOf:
+        - $ref: "#/components/schemas/Slot"
+        - type: object
+          required: [professional, eligibility]
+          properties:
+            professional:
+              $ref: "#/components/schemas/AppointmentProfessional"
+            eligibility:
+              $ref: "#/components/schemas/Eligibility"
+    AvailabilityPage:
+      description: >
+        Os horários agendáveis para um item da linha, no intervalo pedido. Ecoa o
+        `from`/`to` que o servidor de fato usou (mesma razão do SlotPage: "hoje" só
+        existe num fuso, e quem o sabe é o servidor).
+      type: object
+      required: [item_id, from, to, items]
+      properties:
+        item_id:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnotatedSlot"
+    JourneyEvent:
+      description: >
+        Um fato da jornada (event log append-only, SPEC §3.3). É a única fonte que
+        o motor lê e o que a auditoria devolve. `payload` é aberto porque cada tipo
+        carrega dados próprios (o id da consulta, o novo status, a origem da
+        renovação).
+      type: object
+      required: [id, event_type, actor, occurred_at, payload]
+      properties:
+        id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          enum:
+            - matricula_criada
+            - matricula_renovada
+            - matricula_expirada
+            - matricula_encerrada
+            - consulta_agendada
+            - consulta_cancelada
+            - consulta_status_forcado
+        actor:
+          type: string
+          enum: [paciente, sistema, admin]
+          description: >
+            Quem provocou o fato: `paciente` (agendou/cancelou), `sistema`
+            (expiração automática) ou `admin` (matrícula, forçar status).
+        occurred_at:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+    JourneyItem:
+      description: Um item da linha com o veredito do motor avaliado para AGORA.
+      type: object
+      required: [item, eligibility]
+      properties:
+        item:
+          $ref: "#/components/schemas/CareLineItem"
+        eligibility:
+          $ref: "#/components/schemas/Eligibility"
+    JourneyEnrollment:
+      description: >
+        Uma matrícula pronta para a tela de jornada: a matrícula, o nome da linha
+        (para a tela não cruzar com /admin), os itens já com veredito e os eventos
+        recentes.
+      type: object
+      required: [enrollment, care_line_name, items, recent_events]
+      properties:
+        enrollment:
+          $ref: "#/components/schemas/Enrollment"
+        care_line_name:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/JourneyItem"
+        recent_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/JourneyEvent"
+    Journey:
+      description: >
+        A jornada do portador da sessão: todas as suas matrículas, cada uma com
+        itens e vereditos. Envelope `enrollments` (não array de topo) pelo mesmo
+        motivo dos `items`: dá para crescer sem quebrar o cliente.
+      type: object
+      required: [enrollments]
+      properties:
+        enrollments:
+          type: array
+          items:
+            $ref: "#/components/schemas/JourneyEnrollment"
+    AuditPage:
+      description: >
+        Uma página do event log. `next_cursor` é OPACO — o cliente o devolve como
+        veio, sem interpretar; ausente significa fim.
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/JourneyEvent"
+        next_cursor:
+          type: string
+          description: Cursor opaco para a próxima página. Ausente = não há mais.
+    # ---- Requisições (admin monta o template e as matrículas) ----
+    CreateCareLineRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          description: Código estável da linha. Único entre linhas draft.
+          example: saude-mental
+        name:
+          type: string
+        description:
+          type: string
+    CreateCareLineItemRequest:
+      type: object
+      required: [ref, kind, specialty_code, label]
+      properties:
+        ref:
+          type: string
+          example: aval-inicial
+        kind:
+          type: string
+          enum: [CONSULTA]
+        specialty_code:
+          type: string
+        label:
+          type: string
+        recurrence:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/RecurrenceRule"
+        sort_order:
+          type: integer
+          description: Ordem na linha. Default a cargo do servidor quando ausente.
+    CreateCareLineRuleRequest:
+      type: object
+      required: [rule_type, params]
+      properties:
+        rule_type:
+          type: string
+          enum: [QUOTA, MIN_INTERVAL, MAX_ADVANCE, PREREQUISITE]
+        params:
+          type: object
+          additionalProperties: true
+    CreateEnrollmentRequest:
+      type: object
+      required: [patient_id, care_line_code, months]
+      properties:
+        patient_id:
+          type: string
+          format: uuid
+        care_line_code:
+          type: string
+          description: A linha é resolvida para a ÚLTIMA versão publicada deste code.
+        months:
+          type: integer
+          enum: [1, 2, 3]
+          description: Vigência concedida, em meses (1, 2 ou 3).
+    RenewEnrollmentRequest:
+      type: object
+      required: [months]
+      properties:
+        months:
+          type: integer
+          enum: [1, 2, 3]
+          description: Meses acrescentados à vigência (novo período, não edita o atual).
+    EndEnrollmentRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          type: string
+          enum: [concluida, encerrada]
+          description: >
+            O desfecho: `concluida` (paciente terminou a linha) ou `encerrada`
+            (interrompida). São desfechos distintos na jornada, por isso o admin
+            escolhe qual.
+        reason:
+          type: string
+          description: Justificativa registrada no event log (auditoria).
+    CreateCareAppointmentRequest:
+      type: object
+      required: [item_id, slot_id]
+      properties:
+        item_id:
+          type: string
+          format: uuid
+          description: O item da linha para o qual se agenda.
+        slot_id:
+          type: string
+          description: Id do horário escolhido no legado (opaco), como em AnnotatedSlot.
+    ForceStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [realizada, falta]
+          description: O status a forçar na consulta (rota interna de teste).
     Problem:
       description: Erro no formato RFC 7807 (problem+json).
       type: object
@@ -1002,5 +2157,23 @@ components:
         # tradução só, no front, servindo erro e veredito.
         reason:
           $ref: "#/components/schemas/Reason"
+        # Extensões (§3.2) opcionais, presentes só em erros específicos — e por
+        # serem opcionais, backward-compatible com quem já lê Problem.
+        # `blocks`: os bloqueios do motor no 422 de agendamento (EligibilityBlocked).
+        blocks:
+          type: array
+          description: >
+            Bloqueios do motor de elegibilidade. Presente no 422 de agendamento
+            barrado; cada item explica UMA regra violada.
+          items:
+            $ref: "#/components/schemas/EligibilityBlock"
+        # `errors`: a lista de erros de validação no 400 de publicação (PublishInvalid).
+        errors:
+          type: array
+          description: >
+            Erros de validação. Presente no 400 de publicação de linha, com todos
+            os problemas do template de uma vez.
+          items:
+            type: string
 security:
   - cookieAuth: []

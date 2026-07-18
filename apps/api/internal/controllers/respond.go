@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 )
 
 // WriteJSON serializa v como JSON com o status informado.
@@ -33,6 +34,18 @@ type Reason struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// ProblemBlock é um bloqueio do motor de elegibilidade já no formato de resposta.
+//
+// É um tipo local, e NÃO o `api.EligibilityBlock` gerado, de propósito: respond.go
+// escreve erros e não deve depender do pacote de tipos gerado (nem do ciclo de
+// geração) só para montar um corpo. O JSON é idêntico ao do schema EligibilityBlock
+// do contrato — quem consome não vê a diferença.
+type ProblemBlock struct {
+	RuleType      string     `json:"rule_type"`
+	Reason        string     `json:"reason"`
+	AvailableFrom *time.Time `json:"available_from,omitempty"`
+}
+
 // Problem é o corpo de erro no formato RFC 7807 (application/problem+json).
 type Problem struct {
 	Type   string `json:"type,omitempty"`
@@ -41,6 +54,12 @@ type Problem struct {
 	Detail string `json:"detail,omitempty"`
 	// Membro de extensão, previsto pela própria RFC 7807 (§3.2).
 	Reason *Reason `json:"reason,omitempty"`
+	// Blocks são os bloqueios do motor de elegibilidade — presente no 422 de
+	// agendamento barrado. Também é membro de extensão (§3.2).
+	Blocks []ProblemBlock `json:"blocks,omitempty"`
+	// Errors é a lista de erros de validação — presente no 400 de publicação de
+	// linha, onde o admin quer corrigir tudo de uma vez. Membro de extensão (§3.2).
+	Errors []string `json:"errors,omitempty"`
 }
 
 // WriteProblem escreve um erro padronizado (RFC 7807).
@@ -52,6 +71,15 @@ func WriteProblem(w http.ResponseWriter, status int, title, detail string) {
 // cliente precisar DECIDIR algo a partir do erro, e não só exibi-lo.
 func WriteProblemReason(w http.ResponseWriter, status int, title, detail string, reason Reason) {
 	writeProblem(w, Problem{Title: title, Status: status, Detail: detail, Reason: &reason})
+}
+
+// WriteProblemFull escreve um Problem já montado pelo chamador, INCLUSIVE com os
+// membros de extensão (`blocks`, `errors`, `reason`). Use quando os writers acima
+// não bastarem: o 422 de elegibilidade (com `Blocks`) e o 400 de publicação (com
+// `Errors`). Reusa o writer interno para manter content-type e serialização num só
+// lugar.
+func WriteProblemFull(w http.ResponseWriter, p Problem) {
+	writeProblem(w, p)
 }
 
 func writeProblem(w http.ResponseWriter, p Problem) {

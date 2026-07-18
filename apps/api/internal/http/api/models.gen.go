@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	AdminTokenScopes adminTokenContextKey = "adminToken.Scopes"
 	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
 )
 
@@ -31,6 +32,258 @@ func (e AppointmentStatus) Valid() bool {
 	case PROCESSING:
 		return true
 	case UNCONFIRMED:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CareAppointmentStatus.
+const (
+	CareAppointmentStatusAgendada    CareAppointmentStatus = "agendada"
+	CareAppointmentStatusCancelada   CareAppointmentStatus = "cancelada"
+	CareAppointmentStatusConfirmada  CareAppointmentStatus = "confirmada"
+	CareAppointmentStatusEmAndamento CareAppointmentStatus = "em_andamento"
+	CareAppointmentStatusFalta       CareAppointmentStatus = "falta"
+	CareAppointmentStatusRealizada   CareAppointmentStatus = "realizada"
+)
+
+// Valid indicates whether the value is a known member of the CareAppointmentStatus enum.
+func (e CareAppointmentStatus) Valid() bool {
+	switch e {
+	case CareAppointmentStatusAgendada:
+		return true
+	case CareAppointmentStatusCancelada:
+		return true
+	case CareAppointmentStatusConfirmada:
+		return true
+	case CareAppointmentStatusEmAndamento:
+		return true
+	case CareAppointmentStatusFalta:
+		return true
+	case CareAppointmentStatusRealizada:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CareLineStatus.
+const (
+	Draft     CareLineStatus = "draft"
+	Published CareLineStatus = "published"
+)
+
+// Valid indicates whether the value is a known member of the CareLineStatus enum.
+func (e CareLineStatus) Valid() bool {
+	switch e {
+	case Draft:
+		return true
+	case Published:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CareLineItemKind.
+const (
+	CareLineItemKindCONSULTA CareLineItemKind = "CONSULTA"
+)
+
+// Valid indicates whether the value is a known member of the CareLineItemKind enum.
+func (e CareLineItemKind) Valid() bool {
+	switch e {
+	case CareLineItemKindCONSULTA:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CareLineRuleRuleType.
+const (
+	CareLineRuleRuleTypeMAXADVANCE   CareLineRuleRuleType = "MAX_ADVANCE"
+	CareLineRuleRuleTypeMININTERVAL  CareLineRuleRuleType = "MIN_INTERVAL"
+	CareLineRuleRuleTypePREREQUISITE CareLineRuleRuleType = "PREREQUISITE"
+	CareLineRuleRuleTypeQUOTA        CareLineRuleRuleType = "QUOTA"
+)
+
+// Valid indicates whether the value is a known member of the CareLineRuleRuleType enum.
+func (e CareLineRuleRuleType) Valid() bool {
+	switch e {
+	case CareLineRuleRuleTypeMAXADVANCE:
+		return true
+	case CareLineRuleRuleTypeMININTERVAL:
+		return true
+	case CareLineRuleRuleTypePREREQUISITE:
+		return true
+	case CareLineRuleRuleTypeQUOTA:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateCareLineItemRequestKind.
+const (
+	CreateCareLineItemRequestKindCONSULTA CreateCareLineItemRequestKind = "CONSULTA"
+)
+
+// Valid indicates whether the value is a known member of the CreateCareLineItemRequestKind enum.
+func (e CreateCareLineItemRequestKind) Valid() bool {
+	switch e {
+	case CreateCareLineItemRequestKindCONSULTA:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateCareLineRuleRequestRuleType.
+const (
+	CreateCareLineRuleRequestRuleTypeMAXADVANCE   CreateCareLineRuleRequestRuleType = "MAX_ADVANCE"
+	CreateCareLineRuleRequestRuleTypeMININTERVAL  CreateCareLineRuleRequestRuleType = "MIN_INTERVAL"
+	CreateCareLineRuleRequestRuleTypePREREQUISITE CreateCareLineRuleRequestRuleType = "PREREQUISITE"
+	CreateCareLineRuleRequestRuleTypeQUOTA        CreateCareLineRuleRequestRuleType = "QUOTA"
+)
+
+// Valid indicates whether the value is a known member of the CreateCareLineRuleRequestRuleType enum.
+func (e CreateCareLineRuleRequestRuleType) Valid() bool {
+	switch e {
+	case CreateCareLineRuleRequestRuleTypeMAXADVANCE:
+		return true
+	case CreateCareLineRuleRequestRuleTypeMININTERVAL:
+		return true
+	case CreateCareLineRuleRequestRuleTypePREREQUISITE:
+		return true
+	case CreateCareLineRuleRequestRuleTypeQUOTA:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateEnrollmentRequestMonths.
+const (
+	CreateEnrollmentRequestMonthsN1 CreateEnrollmentRequestMonths = 1
+	CreateEnrollmentRequestMonthsN2 CreateEnrollmentRequestMonths = 2
+	CreateEnrollmentRequestMonthsN3 CreateEnrollmentRequestMonths = 3
+)
+
+// Valid indicates whether the value is a known member of the CreateEnrollmentRequestMonths enum.
+func (e CreateEnrollmentRequestMonths) Valid() bool {
+	switch e {
+	case CreateEnrollmentRequestMonthsN1:
+		return true
+	case CreateEnrollmentRequestMonthsN2:
+		return true
+	case CreateEnrollmentRequestMonthsN3:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EligibilityBlockRuleType.
+const (
+	MAXADVANCE   EligibilityBlockRuleType = "MAX_ADVANCE"
+	MININTERVAL  EligibilityBlockRuleType = "MIN_INTERVAL"
+	PREREQUISITE EligibilityBlockRuleType = "PREREQUISITE"
+	QUOTA        EligibilityBlockRuleType = "QUOTA"
+	VIGENCIA     EligibilityBlockRuleType = "VIGENCIA"
+)
+
+// Valid indicates whether the value is a known member of the EligibilityBlockRuleType enum.
+func (e EligibilityBlockRuleType) Valid() bool {
+	switch e {
+	case MAXADVANCE:
+		return true
+	case MININTERVAL:
+		return true
+	case PREREQUISITE:
+		return true
+	case QUOTA:
+		return true
+	case VIGENCIA:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EndEnrollmentRequestStatus.
+const (
+	EndEnrollmentRequestStatusConcluida EndEnrollmentRequestStatus = "concluida"
+	EndEnrollmentRequestStatusEncerrada EndEnrollmentRequestStatus = "encerrada"
+)
+
+// Valid indicates whether the value is a known member of the EndEnrollmentRequestStatus enum.
+func (e EndEnrollmentRequestStatus) Valid() bool {
+	switch e {
+	case EndEnrollmentRequestStatusConcluida:
+		return true
+	case EndEnrollmentRequestStatusEncerrada:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EnrollmentStatus.
+const (
+	EnrollmentStatusAtiva     EnrollmentStatus = "ativa"
+	EnrollmentStatusConcluida EnrollmentStatus = "concluida"
+	EnrollmentStatusEncerrada EnrollmentStatus = "encerrada"
+	EnrollmentStatusExpirada  EnrollmentStatus = "expirada"
+	EnrollmentStatusPausada   EnrollmentStatus = "pausada"
+)
+
+// Valid indicates whether the value is a known member of the EnrollmentStatus enum.
+func (e EnrollmentStatus) Valid() bool {
+	switch e {
+	case EnrollmentStatusAtiva:
+		return true
+	case EnrollmentStatusConcluida:
+		return true
+	case EnrollmentStatusEncerrada:
+		return true
+	case EnrollmentStatusExpirada:
+		return true
+	case EnrollmentStatusPausada:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EnrollmentPeriodSource.
+const (
+	EnrollmentPeriodSourceAdmin EnrollmentPeriodSource = "admin"
+)
+
+// Valid indicates whether the value is a known member of the EnrollmentPeriodSource enum.
+func (e EnrollmentPeriodSource) Valid() bool {
+	switch e {
+	case EnrollmentPeriodSourceAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ForceStatusRequestStatus.
+const (
+	ForceStatusRequestStatusFalta     ForceStatusRequestStatus = "falta"
+	ForceStatusRequestStatusRealizada ForceStatusRequestStatus = "realizada"
+)
+
+// Valid indicates whether the value is a known member of the ForceStatusRequestStatus enum.
+func (e ForceStatusRequestStatus) Valid() bool {
+	switch e {
+	case ForceStatusRequestStatusFalta:
+		return true
+	case ForceStatusRequestStatusRealizada:
 		return true
 	default:
 		return false
@@ -79,6 +332,129 @@ func (e JoinWindowStatus) Valid() bool {
 	}
 }
 
+// Defines values for JourneyEventActor.
+const (
+	JourneyEventActorAdmin    JourneyEventActor = "admin"
+	JourneyEventActorPaciente JourneyEventActor = "paciente"
+	JourneyEventActorSistema  JourneyEventActor = "sistema"
+)
+
+// Valid indicates whether the value is a known member of the JourneyEventActor enum.
+func (e JourneyEventActor) Valid() bool {
+	switch e {
+	case JourneyEventActorAdmin:
+		return true
+	case JourneyEventActorPaciente:
+		return true
+	case JourneyEventActorSistema:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for JourneyEventEventType.
+const (
+	ConsultaAgendada      JourneyEventEventType = "consulta_agendada"
+	ConsultaCancelada     JourneyEventEventType = "consulta_cancelada"
+	ConsultaStatusForcado JourneyEventEventType = "consulta_status_forcado"
+	MatriculaCriada       JourneyEventEventType = "matricula_criada"
+	MatriculaEncerrada    JourneyEventEventType = "matricula_encerrada"
+	MatriculaExpirada     JourneyEventEventType = "matricula_expirada"
+	MatriculaRenovada     JourneyEventEventType = "matricula_renovada"
+)
+
+// Valid indicates whether the value is a known member of the JourneyEventEventType enum.
+func (e JourneyEventEventType) Valid() bool {
+	switch e {
+	case ConsultaAgendada:
+		return true
+	case ConsultaCancelada:
+		return true
+	case ConsultaStatusForcado:
+		return true
+	case MatriculaCriada:
+		return true
+	case MatriculaEncerrada:
+		return true
+	case MatriculaExpirada:
+		return true
+	case MatriculaRenovada:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RecurrenceRuleFreq.
+const (
+	MONTHLY RecurrenceRuleFreq = "MONTHLY"
+	WEEKLY  RecurrenceRuleFreq = "WEEKLY"
+)
+
+// Valid indicates whether the value is a known member of the RecurrenceRuleFreq enum.
+func (e RecurrenceRuleFreq) Valid() bool {
+	switch e {
+	case MONTHLY:
+		return true
+	case WEEKLY:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RenewEnrollmentRequestMonths.
+const (
+	RenewEnrollmentRequestMonthsN1 RenewEnrollmentRequestMonths = 1
+	RenewEnrollmentRequestMonthsN2 RenewEnrollmentRequestMonths = 2
+	RenewEnrollmentRequestMonthsN3 RenewEnrollmentRequestMonths = 3
+)
+
+// Valid indicates whether the value is a known member of the RenewEnrollmentRequestMonths enum.
+func (e RenewEnrollmentRequestMonths) Valid() bool {
+	switch e {
+	case RenewEnrollmentRequestMonthsN1:
+		return true
+	case RenewEnrollmentRequestMonthsN2:
+		return true
+	case RenewEnrollmentRequestMonthsN3:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListMyCareAppointmentsParamsStatus.
+const (
+	Agendada    ListMyCareAppointmentsParamsStatus = "agendada"
+	Cancelada   ListMyCareAppointmentsParamsStatus = "cancelada"
+	Confirmada  ListMyCareAppointmentsParamsStatus = "confirmada"
+	EmAndamento ListMyCareAppointmentsParamsStatus = "em_andamento"
+	Falta       ListMyCareAppointmentsParamsStatus = "falta"
+	Realizada   ListMyCareAppointmentsParamsStatus = "realizada"
+)
+
+// Valid indicates whether the value is a known member of the ListMyCareAppointmentsParamsStatus enum.
+func (e ListMyCareAppointmentsParamsStatus) Valid() bool {
+	switch e {
+	case Agendada:
+		return true
+	case Cancelada:
+		return true
+	case Confirmada:
+		return true
+	case EmAndamento:
+		return true
+	case Falta:
+		return true
+	case Realizada:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account A conta do próprio portador da sessão. Deliberadamente enxuta: não carrega nada vindo da DAV nem o id de lá.
 type Account struct {
 	Email    openapi_types.Email `json:"email"`
@@ -100,6 +476,29 @@ type Address struct {
 
 	// ZipCode CEP, com ou sem traço.
 	ZipCode string `json:"zip_code"`
+}
+
+// AnnotatedSlot defines model for AnnotatedSlot.
+type AnnotatedSlot struct {
+	// Eligibility O veredito do motor para UM item, no instante avaliado. `allowed` resume (`blocks` vazio); `blocks` diz por que não, quando não. O front usa isto para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o porquê.
+	Eligibility Eligibility `json:"eligibility"`
+	EndsAt      time.Time   `json:"ends_at"`
+
+	// Id Id do slot no legado (tb_slots), opaco.
+	Id string `json:"id"`
+
+	// Professional O profissional COMO ELE ERA quando a consulta foi marcada — e por isso é mais enxuto que o `Professional` da escolha.
+	// O motivo é honestidade: a consulta guarda uma FOTOGRAFIA do legado (nome e especialidade), porque as FKs de lá são ON DELETE CASCADE e o schema é de terceiro — se o profissional for renomeado ou removido, a consulta antiga ainda precisa saber se descrever. Mas não fotografamos o registro no conselho, então prometer o `Professional` inteiro aqui devolveria `council: ""` e a tela mostraria "CRP/ ". Um campo obrigatório vazio é pior que um campo ausente.
+	// O registro no conselho é o que ajuda a ESCOLHER, e aparece lá (em /specialties/{id}/professionals). Depois de marcada, o que importa é quem e quando.
+	Professional AppointmentProfessional `json:"professional"`
+
+	// StartsAt Instante do início, RFC 3339 COM offset. A origem no legado é DATETIME SEM fuso, que significa hora de parede de America/Sao_Paulo; quem resolve para instante é a API.
+	// Nunca mandamos "2026-07-20T09:00:00" sem offset: `new Date()` no browser leria isso no fuso do USUÁRIO, e um paciente viajando (ou um runner de CI em UTC) veria a hora errada — sem erro, sem aviso, só errado.
+	StartsAt time.Time `json:"starts_at"`
+
+	// TimeZone Fuso IANA em que este horário DEVE ser exibido — o da agenda.
+	// Não é redundante com o offset de `starts_at`: o offset é propriedade de um INSTANTE, o fuso é a REGRA. A consulta é às 09:00 em São Paulo, e é 09:00 que o paciente precisa ler mesmo que o relógio dele esteja em Lisboa. Sem este campo o front só poderia formatar no fuso do browser — que é exatamente o erro.
+	TimeZone string `json:"time_zone"`
 }
 
 // Appointment A consulta como o paciente a vê. Enxuta pelo mesmo motivo de `Account`: não carrega o id da DAV, nem o id do slot no legado, nem — jamais — o link da sala.
@@ -160,6 +559,111 @@ type AppointmentProfessional struct {
 	Id       string `json:"id"`
 }
 
+// AuditPage Uma página do event log. `next_cursor` é OPACO — o cliente o devolve como veio, sem interpretar; ausente significa fim.
+type AuditPage struct {
+	Items []JourneyEvent `json:"items"`
+
+	// NextCursor Cursor opaco para a próxima página. Ausente = não há mais.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// AvailabilityPage Os horários agendáveis para um item da linha, no intervalo pedido. Ecoa o `from`/`to` que o servidor de fato usou (mesma razão do SlotPage: "hoje" só existe num fuso, e quem o sabe é o servidor).
+type AvailabilityPage struct {
+	From   openapi_types.Date `json:"from"`
+	ItemId openapi_types.UUID `json:"item_id"`
+	Items  []AnnotatedSlot    `json:"items"`
+	To     openapi_types.Date `json:"to"`
+}
+
+// CareAppointment A consulta de um item da linha, na visão da JORNADA. NÃO é o mesmo que `Appointment` (o agendamento no módulo de booking): esta amarra a consulta ao ITEM da linha e ao motor. O `booking_id` é a ponte — é o `id` que o paciente usa nas rotas /appointments existentes para ver detalhes e entrar na sala.
+type CareAppointment struct {
+	// BookingId Id da consulta no módulo de booking (o `id` de `Appointment`). O paciente o usa em GET /appointments/{id} e POST .../join.
+	BookingId openapi_types.UUID `json:"booking_id"`
+
+	// CancelledAt Quando foi cancelada. Ausente quando não foi.
+	CancelledAt *time.Time         `json:"cancelled_at,omitempty"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// ItemRef O `ref` do item da linha a que esta consulta atende.
+	ItemRef string `json:"item_ref"`
+
+	// Label Rótulo do item (copiado para a tela não precisar cruzar dados).
+	Label       string                `json:"label"`
+	ScheduledAt time.Time             `json:"scheduled_at"`
+	Status      CareAppointmentStatus `json:"status"`
+
+	// TimeZone Fuso IANA para exibição (mesma regra de Slot.time_zone).
+	TimeZone string `json:"time_zone"`
+}
+
+// CareAppointmentStatus defines model for CareAppointment.Status.
+type CareAppointmentStatus string
+
+// CareAppointmentList defines model for CareAppointmentList.
+type CareAppointmentList struct {
+	Items []CareAppointment `json:"items"`
+}
+
+// CareLine O TEMPLATE de uma linha de cuidado, versionado. Nasce `draft` (o admin monta itens e regras) e ao `published` vira imutável e passa a valer para NOVAS matrículas. `version` sobe a cada publicação do mesmo `code`.
+type CareLine struct {
+	// Code Código estável da linha (constante entre versões).
+	Code        string             `json:"code"`
+	Description string             `json:"description"`
+	Id          openapi_types.UUID `json:"id"`
+	Items       []CareLineItem     `json:"items"`
+	Name        string             `json:"name"`
+
+	// PublishedAt Quando esta versão foi publicada. Ausente enquanto `draft`.
+	PublishedAt *time.Time     `json:"published_at,omitempty"`
+	Status      CareLineStatus `json:"status"`
+	Version     int            `json:"version"`
+}
+
+// CareLineStatus defines model for CareLine.Status.
+type CareLineStatus string
+
+// CareLineItem Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade. `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
+type CareLineItem struct {
+	Id openapi_types.UUID `json:"id"`
+
+	// Kind Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+	Kind CareLineItemKind `json:"kind"`
+
+	// Label Rótulo em PT-BR exibido ao paciente. Ex.: "Avaliação inicial".
+	Label      string          `json:"label"`
+	Recurrence *RecurrenceRule `json:"recurrence,omitempty"`
+
+	// Ref Código do item dentro da linha (estável entre versões), referenciado pelas regras de pré-requisito.
+	Ref   string         `json:"ref"`
+	Rules []CareLineRule `json:"rules"`
+
+	// SortOrder Ordem de exibição do item na linha.
+	SortOrder int `json:"sort_order"`
+
+	// SpecialtyCode A especialidade da consulta (código do catálogo do legado).
+	SpecialtyCode string `json:"specialty_code"`
+}
+
+// CareLineItemKind Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+type CareLineItemKind string
+
+// CareLineList defines model for CareLineList.
+type CareLineList struct {
+	Items []CareLine `json:"items"`
+}
+
+// CareLineRule Uma regra de elegibilidade presa a um item do template. `params` é aberto de propósito: cada `rule_type` tem sua forma (QUOTA leva janela e limite, PREREQUISITE leva o item exigido e N), e travar isso no contrato agora engessaria o motor antes de o SPEC estabilizar.
+type CareLineRule struct {
+	// Params Parâmetros da regra, específicos de cada `rule_type`.
+	Params map[string]interface{} `json:"params"`
+
+	// RuleType As quatro regras ARMAZENÁVEIS. VIGENCIA não entra: é da matrícula, avaliada sempre, não uma regra que o admin liga por item.
+	RuleType CareLineRuleRuleType `json:"rule_type"`
+}
+
+// CareLineRuleRuleType As quatro regras ARMAZENÁVEIS. VIGENCIA não entra: é da matrícula, avaliada sempre, não uma regra que o admin liga por item.
+type CareLineRuleRuleType string
+
 // CreateAppointmentRequest defines model for CreateAppointmentRequest.
 type CreateAppointmentRequest struct {
 	// SlotId O horário escolhido. Ele já determina o PROFISSIONAL (slot -> shift -> profissional), então o profissional não vem no corpo: mandar de novo o que o servidor já sabe criaria uma segunda verdade para conferir.
@@ -170,6 +674,134 @@ type CreateAppointmentRequest struct {
 	// Tem que ser uma especialidade que o profissional do slot realmente atende; senão, 400.
 	SpecialtyId string `json:"specialty_id"`
 }
+
+// CreateCareAppointmentRequest defines model for CreateCareAppointmentRequest.
+type CreateCareAppointmentRequest struct {
+	// ItemId O item da linha para o qual se agenda.
+	ItemId openapi_types.UUID `json:"item_id"`
+
+	// SlotId Id do horário escolhido no legado (opaco), como em AnnotatedSlot.
+	SlotId string `json:"slot_id"`
+}
+
+// CreateCareLineItemRequest defines model for CreateCareLineItemRequest.
+type CreateCareLineItemRequest struct {
+	Kind       CreateCareLineItemRequestKind `json:"kind"`
+	Label      string                        `json:"label"`
+	Recurrence *RecurrenceRule               `json:"recurrence,omitempty"`
+	Ref        string                        `json:"ref"`
+
+	// SortOrder Ordem na linha. Default a cargo do servidor quando ausente.
+	SortOrder     *int   `json:"sort_order,omitempty"`
+	SpecialtyCode string `json:"specialty_code"`
+}
+
+// CreateCareLineItemRequestKind defines model for CreateCareLineItemRequest.Kind.
+type CreateCareLineItemRequestKind string
+
+// CreateCareLineRequest defines model for CreateCareLineRequest.
+type CreateCareLineRequest struct {
+	// Code Código estável da linha. Único entre linhas draft.
+	Code        string  `json:"code"`
+	Description *string `json:"description,omitempty"`
+	Name        string  `json:"name"`
+}
+
+// CreateCareLineRuleRequest defines model for CreateCareLineRuleRequest.
+type CreateCareLineRuleRequest struct {
+	Params   map[string]interface{}            `json:"params"`
+	RuleType CreateCareLineRuleRequestRuleType `json:"rule_type"`
+}
+
+// CreateCareLineRuleRequestRuleType defines model for CreateCareLineRuleRequest.RuleType.
+type CreateCareLineRuleRequestRuleType string
+
+// CreateEnrollmentRequest defines model for CreateEnrollmentRequest.
+type CreateEnrollmentRequest struct {
+	// CareLineCode A linha é resolvida para a ÚLTIMA versão publicada deste code.
+	CareLineCode string `json:"care_line_code"`
+
+	// Months Vigência concedida, em meses (1, 2 ou 3).
+	Months    CreateEnrollmentRequestMonths `json:"months"`
+	PatientId openapi_types.UUID            `json:"patient_id"`
+}
+
+// CreateEnrollmentRequestMonths Vigência concedida, em meses (1, 2 ou 3).
+type CreateEnrollmentRequestMonths int
+
+// Eligibility O veredito do motor para UM item, no instante avaliado. `allowed` resume (`blocks` vazio); `blocks` diz por que não, quando não. O front usa isto para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o porquê.
+type Eligibility struct {
+	Allowed bool `json:"allowed"`
+
+	// Blocks Vazio quando `allowed` é true.
+	Blocks []EligibilityBlock `json:"blocks"`
+}
+
+// EligibilityBlock Um motivo, JÁ PRONTO PARA EXIBIR, de o motor ter barrado um item. Vem em lista porque um item pode esbarrar em mais de uma regra ao mesmo tempo. O `rule_type` existe para o front reagir por CÓDIGO (destacar a data em MAX_ADVANCE, o pré-requisito em PREREQUISITE), não por texto.
+type EligibilityBlock struct {
+	// AvailableFrom Quando o item destrava, SE o desbloqueio depende do relógio (janela de cota, intervalo mínimo, antecedência máxima). AUSENTE quando depende de AÇÃO (um pré-requisito a cumprir), que não tem data.
+	AvailableFrom *time.Time `json:"available_from,omitempty"`
+
+	// Reason Frase em PT-BR pronta para o paciente ler.
+	Reason string `json:"reason"`
+
+	// RuleType Qual regra barrou. VIGENCIA é da MATRÍCULA (fora do período de validade) e por isso não é uma regra armazenada como as outras quatro.
+	RuleType EligibilityBlockRuleType `json:"rule_type"`
+}
+
+// EligibilityBlockRuleType Qual regra barrou. VIGENCIA é da MATRÍCULA (fora do período de validade) e por isso não é uma regra armazenada como as outras quatro.
+type EligibilityBlockRuleType string
+
+// EndEnrollmentRequest defines model for EndEnrollmentRequest.
+type EndEnrollmentRequest struct {
+	// Reason Justificativa registrada no event log (auditoria).
+	Reason string `json:"reason"`
+
+	// Status O desfecho: `concluida` (paciente terminou a linha) ou `encerrada` (interrompida). São desfechos distintos na jornada, por isso o admin escolhe qual.
+	Status EndEnrollmentRequestStatus `json:"status"`
+}
+
+// EndEnrollmentRequestStatus O desfecho: `concluida` (paciente terminou a linha) ou `encerrada` (interrompida). São desfechos distintos na jornada, por isso o admin escolhe qual.
+type EndEnrollmentRequestStatus string
+
+// Enrollment O vínculo de um paciente a uma VERSÃO publicada da linha. `care_line_version` é congelado na matrícula: republicar a linha não muda a jornada de quem já está matriculado. `valid_from`/`valid_until` resumem a vigência corrente; o detalhe por janela está em `periods`.
+type Enrollment struct {
+	CareLineCode    string             `json:"care_line_code"`
+	CareLineVersion int                `json:"care_line_version"`
+	Id              openapi_types.UUID `json:"id"`
+	PatientId       openapi_types.UUID `json:"patient_id"`
+	Periods         []EnrollmentPeriod `json:"periods"`
+
+	// Status `ativa` vale e está na vigência; `expirada` passou da vigência sem renovar; `concluida`/`encerrada` são desfechos deliberados do admin; `pausada` é suspensão temporária.
+	Status     EnrollmentStatus `json:"status"`
+	ValidFrom  time.Time        `json:"valid_from"`
+	ValidUntil time.Time        `json:"valid_until"`
+}
+
+// EnrollmentStatus `ativa` vale e está na vigência; `expirada` passou da vigência sem renovar; `concluida`/`encerrada` são desfechos deliberados do admin; `pausada` é suspensão temporária.
+type EnrollmentStatus string
+
+// EnrollmentPeriod Uma janela de validade da matrícula. A renovação NÃO edita o período vigente: acrescenta outro, para a jornada guardar por quais janelas o paciente passou.
+type EnrollmentPeriod struct {
+	EndsAt time.Time          `json:"ends_at"`
+	Id     openapi_types.UUID `json:"id"`
+
+	// Source Origem da concessão. Só `admin` no Slice 1 (sem autosserviço).
+	Source   EnrollmentPeriodSource `json:"source"`
+	StartsAt time.Time              `json:"starts_at"`
+}
+
+// EnrollmentPeriodSource Origem da concessão. Só `admin` no Slice 1 (sem autosserviço).
+type EnrollmentPeriodSource string
+
+// ForceStatusRequest defines model for ForceStatusRequest.
+type ForceStatusRequest struct {
+	// Status O status a forçar na consulta (rota interna de teste).
+	Status ForceStatusRequestStatus `json:"status"`
+}
+
+// ForceStatusRequestStatus O status a forçar na consulta (rota interna de teste).
+type ForceStatusRequestStatus string
 
 // HealthStatus defines model for HealthStatus.
 type HealthStatus struct {
@@ -203,6 +835,46 @@ type JoinWindow struct {
 // JoinWindowStatus Decidido com o relógio do SERVIDOR. UNAVAILABLE = a consulta não está confirmada ou não temos link para ela — é diferente de "ainda não" e merece outra frase.
 type JoinWindowStatus string
 
+// Journey A jornada do portador da sessão: todas as suas matrículas, cada uma com itens e vereditos. Envelope `enrollments` (não array de topo) pelo mesmo motivo dos `items`: dá para crescer sem quebrar o cliente.
+type Journey struct {
+	Enrollments []JourneyEnrollment `json:"enrollments"`
+}
+
+// JourneyEnrollment Uma matrícula pronta para a tela de jornada: a matrícula, o nome da linha (para a tela não cruzar com /admin), os itens já com veredito e os eventos recentes.
+type JourneyEnrollment struct {
+	CareLineName string `json:"care_line_name"`
+
+	// Enrollment O vínculo de um paciente a uma VERSÃO publicada da linha. `care_line_version` é congelado na matrícula: republicar a linha não muda a jornada de quem já está matriculado. `valid_from`/`valid_until` resumem a vigência corrente; o detalhe por janela está em `periods`.
+	Enrollment   Enrollment     `json:"enrollment"`
+	Items        []JourneyItem  `json:"items"`
+	RecentEvents []JourneyEvent `json:"recent_events"`
+}
+
+// JourneyEvent Um fato da jornada (event log append-only, SPEC §3.3). É a única fonte que o motor lê e o que a auditoria devolve. `payload` é aberto porque cada tipo carrega dados próprios (o id da consulta, o novo status, a origem da renovação).
+type JourneyEvent struct {
+	// Actor Quem provocou o fato: `paciente` (agendou/cancelou), `sistema` (expiração automática) ou `admin` (matrícula, forçar status).
+	Actor      JourneyEventActor      `json:"actor"`
+	EventType  JourneyEventEventType  `json:"event_type"`
+	Id         openapi_types.UUID     `json:"id"`
+	OccurredAt time.Time              `json:"occurred_at"`
+	Payload    map[string]interface{} `json:"payload"`
+}
+
+// JourneyEventActor Quem provocou o fato: `paciente` (agendou/cancelou), `sistema` (expiração automática) ou `admin` (matrícula, forçar status).
+type JourneyEventActor string
+
+// JourneyEventEventType defines model for JourneyEvent.EventType.
+type JourneyEventEventType string
+
+// JourneyItem Um item da linha com o veredito do motor avaliado para AGORA.
+type JourneyItem struct {
+	// Eligibility O veredito do motor para UM item, no instante avaliado. `allowed` resume (`blocks` vazio); `blocks` diz por que não, quando não. O front usa isto para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o porquê.
+	Eligibility Eligibility `json:"eligibility"`
+
+	// Item Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade. `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
+	Item CareLineItem `json:"item"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	// Cpf O CPF é o identificador de login, não o e-mail — é a chave de identidade do paciente e é sempre único.
@@ -212,12 +884,17 @@ type LoginRequest struct {
 
 // Problem Erro no formato RFC 7807 (problem+json).
 type Problem struct {
-	Detail   *string `json:"detail,omitempty"`
-	Instance *string `json:"instance,omitempty"`
-	Reason   *Reason `json:"reason,omitempty"`
-	Status   int     `json:"status"`
-	Title    string  `json:"title"`
-	Type     *string `json:"type,omitempty"`
+	// Blocks Bloqueios do motor de elegibilidade. Presente no 422 de agendamento barrado; cada item explica UMA regra violada.
+	Blocks *[]EligibilityBlock `json:"blocks,omitempty"`
+	Detail *string             `json:"detail,omitempty"`
+
+	// Errors Erros de validação. Presente no 400 de publicação de linha, com todos os problemas do template de uma vez.
+	Errors   *[]string `json:"errors,omitempty"`
+	Instance *string   `json:"instance,omitempty"`
+	Reason   *Reason   `json:"reason,omitempty"`
+	Status   int       `json:"status"`
+	Title    string    `json:"title"`
+	Type     *string   `json:"type,omitempty"`
 }
 
 // Professional O profissional como o paciente o vê na hora de escolher. Sem contato, sem CPF, sem agenda interna: o que não está aqui não vaza.
@@ -260,6 +937,20 @@ type Reason struct {
 	Detail *string `json:"detail,omitempty"`
 }
 
+// RecurrenceRule Cadência do item (RRULE simplificada, SPEC §3.2a). É a REGRA de repetição ("1 vez por semana"), não a lista de datas: o motor deriva as janelas dela. Nula quando o item é de ocorrência única.
+type RecurrenceRule struct {
+	Freq RecurrenceRuleFreq `json:"freq"`
+
+	// Interval A cada quantas unidades de `freq` a janela reabre (1 = toda).
+	Interval int `json:"interval"`
+
+	// Quota Quantas ocorrências a janela permite.
+	Quota int `json:"quota"`
+}
+
+// RecurrenceRuleFreq defines model for RecurrenceRule.Freq.
+type RecurrenceRuleFreq string
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	Address   Address            `json:"address"`
@@ -276,6 +967,15 @@ type RegisterRequest struct {
 	// Phone Celular com DDD, só dígitos (10 ou 11).
 	Phone string `json:"phone"`
 }
+
+// RenewEnrollmentRequest defines model for RenewEnrollmentRequest.
+type RenewEnrollmentRequest struct {
+	// Months Meses acrescentados à vigência (novo período, não edita o atual).
+	Months RenewEnrollmentRequestMonths `json:"months"`
+}
+
+// RenewEnrollmentRequestMonths Meses acrescentados à vigência (novo período, não edita o atual).
+type RenewEnrollmentRequestMonths int
 
 // Slot Um horário livre. Autossuficiente de propósito: qualquer Slot, sozinho, tem tudo para ser renderizado certo, sem depender do contexto de onde veio.
 type Slot struct {
@@ -320,6 +1020,18 @@ type SpecialtyList struct {
 // AppointmentId defines model for AppointmentId.
 type AppointmentId = openapi_types.UUID
 
+// CareAppointmentId defines model for CareAppointmentId.
+type CareAppointmentId = openapi_types.UUID
+
+// CareLineId defines model for CareLineId.
+type CareLineId = openapi_types.UUID
+
+// EnrollmentId defines model for EnrollmentId.
+type EnrollmentId = openapi_types.UUID
+
+// ItemRef defines model for ItemRef.
+type ItemRef = string
+
 // ProfessionalId defines model for ProfessionalId.
 type ProfessionalId = string
 
@@ -335,11 +1047,17 @@ type BookingUnconfirmed = Problem
 // DavUnavailable Erro no formato RFC 7807 (problem+json).
 type DavUnavailable = Problem
 
+// EligibilityBlocked Erro no formato RFC 7807 (problem+json).
+type EligibilityBlocked = Problem
+
 // LegacyUnavailable Erro no formato RFC 7807 (problem+json).
 type LegacyUnavailable = Problem
 
 // NotFound Erro no formato RFC 7807 (problem+json).
 type NotFound = Problem
+
+// PublishInvalid Erro no formato RFC 7807 (problem+json).
+type PublishInvalid = Problem
 
 // TooManyRequests Erro no formato RFC 7807 (problem+json).
 type TooManyRequests = Problem
@@ -347,8 +1065,62 @@ type TooManyRequests = Problem
 // Unauthorized Erro no formato RFC 7807 (problem+json).
 type Unauthorized = Problem
 
+// adminTokenContextKey is the context key for adminToken security scheme
+type adminTokenContextKey string
+
 // cookieAuthContextKey is the context key for cookieAuth security scheme
 type cookieAuthContextKey string
+
+// ListCareLinesParams defines parameters for ListCareLines.
+type ListCareLinesParams struct {
+	// Code Filtra por uma linha específica (todas as versões desse code).
+	Code *string `form:"code,omitempty" json:"code,omitempty"`
+}
+
+// ListMyCareAppointmentsParams defines parameters for ListMyCareAppointments.
+type ListMyCareAppointmentsParams struct {
+	// Status Filtra por status da consulta.
+	Status *ListMyCareAppointmentsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// ListMyCareAppointmentsParamsStatus defines parameters for ListMyCareAppointments.
+type ListMyCareAppointmentsParamsStatus string
+
+// CreateMyCareAppointmentParams defines parameters for CreateMyCareAppointment.
+type CreateMyCareAppointmentParams struct {
+	// IdempotencyKey Chave de idempotência gerada pelo cliente (UUID recomendado). A MESMA key devolve a MESMA resposta sem duplicar a consulta; keys diferentes são pedidos diferentes. Obrigatória: sem ela, 400.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// GetMyAuditParams defines parameters for GetMyAudit.
+type GetMyAuditParams struct {
+	// Cursor Cursor opaco da página anterior. Ausente = começa do início.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Quantos eventos por página (1..100).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetMyAvailabilityParams defines parameters for GetMyAvailability.
+type GetMyAvailabilityParams struct {
+	// ItemId Id do item da linha (UUID).
+	ItemId openapi_types.UUID `form:"item_id" json:"item_id"`
+
+	// From Primeiro dia do intervalo, no fuso da agenda. Default: hoje.
+	From *openapi_types.Date `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Último dia, inclusive. Default a cargo do servidor.
+	To *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// GetMyEligibilityParams defines parameters for GetMyEligibility.
+type GetMyEligibilityParams struct {
+	// ItemId Id do item da linha (UUID).
+	ItemId openapi_types.UUID `form:"item_id" json:"item_id"`
+
+	// Date Instante da avaliação (RFC 3339). Default: agora.
+	Date *time.Time `form:"date,omitempty" json:"date,omitempty"`
+}
 
 // ListProfessionalSlotsParams defines parameters for ListProfessionalSlots.
 type ListProfessionalSlotsParams struct {
@@ -359,6 +1131,24 @@ type ListProfessionalSlotsParams struct {
 	To *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
 }
 
+// CreateCareLineJSONRequestBody defines body for CreateCareLine for application/json ContentType.
+type CreateCareLineJSONRequestBody = CreateCareLineRequest
+
+// CreateCareLineItemJSONRequestBody defines body for CreateCareLineItem for application/json ContentType.
+type CreateCareLineItemJSONRequestBody = CreateCareLineItemRequest
+
+// CreateCareLineItemRuleJSONRequestBody defines body for CreateCareLineItemRule for application/json ContentType.
+type CreateCareLineItemRuleJSONRequestBody = CreateCareLineRuleRequest
+
+// CreateEnrollmentJSONRequestBody defines body for CreateEnrollment for application/json ContentType.
+type CreateEnrollmentJSONRequestBody = CreateEnrollmentRequest
+
+// EndEnrollmentJSONRequestBody defines body for EndEnrollment for application/json ContentType.
+type EndEnrollmentJSONRequestBody = EndEnrollmentRequest
+
+// RenewEnrollmentJSONRequestBody defines body for RenewEnrollment for application/json ContentType.
+type RenewEnrollmentJSONRequestBody = RenewEnrollmentRequest
+
 // CreateAppointmentJSONRequestBody defines body for CreateAppointment for application/json ContentType.
 type CreateAppointmentJSONRequestBody = CreateAppointmentRequest
 
@@ -367,3 +1157,9 @@ type LoginJSONRequestBody = LoginRequest
 
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody = RegisterRequest
+
+// ForceCareAppointmentStatusJSONRequestBody defines body for ForceCareAppointmentStatus for application/json ContentType.
+type ForceCareAppointmentStatusJSONRequestBody = ForceStatusRequest
+
+// CreateMyCareAppointmentJSONRequestBody defines body for CreateMyCareAppointment for application/json ContentType.
+type CreateMyCareAppointmentJSONRequestBody = CreateCareAppointmentRequest
