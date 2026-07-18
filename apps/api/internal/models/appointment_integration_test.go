@@ -111,6 +111,12 @@ type fakeDAVAppts struct {
 	// onCall roda DENTRO da chamada, antes de retornar. Serve para simular o
 	// paciente fechando a aba no meio da chamada lenta à DAV (cancelando o ctx).
 	onCall func()
+
+	// Cancelamento: espelha o de cima. cancelledID guarda o id recebido, para o
+	// teste provar que cancelamos a consulta certa na DAV.
+	cancelErr   error
+	cancelCalls int
+	cancelledID string
 }
 
 func (f *fakeDAVAppts) CreateAppointment(context.Context, dav.CreateAppointmentInput) (dav.Appointment, error) {
@@ -122,6 +128,12 @@ func (f *fakeDAVAppts) CreateAppointment(context.Context, dav.CreateAppointmentI
 		return dav.Appointment{}, f.err
 	}
 	return dav.Appointment{ID: davApptID, PatientJoinURL: linkPaciente}, nil
+}
+
+func (f *fakeDAVAppts) CancelAppointment(_ context.Context, id string) error {
+	f.cancelCalls++
+	f.cancelledID = id
+	return f.cancelErr
 }
 
 // ---------------------------------------------------------------------------
@@ -484,4 +496,142 @@ func TestGetForAccount_NaoVazaConsultaDeTerceiro(t *testing.T) {
 	outra := criaConta2(t, c.pool)
 	_, err = c.store.GetForAccount(ctx, uuid.MustParse(got.ID), outra.ID, c.agora)
 	require.ErrorIs(t, err, models.ErrAppointmentNotFound)
+}
+
+// ---------------------------------------------------------------------------
+// Cancelamento
+// ---------------------------------------------------------------------------
+
+// bookaConfirmada roda a saga até CONFIRMED e devolve o id — o ponto de partida de
+// todo teste de cancelamento.
+func (c cenario) bookaConfirmada(t *testing.T) uuid.UUID {
+	t.Helper()
+	got, err := c.store.Book(context.Background(), c.entrada())
+	require.NoError(t, err)
+	require.Equal(t, "CONFIRMED", got.Status)
+	require.True(t, c.ag.booked, "o horário tem que estar reservado antes de cancelar")
+	return uuid.MustParse(got.ID)
+}
+
+// Caminho feliz: CANCELLED no Postgres, horário de volta ao mercado (slot_released_at
+// preenchido), fakeAgenda liberou o slot e a DAV foi cancelada com o id certo.
+func TestCancel_CaminhoFeliz(t *testing.T) {
+	c := novoCenario(t)
+	id := c.bookaConfirmada(t)
+
+	res, err := c.store.Cancel(context.Background(), c.conta, id, c.agora)
+	require.NoError(t, err)
+	require.True(t, res.DAVCancelled, "a DAV cancelou")
+	require.Empty(t, res.DAVError)
+	require.Equal(t, slotID, res.SlotID)
+
+	require.Equal(t, 1, c.dv.cancelCalls, "cancelou na DAV uma vez")
+	require.Equal(t, davApptID, c.dv.cancelledID, "cancelou com o dav_appointment_id certo")
+	require.True(t, c.ag.released, "o horário voltou ao mercado no legado")
+	require.False(t, c.ag.booked)
+
+	status, held, released := c.statusNoBanco(t, id.String())
+	require.Equal(t, "CANCELLED", status)
+	require.True(t, held)
+	require.True(t, released, "slot_released_at preenchido")
+}
+
+// A DAV responde erro no cancel (é o 500 real da HML — achado #20). O cancelamento
+// AINDA é sucesso: a consulta fica CANCELLED, o horário volta, e o erro tolerado
+// vai no resultado (DAVCancelled=false, DAVError preenchido).
+func TestCancel_DAVFalha_ToleraEDevolveSucesso(t *testing.T) {
+	c := novoCenario(t)
+	id := c.bookaConfirmada(t)
+	c.dv.cancelErr = errors.New("dav: PUT /appointment/{id}/cancel respondeu 500 (trace 50295b5)")
+
+	res, err := c.store.Cancel(context.Background(), c.conta, id, c.agora)
+	require.NoError(t, err, "o cancel da DAV é best-effort — não derruba o cancelamento do paciente")
+	require.False(t, res.DAVCancelled)
+	require.NotEmpty(t, res.DAVError, "o erro tolerado fica registrado no resultado")
+	require.Equal(t, 1, c.dv.cancelCalls, "escrita na DAV não repete")
+
+	status, held, released := c.statusNoBanco(t, id.String())
+	require.Equal(t, "CANCELLED", status)
+	require.True(t, held)
+	require.True(t, released, "o horário voltou mesmo com a DAV falhando")
+	require.True(t, c.ag.released)
+}
+
+// Devolver o horário falha (fakeAgenda com erro injetado). O cancelamento continua
+// sucesso: PG CANCELLED, mas slot_released_at NULO — a linha vira fila do worker,
+// que tenta devolver de novo. NÃO desfazemos o CANCELLED.
+func TestCancel_ReleaseSlotFalha_DeixaAFilaDoWorker(t *testing.T) {
+	c := novoCenario(t)
+	id := c.bookaConfirmada(t)
+	c.ag.releaseErr = agenda.ErrUnavailable
+
+	res, err := c.store.Cancel(context.Background(), c.conta, id, c.agora)
+	require.NoError(t, err, "devolver o horário é best-effort")
+	require.True(t, res.DAVCancelled, "a DAV ainda foi cancelada")
+
+	status, held, released := c.statusNoBanco(t, id.String())
+	require.Equal(t, "CANCELLED", status)
+	require.True(t, held)
+	require.False(t, released, "slot_released_at NULO: fica para o worker devolver")
+}
+
+// Cancelar consulta de OUTRA conta é 404, nunca 403: um 403 confirmaria que o id
+// existe e a rota viraria oráculo de ids. E a consulta do dono fica intacta.
+func TestCancel_DeOutraConta_EhNotFound(t *testing.T) {
+	c := novoCenario(t)
+	id := c.bookaConfirmada(t)
+
+	outra := criaConta2(t, c.pool)
+	_, err := c.store.Cancel(context.Background(), outra, id, c.agora)
+	require.ErrorIs(t, err, models.ErrAppointmentNotFound)
+
+	require.Zero(t, c.dv.cancelCalls, "consulta de outro nem toca na DAV")
+	status, _, _ := c.statusNoBanco(t, id.String())
+	require.Equal(t, "CONFIRMED", status, "a consulta do dono fica como estava")
+}
+
+// Uma consulta ainda em voo (PENDING_SLOT) não é do paciente cancelar — quem a
+// resolve é a saga/worker. ErrCancelNotAllowed (o controller mapeia para 409).
+func TestCancel_NaoConfirmada_EhCancelNotAllowed(t *testing.T) {
+	c := novoCenario(t)
+	id := c.criaPendente(t)
+
+	_, err := c.store.Cancel(context.Background(), c.conta, id, c.agora)
+	require.ErrorIs(t, err, models.ErrCancelNotAllowed)
+	require.Zero(t, c.dv.cancelCalls, "nem toca na DAV")
+
+	status, _, _ := c.statusNoBanco(t, id.String())
+	require.Equal(t, "PENDING_SLOT", status, "a consulta em voo fica como estava")
+}
+
+// Cancelar duas vezes: a segunda recusa (já não está CONFIRMED). Cobre a corrida
+// entre dois cancelamentos — o guard `status = 'CONFIRMED'` do UPDATE decide.
+func TestCancel_DuasVezes_SegundaRecusa(t *testing.T) {
+	c := novoCenario(t)
+	id := c.bookaConfirmada(t)
+
+	_, err := c.store.Cancel(context.Background(), c.conta, id, c.agora)
+	require.NoError(t, err)
+
+	_, err = c.store.Cancel(context.Background(), c.conta, id, c.agora)
+	require.ErrorIs(t, err, models.ErrCancelNotAllowed, "já cancelada não cancela de novo")
+	require.Equal(t, 1, c.dv.cancelCalls, "a DAV só foi chamada na primeira")
+}
+
+// criaPendente insere uma consulta em PENDING_SLOT direto no banco: é um estado
+// intermediário da saga que o caminho feliz não deixa parado, então o montamos
+// à mão para exercitar a recusa do cancelamento.
+func (c cenario) criaPendente(t *testing.T) uuid.UUID {
+	t.Helper()
+	id, err := uuid.NewV7()
+	require.NoError(t, err)
+	_, err = c.pool.Exec(context.Background(), `
+		INSERT INTO appointment (id, account_id, legacy_slot_id, legacy_professional_id,
+		                         legacy_specialty_id, professional_name, specialty_name,
+		                         starts_at, ends_at, status)
+		VALUES ($1,$2,$3,$4,$5,'Ana Beatriz Moura','Psicologia',$6,$7,'PENDING_SLOT')`,
+		id, c.conta.ID, slotID, profID, specID,
+		c.ag.booking.Slot.StartsAt, c.ag.booking.Slot.EndsAt)
+	require.NoError(t, err)
+	return id
 }
