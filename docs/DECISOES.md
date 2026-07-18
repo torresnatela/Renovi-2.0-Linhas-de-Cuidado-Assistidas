@@ -333,3 +333,35 @@ forjável. **Tratar antes do go-live**, junto do ajuste do `deploy/Caddyfile`.
 **Consequência:** o agendamento está protegido; auth e a auditoria não, até o
 ajuste do Caddy. Registrado aqui para não se perder — é o maior item aberto de
 segurança do piloto, ao lado do fator de posse do ADR-013.
+
+## ADR-020 — Quota das linhas de cuidado é janela MÓVEL GERAL, não mês civil
+
+**Contexto:** o Slice 1 (Linhas de Cuidado) precisa de um motor de elegibilidade
+puro (`internal/models/careline/`) que decida se o paciente pode agendar um item
+num instante. A regra mais delicada é a QUOTA "N por mês": mês civil cria o
+exploit clássico de fronteira (4 consultas na última semana de agosto + 4 na
+primeira de setembro = 8 em 15 dias).
+
+**Decisão:**
+- **Janela móvel GERAL:** `QUOTA {max, period}` bloqueia se **existe alguma**
+  janela de duração `period` (week=7d, month=30d — durações fixas) contendo o
+  `intendedAt` com ≥ max consultas que contam. Não são só as duas janelas
+  ancoradas no `intendedAt`: uma janela começando numa consulta antiga também
+  bloqueia (caso normativo T18). Janelas são semiabertas — distância exata de
+  `period` fica fora (T17). `period=total` = vida da matrícula, bloqueio
+  permanente. `window:"calendar"` é **rejeitada no publish**.
+- **Contagem de canceladas:** cancelou com ≥ 24h de antecedência
+  (`CancelCountThreshold`, configurável por journey) → a vaga volta; cancelamento
+  tardio, falta e status ativos contam. Vale para QUOTA e MIN_INTERVAL.
+- **Composição sem curto-circuito:** vigência da matrícula é pré-condição sempre
+  avaliada, mas NÃO impede as demais regras de rodarem — a resposta traz TODOS os
+  `Blocks` (vigência primeiro), cada um com `Reason` PT-BR e `AvailableFrom`
+  quando o desbloqueio é por tempo (nil = depende de ação: renovar, realizar
+  pré-requisito).
+- **Falha fechada:** params de regra inválidos em runtime viram Block, nunca
+  regra ignorada.
+
+**Consequência:** a tabela T1–T19 de `evaluate_test.go` é a especificação
+normativa do slice — mudança de semântica começa por ela. O motor é O(n²) na
+quota, aceitável para listas de consultas de uma matrícula. O front nunca
+recalcula regra: exibe `Reason`/`AvailableFrom` que o motor mandou.

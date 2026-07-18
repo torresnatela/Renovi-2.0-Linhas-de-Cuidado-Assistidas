@@ -3,7 +3,17 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-16 — **Agendamento concluído (backend + front)** e verificado ponta a ponta no browser contra a DAV de homologação._
+_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 1 concluída:** motor de regras puro `models/careline` por TDD._
+
+## 🚧 Slice 1 — Linhas de Cuidado Assistidas (em andamento)
+
+- [x] **Fase 1 — motor de regras puro** (`internal/models/careline/`, ADR-020):
+  `Evaluate` (VIGENCIA, QUOTA janela móvel GERAL, MIN_INTERVAL, MAX_ADVANCE,
+  PREREQUISITE), `ParseRuleParams` (params tipados, `DisallowUnknownFields`) e
+  `ValidatePublish` (itens, ciclos de pré-requisito, especialidades do legado).
+  A tabela T1–T19 em `evaluate_test.go` é a **especificação normativa** do slice.
+- [ ] Próximas fases: schema/migrations do domínio, queries, wiring nos
+  controllers e front (o pacote ainda não é importado por ninguém — de propósito).
 
 ## ✅ Agendamento — CONCLUÍDO (backend + front)
 
@@ -109,10 +119,10 @@ e ADR-010 a ADR-013 em `docs/DECISOES.md`.
 (compensação e revisão). Sem ele, horário que a compensação não devolveu fica
 retido até alguém olhar.
 
-**2. Motor de elegibilidade** (`models/eligibility`, hoje stub). Ele filtra ANTES
-do agendamento, sem mudar as rotas já contratadas. Escreva a suíte table-driven
-antes: cota semanal (semana ISO), dependências N, "cancelou → cota volta",
-`NOT_YET_OPEN`, `OVERDUE`. Ver SPEC §3.3.
+**2. Wiring do motor de linhas de cuidado.** O motor puro está pronto
+(`models/careline`, Fase 1 do Slice 1); faltam schema, queries e os controllers
+que o alimentam com `Journey`/`Rule` e expõem os `Blocks` ao front. Ele filtra
+ANTES do agendamento, sem mudar as rotas já contratadas.
 
 ## 🗺️ Backlog por fase (resumo — detalhe no SPEC §11)
 
