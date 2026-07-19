@@ -964,6 +964,13 @@ type HealthStatus struct {
 // HealthStatusStatus defines model for HealthStatus.Status.
 type HealthStatusStatus string
 
+// HelpChannel Canal de urgência/care navigation (triagem, não tratamento). O front roteia pelo `type`; sem informação de contato falsa no MVP.
+type HelpChannel struct {
+	Label   string `json:"label"`
+	Message string `json:"message"`
+	Type    string `json:"type"`
+}
+
 // InstrumentConfig Config de um instrumento para o front desenhar a captura. Cortes e polaridades são parâmetros versionados; o front não os recalcula.
 type InstrumentConfig struct {
 	Anel          InstrumentConfigAnel  `json:"anel"`

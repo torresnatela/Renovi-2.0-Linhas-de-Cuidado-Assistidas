@@ -253,6 +253,31 @@ func (s *AssessmentStore) Submit(ctx context.Context, patientID uuid.UUID, codig
 		return AssessmentResult{}, fmt.Errorf("emitir evento: %w", err)
 	}
 
+	// Rastreio positivo => escalonamento à trilha CLÍNICA (nunca ao gestor). É um
+	// fato próprio na jornada; o roteamento efetivo entra quando a trilha clínica
+	// existir (ver PROGRESSO). actor=sistema: quem escala é a regra, não o paciente.
+	if scored.FlagEncaminhar {
+		escID, err := uuid.NewV7()
+		if err != nil {
+			return AssessmentResult{}, fmt.Errorf("gerar uuid v7 do escalonamento: %w", err)
+		}
+		escPayload, err := json.Marshal(map[string]any{
+			"codigo": codigo, "faixa": scored.Faixa, "origem": "rastreio_positivo",
+		})
+		if err != nil {
+			return AssessmentResult{}, fmt.Errorf("serializar escalonamento: %w", err)
+		}
+		if _, err := q.InsertJourneyEvent(ctx, gen.InsertJourneyEventParams{
+			ID: escID, EnrollmentID: det.EnrollmentID, PatientID: patientID,
+			EventType: "escalonamento_clinico", Actor: "sistema",
+			RefTable: pgtype.Text{String: "wellbeing_assessment", Valid: true},
+			RefID:    pgUUID(row.ID),
+			Payload:  escPayload,
+		}); err != nil {
+			return AssessmentResult{}, fmt.Errorf("emitir escalonamento: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return AssessmentResult{}, fmt.Errorf("commit: %w", err)
 	}

@@ -26,6 +26,7 @@ type MoodCheckinService interface {
 	Record(ctx context.Context, patientID uuid.UUID, in models.MoodCheckinInput, now time.Time) (models.MoodCheckin, error)
 	Today(ctx context.Context, patientID uuid.UUID, now time.Time) (models.MoodToday, error)
 	History(ctx context.Context, patientID uuid.UUID, limit int) ([]models.MoodCheckin, error)
+	HelpNow(ctx context.Context, patientID uuid.UUID, now time.Time) (models.HelpChannel, error)
 }
 
 // MoodController expõe as rotas do Verificador de Humor (Anexo C), atrás de
@@ -167,6 +168,22 @@ func (c MoodController) GetHistory(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toAPIMoodCheckin(ck))
 	}
 	WriteJSON(w, http.StatusOK, out)
+}
+
+// HelpNow atende a afordância "preciso de ajuda agora": roteia ao canal de
+// urgência (e registra o pedido na jornada). Nunca ao gestor.
+func (c MoodController) HelpNow(w http.ResponseWriter, r *http.Request) {
+	account, ok := AccountFrom(r.Context())
+	if !ok {
+		WriteProblem(w, http.StatusUnauthorized, "Não autenticado", "sessão ausente ou inválida")
+		return
+	}
+	ch, err := c.Checkins.HelpNow(r.Context(), account.ID, c.now())
+	if err != nil {
+		WriteProblem(w, http.StatusInternalServerError, "Erro ao rotear ajuda", "")
+		return
+	}
+	WriteJSON(w, http.StatusOK, api.HelpChannel{Type: ch.Type, Label: ch.Label, Message: ch.Message})
 }
 
 func toAPIMoodCheckin(c models.MoodCheckin) api.MoodCheckin {

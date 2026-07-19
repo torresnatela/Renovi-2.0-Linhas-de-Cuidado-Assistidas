@@ -24,6 +24,7 @@ type fakeCheckins struct {
 	today     models.MoodToday
 	todayErr  error
 	history   []models.MoodCheckin
+	help      models.HelpChannel
 }
 
 func (f *fakeCheckins) Record(context.Context, uuid.UUID, models.MoodCheckinInput, time.Time) (models.MoodCheckin, error) {
@@ -36,6 +37,10 @@ func (f *fakeCheckins) History(context.Context, uuid.UUID, int) ([]models.MoodCh
 	return f.history, nil
 }
 
+func (f *fakeCheckins) HelpNow(context.Context, uuid.UUID, time.Time) (models.HelpChannel, error) {
+	return f.help, nil
+}
+
 func serveCheckin(t *testing.T, f *fakeCheckins, method, alvo, corpo string) *httptest.ResponseRecorder {
 	t.Helper()
 	c := controllers.MoodController{Checkins: f, Now: func() time.Time { return time.Unix(0, 0).UTC() }}
@@ -44,6 +49,7 @@ func serveCheckin(t *testing.T, f *fakeCheckins, method, alvo, corpo string) *ht
 	r.Post("/me/mood/checkin", c.RecordCheckin)
 	r.Get("/me/mood/today", c.GetToday)
 	r.Get("/me/mood/history", c.GetHistory)
+	r.Post("/me/mood/help-now", c.HelpNow)
 
 	req := httptest.NewRequest(method, alvo, strings.NewReader(corpo))
 	req.AddCookie(&http.Cookie{Name: controllers.SessionCookieName, Value: "t"})
@@ -89,6 +95,16 @@ func TestCheckin_Record_Invalido_400(t *testing.T) {
 	w := serveCheckin(t, f, http.MethodPost, "/me/mood/checkin", `{"valencia":200,"energia":20}`)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCheckin_HelpNow_OK(t *testing.T) {
+	f := &fakeCheckins{help: models.HelpChannel{Type: "care_navigation", Label: "Falar agora", Message: "estamos com você"}}
+	w := serveCheckin(t, f, http.MethodPost, "/me/mood/help-now", "")
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "care_navigation", body["type"])
 }
 
 func TestCheckin_Today_OK(t *testing.T) {

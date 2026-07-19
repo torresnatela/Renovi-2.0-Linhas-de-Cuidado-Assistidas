@@ -87,6 +87,18 @@ func localDay(now time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
+// HelpChannel é o canal de ajuda/urgência (care navigation) — triagem, não
+// tratamento (guardrail 6.2). Roteia SEMPRE ao canal clínico/urgência, jamais
+// ao gestor. Sem informação de contato falsa: o front roteia pelo Type.
+type HelpChannel struct {
+	Type    string
+	Label   string
+	Message string
+}
+
+// helpChannelCareNavigation é o tipo de canal do MVP.
+const helpChannelCareNavigation = "care_navigation"
+
 // MoodCheckinStore é a camada de dados + regra do anel diário.
 type MoodCheckinStore struct {
 	pool *pgxpool.Pool
@@ -281,6 +293,41 @@ func (s *MoodCheckinStore) History(ctx context.Context, patientID uuid.UUID, lim
 		out = append(out, toMoodCheckin(r))
 	}
 	return out, nil
+}
+
+// HelpNow registra o pedido de ajuda na jornada (quando há matrícula elegível) e
+// devolve o canal de urgência. A afordância é permanente — o canal é o que
+// importa; o registro é secundário (trilha clínica/auditoria, nunca gestor).
+func (s *MoodCheckinStore) HelpNow(ctx context.Context, patientID uuid.UUID, now time.Time) (HelpChannel, error) {
+	det, err := s.q.FindActivityEnrollment(ctx, gen.FindActivityEnrollmentParams{
+		PatientID: patientID, ValidFrom: now, Ref: CheckinHumorDiarioRef,
+	})
+	switch {
+	case err == nil:
+		payload, mErr := json.Marshal(map[string]any{"canal": helpChannelCareNavigation})
+		if mErr != nil {
+			return HelpChannel{}, fmt.Errorf("serializar payload: %w", mErr)
+		}
+		evID, gErr := uuid.NewV7()
+		if gErr != nil {
+			return HelpChannel{}, fmt.Errorf("gerar uuid v7: %w", gErr)
+		}
+		if _, iErr := s.q.InsertJourneyEvent(ctx, gen.InsertJourneyEventParams{
+			ID: evID, EnrollmentID: det.EnrollmentID, PatientID: patientID,
+			EventType: "pedido_ajuda", Actor: "paciente",
+			Payload: payload,
+		}); iErr != nil {
+			return HelpChannel{}, fmt.Errorf("registrar pedido de ajuda: %w", iErr)
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return HelpChannel{}, fmt.Errorf("consultar matrícula: %w", err)
+	}
+
+	return HelpChannel{
+		Type:    helpChannelCareNavigation,
+		Label:   "Falar com a equipe de cuidado agora",
+		Message: "Você não está sozinho. Vamos te conectar com a equipe de cuidado para uma triagem imediata.",
+	}, nil
 }
 
 func toMoodCheckin(row gen.MoodCheckin) MoodCheckin {

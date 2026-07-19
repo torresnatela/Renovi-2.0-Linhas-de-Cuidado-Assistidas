@@ -315,6 +315,23 @@ paths:
                   $ref: "#/components/schemas/MoodCheckin"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /me/mood/help-now:
+    post:
+      operationId: moodHelpNow
+      summary: Afordância "preciso de ajuda agora" — roteia ao canal de urgência.
+      description: >
+        Registra o pedido na jornada (trilha clínica/auditoria) e devolve o canal
+        de urgência/care navigation — triagem, não tratamento (guardrail 6.2).
+        NUNCA vai ao gestor.
+      responses:
+        "200":
+          description: Canal de urgência para onde encaminhar o paciente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HelpChannel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /me/assessments/{codigo}:
     get:
       operationId: getAssessmentAvailability
@@ -1729,6 +1746,20 @@ components:
           description: >
             true quando o gatilho indica escalonamento à trilha CLÍNICA (PHQ-4
             positivo). Nunca vai ao gestor — só ao canal clínico/urgência.
+    HelpChannel:
+      description: >
+        Canal de urgência/care navigation (triagem, não tratamento). O front roteia
+        pelo `type`; sem informação de contato falsa no MVP.
+      type: object
+      required: [type, label, message]
+      properties:
+        type:
+          type: string
+          example: care_navigation
+        label:
+          type: string
+        message:
+          type: string
     AssessmentAvailability:
       description: Se o instrumento pode ser respondido agora, e seu descritor.
       type: object

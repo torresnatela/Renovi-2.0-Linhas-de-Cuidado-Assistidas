@@ -535,3 +535,27 @@ fora-de-banda.
 **Consequência:** `escalate=true` (PHQ-4 positivo) roteia à trilha CLÍNICA — nunca
 ao gestor (Módulo 6). A tabela de testes de `trigger` é a especificação; mudar a
 máquina de estados começa por ela.
+
+## ADR-036 — Roteamento de crise e escalonamento vão à trilha clínica, nunca ao gestor
+
+**Contexto:** o anel diário NÃO é detector de crise (sinaliza tendência). Mas o
+módulo precisa de (a) uma afordância permanente "preciso de ajuda agora" e (b)
+escalonamento de rastreio positivo — ambos SEMPRE ao canal clínico/urgência,
+jamais ao gestor (guardrails 6.1/6.2/6.5 do documento central; Anexo C.5.5).
+
+**Decisão:**
+- `POST /me/mood/help-now` registra `pedido_ajuda` na jornada (quando há matrícula)
+  e devolve um `HelpChannel` (`type: care_navigation`) — triagem, não tratamento.
+  Sem informação de contato falsa no MVP: o front roteia pelo `type`.
+- Rastreio positivo (`flag_encaminhar`: WHO-5 índice < 28 / PHQ-4 subescala ≥ corte)
+  emite `escalonamento_clinico` (`actor: sistema`) na MESMA transação do
+  `assessment_respondido`. A trilha clínica efetiva entra quando existir; hoje grava
+  o fato/flag (auditoria) e o `Today.escalate` expõe o sinal ao paciente.
+- **Muralha:** todo evento em `journey_event` é escopado ao paciente
+  (`patient_id NOT NULL`) e append-only (role sem UPDATE/DELETE, 0008). Não há
+  superfície agregada/gestor no schema — a camada agregada/anonimizada (índice
+  coletivo, k-anonimato) é documento próprio (C.8) e não recebe dado individual.
+
+**Consequência:** o dado individual do Anexo C nunca transita para o gestor por
+construção (não existe caminho). O escalonamento é um fato na trilha clínica do
+paciente; a integração de roteamento real é o próximo passo (ver PROGRESSO).

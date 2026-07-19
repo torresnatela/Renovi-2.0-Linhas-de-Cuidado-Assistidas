@@ -189,6 +189,7 @@ func mountMood(r chi.Router, c controllers.MoodController, auth controllers.Auth
 		r.Post("/me/mood/checkin", c.RecordCheckin)
 		r.Get("/me/mood/today", c.GetToday)
 		r.Get("/me/mood/history", c.GetHistory)
+		r.Post("/me/mood/help-now", c.HelpNow)
 	})
 }
 

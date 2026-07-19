@@ -10,6 +10,7 @@ Contexto local do backend Go. Regras gerais no `CLAUDE.md` da raiz; arquitetura 
 | Handler de uma rota | `internal/controllers/<área>_controller.go` |
 | Regra de negócio + acesso a dados | `internal/models/<entidade>.go` |
 | Decisão pura (linha de cuidado) | `internal/models/careline/` — **sem I/O, nunca** |
+| Decisão pura (humor — Anexo C) | `internal/models/mood/scoring/` (pontuação) e `internal/models/mood/trigger/` (gatilho) — **sem I/O, nunca** |
 | Cliente de sistema externo (DAV, Gestão, legado) | `internal/adapters/<sistema>/` — interface no **consumidor** (ADR-012) |
 | Query SQL | `internal/db/queries/*.sql` → `make generate-sqlc` |
 | Migration | `internal/db/migrations/NNNN_nome.up.sql` + `.down.sql` |

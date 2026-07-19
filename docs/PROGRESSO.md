@@ -3,7 +3,7 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-18 — **Verificador Diário de Humor (Anexo C), Módulo 0 concluído:** `care_line_item.kind` ganha ATIVIDADE (branch `feat/verificador-humor`)._
+_Última atualização: 2026-07-18 — **Verificador Diário de Humor (Anexo C): backend completo (Módulos 0–6)** no branch `feat/verificador-humor`._
 
 ## 🌡️ Verificador Diário de Humor — Anexo C (em andamento, branch `feat/verificador-humor`)
 
@@ -46,7 +46,22 @@ Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
   PHQ-4 no `AssessmentStore.score` (subescalas PHQ-2/GAD-2, cortes do banco);
   wiring do gatilho no `MoodCheckinStore.Today` (oferta `offer` + `escalate`
   derivados do histórico). Integração do caminho completo NORMAL→WHO5→PHQ4→ESCALAR verde.
-- [ ] Módulo 6 — Roteamento de crise/escalonamento + fechamento.
+- [x] **Módulo 6 — Crise/escalonamento + fechamento** (ADR-036): `0014_crisis_routing`
+  (event_types `pedido_ajuda`, `escalonamento_clinico`). `POST /me/mood/help-now`
+  (canal de urgência + registro na jornada); rastreio positivo emite
+  `escalonamento_clinico` (actor=sistema) → trilha CLÍNICA, nunca gestor. Integração
+  (help-now + escalonamento + muralha) verde.
+
+**Próximos passos do Verificador de Humor** (fora do backend entregue):
+- **Verificação no browser** do fluxo (precisa do stack de dev com credenciais DAV;
+  rotas `/me/*` só montam com Auth).
+- **Front dos anéis periódicos** (WHO-5/PHQ-4) e da oferta/escalonamento (o front
+  mínimo entregue cobre só o anel diário).
+- **Comentário livre cifrado** (adiado — exige pacote de cifra em repouso).
+- **Degrau 1** (termômetro populacional fora de linha de cuidado) — fork adiado.
+- **Integração real da trilha clínica** e **worker de retenção** (hoje o escalonamento
+  grava o fato/flag; o roteamento efetivo entra quando a trilha existir).
+- **Camada agregada/gestor** (índice coletivo, k-anonimato) — documento próprio (C.8).
 
 ## 🚧 Slice 1 — Linhas de Cuidado Assistidas (em andamento)
 
