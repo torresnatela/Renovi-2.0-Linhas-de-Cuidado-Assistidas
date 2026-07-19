@@ -14,7 +14,7 @@ jornada e elegibilidade) · Vitest + Testing Library. Consumo da API via proxy
 src/
   main.tsx           # bootstrap + QueryClientProvider
   App.tsx            # shell
-  features/<feat>/   # cada tela/feature (auth/, home/, health/, scheduling/; no MVP: journey/)
+  features/<feat>/   # cada tela/feature (auth/, home/, health/, scheduling/, journey/)
   shared/            # api client, helpers, componentes compartilhados
   setupTests.ts      # matchers do Testing Library
 ```
@@ -41,6 +41,10 @@ src/
 - **Regra que o servidor calcula, o front NÃO recalcula.** A janela de entrada
   chega como `join.opens_at`, já pronto: "30 minutos" não existe no front (ADR-017).
   Vale para tudo o que vier do motor de elegibilidade também.
+- **`Idempotency-Key` do agendamento nasce com a INTENÇÃO** (o clique no horário),
+  não com a requisição: o retry do mesmo agendamento reusa a key (replay 200, sem
+  consulta duplicada); escolher outro horário gera uma key nova. Ver
+  `features/journey/ScheduleCarePage.tsx` (ADR-025).
 
 ## Comandos
 

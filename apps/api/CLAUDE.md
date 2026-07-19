@@ -11,6 +11,7 @@ Contexto local do backend Go. Regras gerais no `CLAUDE.md` da raiz; arquitetura 
 | Regra de negócio + acesso a dados | `internal/models/<entidade>.go` |
 | Decisão pura (linha de cuidado) | `internal/models/careline/` — **sem I/O, nunca** |
 | Cliente de sistema externo (DAV, Gestão, legado) | `internal/adapters/<sistema>/` — interface no **consumidor** (ADR-012) |
+| Um model consumindo outro (booking, storage da jornada) | interface **declarada no consumidor**, não no fornecedor — ex.: `BookingService`/`journeyStorage` em `models/care_journey.go` (ADR-012) |
 | Query SQL | `internal/db/queries/*.sql` → `make generate-sqlc` |
 | Migration | `internal/db/migrations/NNNN_nome.up.sql` + `.down.sql` |
 | Montar rota | `internal/http/router.go` |
@@ -23,6 +24,7 @@ Contexto local do backend Go. Regras gerais no `CLAUDE.md` da raiz; arquitetura 
   `time.Now()` lá dentro. Tudo entra por parâmetro. É o alvo #1 de testes table-driven.
 - **Nunca edite** `internal/db/gen/` nem `internal/http/api/*.gen.go` — são gerados.
 - **API-first:** rota nova começa no `openapi.yaml` (raiz `packages/contracts`), depois `make generate`.
+- **Banco/role:** a app roda como `renovi_app` (role restrito, `RENOVI_CARE_DATABASE_URL`); as **migrations** rodam como owner (`RENOVI_CARE_MIGRATE_DATABASE_URL`, com fallback). `journey_event` é append-only **por privilégio de banco**, não por disciplina de código (ADR-024).
 - **Controllers finos:** validam entrada, chamam model, respondem (`WriteJSON`/`WriteProblem`). Sem SQL no controller.
 - **Erros HTTP:** use `controllers.WriteProblem` (RFC 7807).
 - **Testes:** unitários por padrão (`_test.go`); integração com `//go:build integration` + testcontainers (`make test-integration`).

@@ -418,3 +418,100 @@ agenda PELO booking, um store só) e `journeyStorage` (implementada por
 replay 200 e a compensação da corrida têm testes de unidade; atomicidade
 linha+evento, keyset de auditoria com empate de `occurred_at` e a expiração
 idempotente têm testes de integração contra Postgres real.
+
+## ADR-022 — Admin por token estático (RISCO ACEITO)
+
+**Contexto:** o Slice 1 não tem back-office. As rotas `/admin/care-lines*` e
+`/admin/enrollments*` (montar catálogo, publicar, matricular/renovar/encerrar)
+são operadas por gente do time via `curl`/`apps/api/docs/slice1.http`, fora de
+banda — nunca pela sessão do paciente.
+
+**Decisão:** um único token estático no header `X-Admin-Token`
+(`controllers/admin_middleware.go`), comparado em tempo constante
+(`crypto/subtle.ConstantTimeCompare`) com `RENOVI_ADMIN_TOKEN`. **Token vazio =
+rotas desligadas**: o middleware recusa qualquer requisição (inclusive header
+vazio, que casaria por acaso num compare de dois vazios). Ausente e errado
+respondem IGUAL (401 `ADMIN_TOKEN_INVALID`), para não dar oráculo pelo tempo nem
+pela mensagem. **Não há role de operador no schema** — o token é o único fator; o
+admin não é um usuário do banco.
+
+**Consequência — risco aceito:** é um segredo compartilhado, sem rotação, sem
+escopo por operação e **sem auditoria de QUEM operou** (o efeito fica no
+`journey_event` com `actor='admin'` genérico — `enrollment.go`). Mesma dívida do
+ADR-013 (fator de posse): aceitável no piloto, **revisar quando houver
+back-office** com login de operador. O token NUNCA é logado (`config.LogValue` só
+expõe `admin_token_set`).
+
+## ADR-023 — `care_appointment` separado da saga de booking (referência lógica, sem FK)
+
+**Contexto:** a tabela `appointment` (migration 0003) é o **espelho técnico** da
+saga MySQL+DAV do agendamento (ADR-011/016). A jornada clínica tem vocabulário
+(status em PT-BR) e ciclo de vida próprios, e não deve acoplar seu esquema ao da
+saga.
+
+**Decisão:** `care_appointment` (migration 0007) é a projeção clínica: status
+PT-BR (`agendada/confirmada/em_andamento/realizada/falta/cancelada`) e
+**`booking_id UUID NOT NULL` SEM FK** para `appointment`. A garantia "um booking,
+uma consulta de jornada" vem do índice único `ux_care_appt_booking`, não de uma
+FK que acoplaria os dois esquemas. O booking é consumido atrás da interface
+`BookingService`, **declarada no consumidor** (`models/care_journey.go`, ADR-012)
+e implementada pelo `*BookingStore` real.
+
+**Consequência — LIMITAÇÕES CONHECIDAS:**
+- **(a) Espelhos podem divergir** se a TX final falhar depois do `Book`: em
+  `Schedule`, se `CreateScheduled` falha após o booking já existir, há uma
+  consulta REAL na DAV sem projeção de jornada. Não há compensação segura
+  genérica — fica log ERROR com os ids (filosofia falha-fechada: gente resolve).
+- **(b) `CANCELLED` com slot retido fica órfão.** A fila do worker
+  (`ListPendingSlotRelease`, `queries/scheduling.sql`) hoje varre **só `FAILED`**
+  com `slot_held_at` e sem `slot_released_at`. Mas `releaseCancelledSlot`
+  (`appointment.go`) pode deixar uma consulta **`CANCELLED` com `slot_held_at` e
+  sem `slot_released_at`** quando o `ReleaseSlot` no legado falha — e essa linha
+  **não** entra na fila varrida. Fica órfã até o worker do Slice 2 cobrir
+  `CANCELLED`+held+not-released (o comentário do código já promete essa varredura;
+  a query ainda não a faz).
+
+## ADR-024 — Role `renovi_app` e `journey_event` append-only por PRIVILÉGIO de banco
+
+**Contexto:** o `journey_event` é a trilha de auditoria da jornada. Append-only
+por desenho (sem `updated_at`) não basta: um bug — ou um app comprometido — que
+emita `UPDATE`/`DELETE` reescreveria a história.
+
+**Decisão:** a migration 0008 cria o role `renovi_app` (num bloco `DO $$` — o DDL
+de role é string opaca para o sqlc) com os privilégios de DML e então **`REVOKE
+UPDATE, DELETE ON journey_event`**. A aplicação em runtime conecta como
+`renovi_app` (`RENOVI_CARE_DATABASE_URL`); as **migrations** rodam como OWNER
+(`renovi`), porque criam tabelas e o próprio role — via
+`RENOVI_CARE_MIGRATE_DATABASE_URL`, que **cai em `RENOVI_CARE_DATABASE_URL`**
+quando não definida (`config.go`; `cmd/migrate` usa a de migração, `cmd/api` a do
+app).
+
+**Consequência:** a trilha fica à prova de app comprometida — um `UPDATE`/`DELETE`
+em `journey_event` recebe SQLSTATE 42501, no banco, não por disciplina de código
+(mesmo espírito do CHECK `active_exige_vinculo_dav` e do grant do legado, ADR-014).
+Custo: a senha do role na migration é de DEV (bate com o compose/`.env`); em
+staging/produção o operador roda `ALTER ROLE renovi_app PASSWORD ...` com um
+segredo fora do controle de versão — **documentado no README do slice**
+(`apps/api/docs/SLICE1.md`).
+
+## ADR-025 — Idempotência do agendamento por coluna UNIQUE (sem tabela própria)
+
+**Contexto:** o `POST /me/appointments` fala com a DAV, que é lenta e insondável;
+o duplo-clique criaria duas consultas REAIS. O ADR-021 já registra o comportamento
+em runtime (motor antes do booking, replay 200, corrida compensada). Esta ADR
+registra a **decisão de schema** e o **limite** da idempotência.
+
+**Decisão:** nenhuma tabela de idempotency-keys. A chave mora numa **coluna** —
+`care_appointment.idempotency_key` — com **índice único PARCIAL por matrícula**
+(`ux_care_appt_idem (enrollment_id, idempotency_key) WHERE idempotency_key IS NOT
+NULL`, migration 0007). Replay da mesma key devolve a MESMA consulta com 200. A
+corrida de dois requests com a mesma key é decidida pelo próprio índice dentro do
+`CreateScheduled`; o perdedor **compensa o booking que criou** (`BookingStore.Cancel`,
+log ERROR se falhar) e devolve o vencedor como replay. A corrida é reconhecida
+PELO NOME da constraint — outra unique violation é bug, não replay.
+
+**Consequência:** a idempotência garante **um agendamento de jornada por key**;
+ela **não** torna a escrita na DAV idempotente — `POST /appointment` continua
+não-idempotente e insondável, e o fail-closed do ADR-011b/016 segue INTACTO
+(quem estoura no `Book` sobe o erro; a jornada não reescreve nem retenta a DAV).
+Parcial porque a maioria das linhas não traz key (nulos não colidem).

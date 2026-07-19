@@ -3,60 +3,80 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 8 concluída:** artefatos do ambiente manual (seed de slots + `slice1.http` + env)._
+_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado) CONCLUÍDO:** motor
+puro, catálogo/matrícula, jornada `/me/*`, E2E e percurso ao vivo contra a DAV HML.
+Docs consolidados (ADR-022 a ADR-025, este PROGRESSO, `apps/api/docs/SLICE1.md`)._
 
-## 🚧 Slice 1 — Linhas de Cuidado Assistidas (em andamento)
+## ✅ Slice 1 — Linhas de Cuidado Assistidas (CONCLUÍDO)
 
-- [x] **Fase 1 — motor de regras puro** (`internal/models/careline/`, ADR-020):
-  `Evaluate` (VIGENCIA, QUOTA janela móvel GERAL, MIN_INTERVAL, MAX_ADVANCE,
-  PREREQUISITE), `ParseRuleParams` (params tipados, `DisallowUnknownFields`) e
-  `ValidatePublish` (itens, ciclos de pré-requisito, especialidades do legado).
-  A tabela T1–T19 em `evaluate_test.go` é a **especificação normativa** do slice.
-- [x] **Schema + queries** (migrations 0005–0008): `care_line/care_line_item/
-  care_line_rule` (catálogo versionado e imutável por versão), `enrollment` +
-  `enrollment_period`, `care_appointment` + `journey_event` (append-only, role
-  `renovi_app` sem UPDATE/DELETE) e as queries sqlc de tudo.
-- [x] **Contrato**: `/admin/care-lines*`, `/admin/enrollments*`, `/me/journey`,
-  `/me/eligibility`, `/me/availability`, `/me/appointments` (+cancel), `/me/audit`
-  e `/internal/.../force-status` no `openapi.yaml`, com tipos gerados.
-- [x] **Admin** (token estático `X-Admin-Token`): `CareLineStore` (draft → itens
-  → regras → publish validando especialidades no legado) e `EnrollmentStore`
-  (matricular/renovar/encerrar com eventos), rotas montadas.
-- [x] **`BookingStore.Cancel`** (paciente): CANCELLED + devolve o horário ao
-  legado + cancel best-effort na DAV (que responde 500 em HML — tolerado).
-- [x] **Fase 6 — jornada do paciente** (ADR-021): `models/care_journey.go`
-  (`JourneyStore`, interfaces `BookingService`/`journeyStorage` no consumidor) +
-  `care_journey_repo.go` (linha+evento SEMPRE na mesma TX). Rotas `/me/journey`
-  (matrículas com itens já avaliados + eventos recentes, **expiração lazy**),
-  `/me/eligibility` (com `date` simulada), `/me/availability` (slots dos
-  profissionais da especialidade anotados com o veredito por instante),
-  `POST /me/appointments` (**Idempotency-Key obrigatória**, motor ANTES do
-  booking → 422 `blocks[]`, replay 200, corrida de key compensa o booking),
-  cancel com bookkeeping de cota, `/me/audit` (keyset por cursor opaco) e
-  `POST /internal/appointments/{id}/force-status` (só com
-  `RENOVI_TEST_ENDPOINTS`).
-- [x] **Fase 7 — E2E do cenário-alvo** (`apps/api/internal/e2e/`, tag
-  `integration`): sobe a API real (router de produção, fiação à mão espelhando
-  `cmd/api/main.go`) contra Postgres + MySQL reais (testcontainers, role
-  restrito `renovi_app`) e uma DAV **fake** (`httptest`, cancel sempre 500 —
-  achado #20 tolerado de propósito). `TestE2E_A_SaudeMentalBasica` (23 passos:
-  publish/validação, cota/intervalo/antecedência/vigência, cancelamento com
-  devolução de vaga, renovação contígua, expiração lazy + reativação,
-  auditoria paginada) e `TestE2E_B_ApoioPsicologico` (6 passos: QUOTA
-  `period:total` = bloqueio permanente sem `available_from`). Novo
-  `testsupport.SeedFutureSlots` (ids `e2e-*`, sem colidir com o `init.sql`).
-- [x] **Fase 8 — artefatos do ambiente manual**: `deploy/mysql-legacy/seed-slots.sql`
-  (idempotente, `INSERT IGNORE`, ids `manual-a-*`/`manual-b-*` — mesmos offsets
-  do E2E, mas sobrevivendo ao mock **persistente** do compose) + alvo
-  `make seed-legacy-slots` + `TestSeedLegacySlotsIsIdempotent`
-  (`internal/testsupport/seed_slots_test.go`, roda o script duas vezes e confere
-  a contagem). `apps/api/docs/slice1.http` espelha 1:1 os passos HTTP dos
-  cenários A e B (os 2 passos que mexem direto no Postgres via superusuário —
-  expiração/reativação lazy e o teste do grant append-only — ficam de fora, sem
-  rota correspondente) + bloco C curto de validação de publish/token.
-  `.env.example` ganha `RENOVI_ADMIN_TOKEN`/`RENOVI_TEST_ENDPOINTS` documentados.
-- [ ] Próximas fases: front (telas da jornada), auto-conclusão via worker/cron,
-  seed `saude-mental-v1`.
+O colaborador vê a linha de cuidado, o motor decide o que pode agendar, ele agenda
+pelo booking existente e a jornada fica auditada. Ativação (Gestão), preço/billing
+e o worker de auto-conclusão ficam **fora** deste slice.
+
+- [x] **Motor de regras puro** (`models/careline/`, ADR-020): `Evaluate` (VIGENCIA,
+  QUOTA em **janela móvel GERAL**, MIN_INTERVAL, MAX_ADVANCE, PREREQUISITE),
+  `ParseRuleParams` (tipado, `DisallowUnknownFields`) e `ValidatePublish`. A tabela
+  **T1–T19** em `evaluate_test.go` é a especificação normativa do slice.
+- [x] **Catálogo versionado via API + publish validado** (migration 0005,
+  `careline_catalog.go`, rotas `/admin/care-lines*`): draft → itens → regras →
+  publish que valida ciclos de pré-requisito e as especialidades contra o legado
+  (legado indisponível = 503). Versão publicada é **imutável** (novo item/regra em
+  linha publicada = 409).
+- [x] **Matrícula** (migration 0006, `enrollment.go`, `/admin/enrollments*`):
+  vigência por período, **renovação contígua** (o novo período emenda no fim do
+  atual), **reativação** de uma matrícula expirada (a partir de agora) e
+  **expiração LAZY** — toda leitura da jornada expira a matrícula vencida na hora,
+  com evento `matricula_expirada`, sem depender de cron.
+- [x] **Jornada do paciente `/me/*`** (ADR-021, `care_journey.go` +
+  `care_journey_repo.go`): `/me/journey`, `/me/eligibility`, `/me/availability`
+  (slots dos profissionais da especialidade anotados com o veredito por instante),
+  `POST /me/appointments` com **elegibilidade reavaliada no servidor** (motor ANTES
+  do booking → 422 `blocks[]`), **idempotência por `Idempotency-Key`** (replay 200,
+  corrida compensa o booking — ADR-025), cancel com bookkeeping de cota e
+  `/me/audit` (keyset por cursor opaco). Toda escrita grava **linha + evento
+  append-only na mesma TX**; `journey_event` é append-only por PRIVILÉGIO de banco
+  (role `renovi_app`, ADR-024).
+- [x] **Cancelamento best-effort na DAV**: `BookingStore.Cancel` marca CANCELLED,
+  devolve o horário ao legado (CAS) e tenta o cancel na DAV — que responde **500 em
+  HML** (achado #20), tolerado e auditado.
+- [x] **E2E de integração** (`internal/e2e/`, tag `integration`, **29 passos em 2
+  cenários**): sobe a API real contra Postgres + MySQL (testcontainers, role
+  restrito `renovi_app`) e uma DAV fake (cancel sempre 500). `TestE2E_A_SaudeMentalBasica`
+  (23 passos: publish/validação, cota/intervalo/antecedência/vigência, cancelamento
+  com devolução de vaga, renovação contígua, expiração lazy + reativação, auditoria
+  paginada) e `TestE2E_B_ApoioPsicologico` (6 passos: QUOTA `period:total` =
+  bloqueio permanente sem `available_from`).
+- [x] **Percurso ao vivo contra a DAV de homologação** (2026-07-18): o cenário-alvo
+  rodado ponta a ponta pela API real. Comprovado: **2 estouros reais de 29s** no
+  teto do gateway → **502 fail-closed** (o horário fica retido, nenhuma consulta
+  fantasma é solta — ADR-016); **cancel da DAV em 500 tolerado e auditado**;
+  **renovação antecipada liberando o ciclo 2** ao vivo.
+- [x] **Front de teste** (`apps/web/src/features/journey/`, 3 telas): Minha Jornada,
+  Agendar (Idempotency-Key nascida com a intenção) e Minhas consultas. Estilo
+  mínimo — o design vem depois.
+- [x] **Ambiente manual**: `apps/api/docs/slice1.http` (espelha os cenários A/B),
+  `deploy/mysql-legacy/seed-slots.sql` + `make seed-legacy-slots` (idempotente) e
+  `apps/api/docs/SLICE1.md` (README operacional do slice).
+
+### 🔴 Pendências e riscos conhecidos do Slice 1
+
+- **`cmd/worker` continua stub** — e agora com uma lacuna NOVA: um `CANCELLED` cujo
+  `ReleaseSlot` no legado falhou fica com o slot retido e **não** entra na fila que
+  o worker varre (`ListPendingSlotRelease` só varre `FAILED`). Órfão até o worker
+  do Slice 2 cobrir `CANCELLED`+held+not-released (ADR-023).
+- **Expiração de matrícula é LAZY**: só acontece quando alguém lê a jornada. O cron
+  do Slice 2 vira otimização, não requisito de corretude (ADR-021).
+- **Admin por token estático, sem rotação nem auditoria de operador** (ADR-022):
+  revisar quando houver back-office.
+- **DAV HML instável no limite dos 29s** (comprovado ao vivo): o `POST /appointment`
+  estoura o teto do gateway na cauda. O fail-closed cobre, mas é operacionalmente
+  ruim — mesmo chamado já aberto na DAV (ADR-016).
+
+### ⏭️ Próximo passo (fora deste slice)
+
+**Worker** (compensação + reconciliação, INCLUINDO a varredura de `CANCELLED` com
+slot retido) + **ativação via Gestão** (Adapter de leitura) + **preço/billing** da
+matrícula.
 
 ## ✅ Agendamento — CONCLUÍDO (backend + front)
 
@@ -158,24 +178,26 @@ e ADR-010 a ADR-013 em `docs/DECISOES.md`.
 
 ## ⏳ Próximo passo
 
-**1. `cmd/worker`** — hoje stub, e a saga já produz as filas que ele deveria varrer
-(compensação e revisão). Sem ele, horário que a compensação não devolveu fica
-retido até alguém olhar.
+**`cmd/worker`** — hoje stub, e a saga já produz as filas que ele deveria varrer
+(compensação e revisão). O Slice 1 acrescentou uma fila NOVA: `CANCELLED` com slot
+retido que o `ReleaseSlot` não devolveu (ADR-023). Sem o worker, esse horário fica
+preso até alguém olhar. Depois dele: **ativação via Gestão** e **preço/billing** da
+matrícula.
 
-**2. Wiring do motor de linhas de cuidado.** O motor puro está pronto
-(`models/careline`, Fase 1 do Slice 1); faltam schema, queries e os controllers
-que o alimentam com `Journey`/`Rule` e expõem os `Blocks` ao front. Ele filtra
-ANTES do agendamento, sem mudar as rotas já contratadas.
+_(O wiring do motor de linhas de cuidado — schema, queries, controllers `/me/*` que
+expõem os `Blocks` — foi CONCLUÍDO no Slice 1; ver a seção acima.)_
 
 ## 🗺️ Backlog por fase (resumo — detalhe no SPEC §11)
 
 ### P0 (MVP) — linha de cuidado + agendamento
-- [ ] Schema real de domínio (patient_account, care_line_template/item/dependency, enrollment, journey_event, appointment, idempotency_key) — migrations
-- [ ] Motor de elegibilidade implementado + `GET /me/eligibility`
+- [x] Schema real de domínio (care_line/item/rule, enrollment + período, care_appointment, journey_event, idempotency por coluna UNIQUE — migrations 0005–0008; patient_account/appointment já vinham da auth/agendamento)
+- [x] Motor de elegibilidade implementado + `GET /me/eligibility` (Slice 1)
 - [ ] Ativação de conta (token por CPF/e-mail) + Adapter Gestão (leitura)
 - [x] Adapter Agenda (legado): leitura de slots + reserva por CAS (ADR-015)
 - [x] Fluxo de agendamento distribuído + Adapter DAV — **sem** reconciliação: ela é impossível hoje (ADR-016)
-- [ ] Auto-conclusão (cron) + jornada avançando
+- [ ] Auto-conclusão (cron) — jornada avançando já funciona (eventos + expiração
+  lazy); o `realizada`/`falta` só existe hoje pela rota de teste
+  `force-status` (Slice 1). O cron real fica no worker (Slice 2).
 - [ ] `cmd/seed` real (aplica `saude-mental-v1`, valida DAG)
 - [ ] Telas: Ativação/Login, Minha Jornada, Agendar, Minha Consulta
   - [x] Front de teste da jornada (`apps/web/src/features/journey/`): telas cruas de
@@ -183,6 +205,9 @@ ANTES do agendamento, sem mudar as rotas já contratadas.
     nascida por intenção) e Minhas consultas (`/me/appointments`), com hooks
     (`useJourney`) e testes colocalizados. Estilo mínimo — o design vem depois.
 - [ ] E2E (Playwright): fluxo feliz + 2 bloqueios
+  - [x] E2E de integração em Go (`internal/e2e/`, 29 passos em 2 cenários) já cobre o
+    cenário-alvo do Slice 1 (feliz + bloqueios de cota/intervalo/vigência);
+    Playwright no browser fica para quando as telas de produto existirem.
 
 ### P1 — robustez
 - [ ] Conciliação via histórico DAV (no-show real)
