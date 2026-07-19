@@ -29,6 +29,18 @@ const FRASES: Record<string, string> = {
   // voltar, em vez de prometer atualização automática.
   JOIN_UNAVAILABLE:
     'Ainda estamos confirmando esta consulta com a Doutor ao Vivo. Volte a esta página em instantes.',
+
+  // Jornada / linha de cuidado (rotas /me/*). Os TEXTOS dos `blocks` de
+  // elegibilidade vêm prontos do servidor e NÃO passam por aqui — esta tabela é só
+  // para `Reason.code` de erro. ELIGIBILITY_BLOCKED é a mensagem de recuo: quando
+  // a tela consegue os blocks, mostra-os; sem eles, cai neste texto.
+  ELIGIBILITY_BLOCKED: 'As regras da sua linha de cuidado não permitem agendar este horário agora.',
+  IDEMPOTENCY_KEY_REQUIRED:
+    'Não foi possível concluir o agendamento. Recarregue a página e tente de novo.',
+  CANCEL_NOT_ALLOWED: 'Esta consulta não pode mais ser cancelada.',
+  AUDIT_CURSOR_INVALID: 'Não foi possível carregar mais itens. Recarregue a página.',
+  LEGACY_UNAVAILABLE:
+    'Não conseguimos consultar a agenda agora. Isso é um problema nosso, não seu — tente de novo em instantes.',
 };
 
 /**

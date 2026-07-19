@@ -178,6 +178,10 @@ ANTES do agendamento, sem mudar as rotas já contratadas.
 - [ ] Auto-conclusão (cron) + jornada avançando
 - [ ] `cmd/seed` real (aplica `saude-mental-v1`, valida DAG)
 - [ ] Telas: Ativação/Login, Minha Jornada, Agendar, Minha Consulta
+  - [x] Front de teste da jornada (`apps/web/src/features/journey/`): telas cruas de
+    Minha Jornada, Agendar (por item, via `/me/availability` com a Idempotency-Key
+    nascida por intenção) e Minhas consultas (`/me/appointments`), com hooks
+    (`useJourney`) e testes colocalizados. Estilo mínimo — o design vem depois.
 - [ ] E2E (Playwright): fluxo feliz + 2 bloqueios
 
 ### P1 — robustez
