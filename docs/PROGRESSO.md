@@ -3,9 +3,12 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado) CONCLUÍDO:** motor
-puro, catálogo/matrícula, jornada `/me/*`, E2E e percurso ao vivo contra a DAV HML.
-Docs consolidados (ADR-022 a ADR-025, este PROGRESSO, `apps/api/docs/SLICE1.md`)._
+_Última atualização: 2026-07-19 — **Correções pós-review do Slice 1** (renovação de
+matrícula vencida, PREREQUISITE com limite superior, `available_from` de QUOTA
+super-lotada, `Idempotency-Key` por item, detach do ctx pós-`Book`, front sem POST
+concorrente) + cenário C do E2E. `make ci` e integração completa (E2E A/B/C) verdes.
+Antes: 2026-07-18 — Slice 1 CONCLUÍDO (motor, catálogo/matrícula, jornada `/me/*`,
+E2E, percurso ao vivo na DAV HML; ADR-022 a ADR-025)._
 
 ## ✅ Slice 1 — Linhas de Cuidado Assistidas (CONCLUÍDO)
 
@@ -66,13 +69,41 @@ e o worker de auto-conclusão ficam **fora** deste slice.
   `deploy/mysql-legacy/seed-slots.sql` + `make seed-legacy-slots` (idempotente) e
   `apps/api/docs/SLICE1.md` (README operacional do slice).
 
+### 🔧 Correções pós-review (2026-07-19)
+
+Achados de review corrigidos, cada um com teste (unit/integração/web). `make ci` e
+a integração completa (E2E A/B/C) verdes; front 47/47 + typecheck.
+
+- [x] **Renovação de matrícula vencida sem status expirado** (`enrollment.go`): o
+  admin renovava o que venceu antes de a expiração lazy rodar e o período novo caía
+  no passado; `Renew` agora reativa a partir de `now` quando `valid_until <= now`
+  (ADR-021, `TestRenew_MatriculaVencidaSemMarcarExpirada_ReativaDeNow`).
+- [x] **PREREQUISITE com limite superior** (`careline/evaluate.go`): consulta futura
+  não satisfaz mais "realize primeiro" (`X04`).
+- [x] **`available_from` de QUOTA super-lotada** (`careline/evaluate.go`): usa a
+  `(n-max+1)`-ésima consulta da janela, não a mais antiga (`X05`; validado pela
+  mutação da janela do cenário C).
+- [x] **`Idempotency-Key` vinculada ao item** (`care_journey.go`): reúso para outro
+  item vira `422 IDEMPOTENCY_KEY_REUSE` em vez de replay errado (ADR-025).
+- [x] **Detach do ctx pós-`Book`** (`care_journey.go`): desconexão do cliente não
+  deixa o booking órfão (projeção + compensação em `context.WithoutCancel`; ADR-021).
+- [x] **Front sem POST concorrente** (`ScheduleCarePage.tsx`): todos os botões
+  Agendar travam enquanto um agendamento está em voo.
+
+Deixados fora (decisão de escopo, não bug de código): corrida de cota entre keys
+diferentes (LIMITAÇÃO ACEITA, ADR-021); `RENOVI_ENV` fail-open (decisão de ops);
+defesa em profundidade do append-only e demais itens que exigem migration nova.
+
 ### 🔴 Pendências e riscos conhecidos do Slice 1
 
 - **`cmd/worker` continua stub** — e agora com uma lacuna NOVA: um `CANCELLED` cujo
   `ReleaseSlot` no legado falhou fica com o slot retido e **não** entra na fila que
   o worker varre (`ListPendingSlotRelease` só varre `FAILED`). Órfão até o worker
   do Slice 2 cobrir `CANCELLED`+held+not-released (ADR-023).
-- **Expiração de matrícula é LAZY**: só acontece quando alguém lê a jornada. O cron
+- **Expiração de matrícula é LAZY**: só acontece quando alguém lê a JORNADA do
+  paciente. A renovação já não depende disso (decide por tempo — ver Correções
+  pós-review); resta que as leituras ADMIN (`EnrollmentStore.Get`, dashboard) ainda
+  mostram `ativa` para uma vigência vencida até uma leitura da jornada rodar. O cron
   do Slice 2 vira otimização, não requisito de corretude (ADR-021).
 - **Admin por token estático, sem rotação nem auditoria de operador** (ADR-022):
   revisar quando houver back-office.

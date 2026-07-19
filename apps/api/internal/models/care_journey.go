@@ -31,6 +31,10 @@ var (
 	// ErrIdemKeyRequired: POST /me/appointments sem Idempotency-Key. A key é a
 	// rede de proteção contra o duplo-clique num POST que fala com a DAV.
 	ErrIdemKeyRequired = errors.New("jornada: Idempotency-Key é obrigatória")
+	// ErrIdemKeyReused: a MESMA key já criou uma consulta de OUTRO item nesta
+	// matrícula. Replay de idempotência supõe a mesma operação; item diferente é
+	// reúso indevido da key, não replay — 422 em vez de devolver a consulta errada.
+	ErrIdemKeyReused = errors.New("jornada: Idempotency-Key reutilizada para outro item")
 	// ErrCareCancelNotAllowed: a consulta existe e é do paciente, mas o status não
 	// é cancelável (só agendada/confirmada cancelam). Vira 409.
 	ErrCareCancelNotAllowed = errors.New("jornada: consulta não pode ser cancelada")
@@ -426,6 +430,11 @@ func (s *JourneyStore) Schedule(ctx context.Context, in ScheduleInput) (CareAppo
 	if appt, ok, err := s.storage.FindByIdemKey(ctx, snap.Enrollment.ID, key); err != nil {
 		return CareAppointment{}, false, fmt.Errorf("consultar idempotência: %w", err)
 	} else if ok {
+		// A key vale por operação: reusá-la para OUTRO item devolveria a consulta
+		// errada como replay 200. Vincula ao item pedido antes de replayar.
+		if appt.CareLineItemID != in.ItemID {
+			return CareAppointment{}, false, ErrIdemKeyReused
+		}
 		return s.view(appt), true, nil
 	}
 
@@ -466,7 +475,15 @@ func (s *JourneyStore) Schedule(ctx context.Context, in ScheduleInput) (CareAppo
 		return CareAppointment{}, false, fmt.Errorf("id do booking não é uuid: %w", err)
 	}
 
-	appt, err := s.storage.CreateScheduled(ctx, CreateScheduledInput{
+	// A partir daqui o booking JÁ é uma consulta REAL na DAV. Desanexa do ctx da
+	// requisição: se o cliente desconectar agora (o duplo-clique num POST lento é
+	// exatamente quando isso acontece), a projeção ainda grava e a compensação
+	// ainda roda — senão o booking ficaria órfão e a mesma key travaria o retry em
+	// ErrSlotTaken. (Um CRASH do processo nesta janela continua sem cobertura: só
+	// uma intent persistida ANTES do Book resolveria, o que é mudança de schema.)
+	wctx := context.WithoutCancel(ctx)
+
+	appt, err := s.storage.CreateScheduled(wctx, CreateScheduledInput{
 		EnrollmentID: snap.Enrollment.ID, PatientID: in.Account.ID,
 		CareLineItemID: item.ID, ItemRef: item.Ref, Label: item.Label,
 		BookingID: bookingID, SlotID: in.SlotID, ScheduledAt: booked.StartsAt,
@@ -476,11 +493,11 @@ func (s *JourneyStore) Schedule(ctx context.Context, in ScheduleInput) (CareAppo
 		// Dois requests com a MESMA key passaram juntos pelo replay: o índice
 		// único escolheu o vencedor. O booking do perdedor é uma consulta REAL e
 		// precisa ser desfeito — se o cancel falhar, fica o log para operação.
-		if _, cancelErr := s.booking.Cancel(ctx, in.Account, bookingID, in.Now); cancelErr != nil {
+		if _, cancelErr := s.booking.Cancel(wctx, in.Account, bookingID, in.Now); cancelErr != nil {
 			s.logger.ErrorContext(ctx, "jornada: compensação do booking falhou após corrida de idempotência",
 				"booking_id", bookingID, "error", cancelErr.Error())
 		}
-		winner, ok, findErr := s.storage.FindByIdemKey(ctx, snap.Enrollment.ID, key)
+		winner, ok, findErr := s.storage.FindByIdemKey(wctx, snap.Enrollment.ID, key)
 		if findErr != nil || !ok {
 			return CareAppointment{}, false, fmt.Errorf("jornada: corrida de idempotência sem vencedor (find=%v): %w", findErr, err)
 		}

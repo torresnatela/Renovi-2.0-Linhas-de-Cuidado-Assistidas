@@ -226,6 +226,52 @@ func TestRenew_ReativaColideComMatriculaViva_Retorna409(t *testing.T) {
 	require.ErrorIs(t, err, models.ErrEnrollmentAlive)
 }
 
+// TestRenew_MatriculaVencidaSemMarcarExpirada_ReativaDeNow cobre o buraco entre a
+// vigência e o status: a expiração é LAZY (só as leituras da jornada do paciente
+// marcam 'expirada'), então uma matrícula pode estar 'ativa' com valid_until no
+// passado. Renovar de forma CONTÍGUA a partir desse valid_until velho geraria um
+// período INTEIRO no passado — o paciente pagaria por dias já vencidos. O Renew
+// decide pelo TEMPO: vigência vencida reativa a partir de now.
+func TestRenew_MatriculaVencidaSemMarcarExpirada_ReativaDeNow(t *testing.T) {
+	ctx := context.Background()
+	catalog, enroll, pool := newCareStores(t, aceitaAmbas())
+
+	line, err := catalog.Create(ctx, "vencida-ativa", "Vencida ainda ativa", "")
+	require.NoError(t, err)
+	_, err = catalog.AddItem(ctx, line.ID, models.AddItemInput{
+		Ref: "aval", SpecialtyCode: "Psicologia", Label: "Avaliação",
+	})
+	require.NoError(t, err)
+	_, err = catalog.Publish(ctx, line.ID, time.Now())
+	require.NoError(t, err)
+
+	patient := insertPatient(t, pool)
+	// Matrícula de 1 mês começando ~90 dias atrás: a vigência (start + 30d) já
+	// venceu, mas o status continua 'ativa' — nenhuma leitura da jornada rodou.
+	start := time.Now().UTC().Truncate(time.Microsecond).Add(-90 * 24 * time.Hour)
+	e, err := enroll.Enroll(ctx, patient, "vencida-ativa", 1, start)
+	require.NoError(t, err)
+	require.Equal(t, "ativa", e.Status)
+	require.True(t, e.ValidUntil.Before(time.Now()), "pré-condição: valid_until no passado, status ainda ativa")
+
+	// Renova AGORA: como a vigência venceu, reativa a partir de now — o período
+	// novo NÃO pode começar no valid_until velho (jogaria tudo no passado).
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	r, err := enroll.Renew(ctx, e.ID, 1, now)
+	require.NoError(t, err)
+	require.Equal(t, "ativa", r.Status)
+
+	novo := r.Periods[len(r.Periods)-1]
+	require.True(t, now.Equal(novo.StartsAt), "período novo começa em now, não no valid_until vencido")
+	wantUntil := now.Add(careline.MonthWindow)
+	require.True(t, wantUntil.Equal(r.ValidUntil), "valid_until = now + 30d (no futuro)")
+	require.True(t, r.ValidUntil.After(time.Now()), "a matrícula renovada precisa cobrir o futuro")
+
+	// O evento marca a reativação (vigência vencida => reativa, não contígua).
+	_, _, payload := latestEvent(t, pool, e.ID)
+	require.Equal(t, true, payload["reactivated"], "vigência vencida marca reativação")
+}
+
 // TestPublish_CicloDePrerequisito_Reprova prova que o publish acumula os erros de
 // validação em vez de gravar uma linha inconsistente.
 func TestPublish_CicloDePrerequisito_Reprova(t *testing.T) {

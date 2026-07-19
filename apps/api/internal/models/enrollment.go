@@ -192,10 +192,15 @@ func (s *EnrollmentStore) Renew(ctx context.Context, id uuid.UUID, months int, n
 		return Enrollment{}, ErrEnrollmentClosed
 	}
 
-	// Contíguo por padrão; reativação (a partir de agora) só quando expirada.
+	// Contíguo por padrão; reativação (a partir de agora) quando a vigência já
+	// venceu. Decidir pelo TEMPO, não só pelo status: a expiração é lazy (só as
+	// leituras da jornada do paciente a marcam), então uma matrícula pode estar
+	// 'ativa'/'pausada' com valid_until no passado. Renovar de forma contígua a
+	// partir desse valid_until velho geraria um período INTEIRO no passado — o
+	// paciente pagaria por dias que já venceram. Se a vigência passou, reativa.
 	startsAt := enr.ValidUntil
 	reactivated := false
-	if enr.Status == careline.EnrollmentExpirada {
+	if enr.Status == careline.EnrollmentExpirada || !enr.ValidUntil.After(now) {
 		startsAt = now
 		reactivated = true
 	}

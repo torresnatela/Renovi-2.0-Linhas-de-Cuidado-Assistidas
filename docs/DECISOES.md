@@ -437,6 +437,35 @@ do `CreateScheduled`, contra um snapshot `FOR UPDATE` das consultas da matrícul
 e **compensar o booking** (`BookingStore.Cancel`) quando a segunda a commitar
 estourar a regra — exatamente como a corrida da MESMA key já compensa hoje.
 
+**Revisão pós-review (2026-07-19):**
+
+- **Renovação decide por TEMPO, não pelo flag `status`.** A expiração lazy só roda
+  nas leituras da JORNADA do paciente; o caminho ADMIN (`EnrollmentStore.Renew`)
+  nunca a dispara. Uma matrícula podia então estar `ativa`/`pausada` com
+  `valid_until` no passado, e renovar de forma CONTÍGUA a partir desse
+  `valid_until` velho gerava um período INTEIRO no passado (o paciente pagava por
+  dias já vencidos, sem que o CHECK `valid_until > valid_from` pegasse). `Renew`
+  agora reativa a partir de `now` sempre que a vigência já venceu
+  (`status == expirada` **ou** `valid_until <= now`). A afirmação "o cron vira
+  otimização, não requisito de corretude" só se sustenta porque essa decisão
+  passou a ser por tempo — antes era falsa no admin. Coberto por
+  `TestRenew_MatriculaVencidaSemMarcarExpirada_ReativaDeNow`.
+- **`Idempotency-Key` vinculada ao ITEM (ver ADR-025).** Reusar a MESMA key para
+  outro item da matrícula devolvia a consulta ERRADA como replay 200; agora vira
+  `422 IDEMPOTENCY_KEY_REUSE`.
+- **Seção crítica pós-`Book` desanexa do ctx da requisição** (`context.WithoutCancel`):
+  gravar a projeção e compensar a corrida de key rodavam no ctx do request, então
+  uma DESCONEXÃO do cliente (o duplo-clique num POST lento) deixava o booking REAL
+  órfão e travava o retry da mesma key em `ErrSlotTaken`. Com o detach a projeção e
+  a compensação completam mesmo sem o cliente. (Um CRASH do processo nessa janela
+  continua sem cobertura — só uma *intent* persistida ANTES do `Book` resolveria, o
+  que é mudança de schema; fica para o Slice 2.)
+- **`available_from` de QUOTA em janela super-lotada** (`n > max`) usava a consulta
+  mais antiga da janela + period — um instante que ainda estaria bloqueado. Agora
+  usa a `(n-max+1)`-ésima mais antiga da janela de âncora mais antiga (com `n == max`
+  é idêntico ao anterior, o que preserva a tabela T e o E2E semanal). Coberto por
+  `X05_quota_janela_super_lotada...` e pela mutação da janela do cenário C.
+
 ## ADR-022 — Admin por token estático (RISCO ACEITO)
 
 **Contexto:** o Slice 1 não tem back-office. As rotas `/admin/care-lines*` e
@@ -533,3 +562,9 @@ ela **não** torna a escrita na DAV idempotente — `POST /appointment` continua
 não-idempotente e insondável, e o fail-closed do ADR-011b/016 segue INTACTO
 (quem estoura no `Book` sobe o erro; a jornada não reescreve nem retenta a DAV).
 Parcial porque a maioria das linhas não traz key (nulos não colidem).
+
+**Revisão pós-review (2026-07-19):** o replay é VINCULADO ao item. A key vale por
+operação; reusá-la para OUTRO item da mesma matrícula devolvia a consulta do item
+A quando o cliente pediu o item B (confirmação de agendamento silenciosamente
+errada). O `Schedule` agora confere `care_appointment.care_line_item_id` contra o
+item pedido antes de replayar e, se divergir, responde `422 IDEMPOTENCY_KEY_REUSE`.

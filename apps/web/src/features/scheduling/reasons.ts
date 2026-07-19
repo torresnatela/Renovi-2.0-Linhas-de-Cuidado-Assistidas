@@ -16,6 +16,7 @@ const FRASES: Record<string, string> = {
   // Agendamento
   SLOT_TAKEN: 'Este horário acabou de ser reservado por outra pessoa. Escolha outro.',
   SLOT_EXPIRED: 'Este horário já passou. Escolha outro.',
+  BOOKING_REJECTED: 'A Doutor ao Vivo recusou este agendamento. Escolha outro horário.',
   BOOKING_UNCONFIRMED:
     'Não conseguimos confirmar sua consulta com a Doutor ao Vivo a tempo. Ela pode ter sido marcada — veja em Minhas consultas.',
 
@@ -36,6 +37,8 @@ const FRASES: Record<string, string> = {
   // a tela consegue os blocks, mostra-os; sem eles, cai neste texto.
   ELIGIBILITY_BLOCKED: 'As regras da sua linha de cuidado não permitem agendar este horário agora.',
   IDEMPOTENCY_KEY_REQUIRED:
+    'Não foi possível concluir o agendamento. Recarregue a página e tente de novo.',
+  IDEMPOTENCY_KEY_REUSE:
     'Não foi possível concluir o agendamento. Recarregue a página e tente de novo.',
   CANCEL_NOT_ALLOWED: 'Esta consulta não pode mais ser cancelada.',
   AUDIT_CURSOR_INVALID: 'Não foi possível carregar mais itens. Recarregue a página.',

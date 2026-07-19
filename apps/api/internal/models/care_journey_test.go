@@ -375,6 +375,32 @@ func TestJourneyStore_Schedule_Replay(t *testing.T) {
 	assert.Len(t, st.createCalls, 1, "nada novo é gravado no replay")
 }
 
+// Reúso da key: a MESMA key já criou uma consulta de OUTRO item nesta matrícula.
+// Não é replay — devolver a consulta do item A quando o cliente pediu o item B
+// confirmaria o agendamento errado. Vira ErrIdemKeyReused, sem tocar no Book.
+func TestJourneyStore_Schedule_KeyReutilizadaParaOutroItem(t *testing.T) {
+	item := acompItem()
+	st := &fakeJourneyStorage{snap: snapAtiva(item, nil), snapItem: item}
+	// O índice já tem a key, mas amarrada a OUTRO item (outro CareLineItemID).
+	st.byIdem = map[string]CareAppointment{"k-reuso": {
+		ID: uuid.New(), EnrollmentID: st.snap.Enrollment.ID, CareLineItemID: uuid.New(),
+		ItemRef: "outro", Status: careline.StatusAgendada,
+	}}
+	bk := &fakeBookingSvc{
+		specialties: psicologia(),
+		slotInfo:    bookingFor("slot-1", jSlotStart),
+		bookResult:  confirmedBooking(uuid.New(), jSlotStart),
+	}
+	js := NewJourneyStore(st, bk, 24*time.Hour, nil)
+
+	_, _, err := js.Schedule(context.Background(), ScheduleInput{
+		Account: jAccount, ItemID: item.ID, SlotID: "slot-1", IdemKey: "k-reuso", Now: jNow,
+	})
+	require.ErrorIs(t, err, ErrIdemKeyReused)
+	assert.Empty(t, bk.bookCalls, "reúso indevido não pode chamar o Book")
+	assert.Empty(t, st.createCalls, "nada é gravado no reúso")
+}
+
 // Corrida de key: o índice único decide; o perdedor COMPENSA o booking que
 // criou (Cancel com o bookingID recém-criado) e devolve o vencedor.
 func TestJourneyStore_Schedule_CorridaDeKey_Compensa(t *testing.T) {

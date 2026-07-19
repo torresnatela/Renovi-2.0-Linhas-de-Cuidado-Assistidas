@@ -289,6 +289,11 @@ func writeJourneyError(w http.ResponseWriter, err error) {
 		})
 	case errors.Is(err, models.ErrIdemKeyRequired):
 		writeIdemKeyRequired(w)
+	case errors.Is(err, models.ErrIdemKeyReused):
+		// A key já agendou OUTRO item nesta matrícula: reúso indevido, não replay.
+		WriteProblemReason(w, http.StatusUnprocessableEntity, "Idempotency-Key reutilizada",
+			"Esta Idempotency-Key já foi usada para agendar outro item. Gere uma key nova para este agendamento.",
+			Reason{Code: "IDEMPOTENCY_KEY_REUSE"})
 	case errors.Is(err, models.ErrItemNotFound):
 		WriteProblem(w, http.StatusNotFound, "Não encontrado", "Item da linha de cuidado não encontrado.")
 	case errors.Is(err, models.ErrCareAppointmentNotFound):

@@ -4,7 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, type AnnotatedSlot, type AvailabilityPage } from '../../shared/api';
+import {
+  ApiError,
+  type AnnotatedSlot,
+  type AvailabilityPage,
+  type CareAppointment,
+} from '../../shared/api';
 import { ScheduleCarePage } from './ScheduleCarePage';
 
 vi.mock('../../shared/api', async () => {
@@ -121,6 +126,45 @@ describe('ScheduleCarePage', () => {
     expect(calls[0][1]).toBe(calls[1][1]); // mesma intenção → MESMA key
     expect(calls[2][1]).not.toBe(calls[0][1]); // outro horário → key NOVA
     expect(calls[0][1]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/i); // é um UUID gerado no cliente
+  });
+
+  /**
+   * Enquanto um agendamento está em voo (a DAV leva ~29s), TODOS os botões
+   * travam: como o hook é uma única useMutation, clicar outro horário dispararia
+   * um segundo POST concorrente — o banner do primeiro sumiria e a corrida de cota
+   * do servidor se alargaria. O paciente espera este confirmar e marca o próximo.
+   */
+  it('trava os demais horários enquanto um agendamento está em voo', async () => {
+    const user = userEvent.setup();
+    let resolver!: (v: CareAppointment) => void;
+    vi.mocked(api.createCareAppointment).mockImplementation(
+      () =>
+        new Promise<CareAppointment>((res) => {
+          resolver = res;
+        }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Agendar horário das 09:00/i }));
+    await waitFor(() => expect(api.createCareAppointment).toHaveBeenCalledTimes(1));
+
+    // Com o 1º em voo, o OUTRO horário está desabilitado — não há como disparar 2º POST.
+    expect(screen.getByRole('button', { name: /Agendar horário das 14:00/i })).toBeDisabled();
+    expect(api.createCareAppointment).toHaveBeenCalledTimes(1);
+
+    // Concluído o 1º, os botões voltam e o paciente segue marcando.
+    resolver({
+      id: 'care-1',
+      item_ref: 'aval',
+      label: 'Avaliação',
+      status: 'confirmada',
+      scheduled_at: '2026-07-20T09:00:00-03:00',
+      time_zone: 'America/Sao_Paulo',
+      booking_id: 'book-1',
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Agendar horário das 14:00/i })).toBeEnabled(),
+    );
   });
 
   /**

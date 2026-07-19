@@ -159,8 +159,13 @@ function Horario({
 }) {
   const hora = formatTime(slot.starts_at, slot.time_zone);
   const permitido = slot.eligibility.allowed;
-  const pendente = agendar.isPending && agendar.variables?.body.slot_id === slot.id;
+  const estePendente = agendar.isPending && agendar.variables?.body.slot_id === slot.id;
 
+  // Enquanto QUALQUER agendamento está em voo, todos os botões travam: o hook é
+  // uma única useMutation e a chamada à DAV leva ~29s. Clicar outro horário no
+  // meio dispararia um segundo POST concorrente — o observer só rastrearia o
+  // segundo (o banner do primeiro sumiria) e ainda alargaria a corrida de cota do
+  // servidor. O paciente espera este confirmar e marca o próximo.
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between gap-3">
@@ -172,10 +177,10 @@ function Horario({
           type="button"
           aria-label={`Agendar horário das ${hora}`}
           onClick={() => onMarcar(slot)}
-          disabled={pendente || !permitido}
+          disabled={agendar.isPending || !permitido}
           className="shrink-0 rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {pendente ? 'Agendando…' : 'Agendar'}
+          {estePendente ? 'Agendando…' : 'Agendar'}
         </button>
       </div>
 
