@@ -3,7 +3,7 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 6 concluída:** jornada do paciente (`JourneyStore` + rotas `/me/*` + endpoint interno de teste), ADR-021._
+_Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 8 concluída:** artefatos do ambiente manual (seed de slots + `slice1.http` + env)._
 
 ## 🚧 Slice 1 — Linhas de Cuidado Assistidas (em andamento)
 
@@ -35,6 +35,26 @@ _Última atualização: 2026-07-18 — **Slice 1 (Linhas de Cuidado), Fase 6 con
   cancel com bookkeeping de cota, `/me/audit` (keyset por cursor opaco) e
   `POST /internal/appointments/{id}/force-status` (só com
   `RENOVI_TEST_ENDPOINTS`).
+- [x] **Fase 7 — E2E do cenário-alvo** (`apps/api/internal/e2e/`, tag
+  `integration`): sobe a API real (router de produção, fiação à mão espelhando
+  `cmd/api/main.go`) contra Postgres + MySQL reais (testcontainers, role
+  restrito `renovi_app`) e uma DAV **fake** (`httptest`, cancel sempre 500 —
+  achado #20 tolerado de propósito). `TestE2E_A_SaudeMentalBasica` (23 passos:
+  publish/validação, cota/intervalo/antecedência/vigência, cancelamento com
+  devolução de vaga, renovação contígua, expiração lazy + reativação,
+  auditoria paginada) e `TestE2E_B_ApoioPsicologico` (6 passos: QUOTA
+  `period:total` = bloqueio permanente sem `available_from`). Novo
+  `testsupport.SeedFutureSlots` (ids `e2e-*`, sem colidir com o `init.sql`).
+- [x] **Fase 8 — artefatos do ambiente manual**: `deploy/mysql-legacy/seed-slots.sql`
+  (idempotente, `INSERT IGNORE`, ids `manual-a-*`/`manual-b-*` — mesmos offsets
+  do E2E, mas sobrevivendo ao mock **persistente** do compose) + alvo
+  `make seed-legacy-slots` + `TestSeedLegacySlotsIsIdempotent`
+  (`internal/testsupport/seed_slots_test.go`, roda o script duas vezes e confere
+  a contagem). `apps/api/docs/slice1.http` espelha 1:1 os passos HTTP dos
+  cenários A e B (os 2 passos que mexem direto no Postgres via superusuário —
+  expiração/reativação lazy e o teste do grant append-only — ficam de fora, sem
+  rota correspondente) + bloco C curto de validação de publish/token.
+  `.env.example` ganha `RENOVI_ADMIN_TOKEN`/`RENOVI_TEST_ENDPOINTS` documentados.
 - [ ] Próximas fases: front (telas da jornada), auto-conclusão via worker/cron,
   seed `saude-mental-v1`.
 
