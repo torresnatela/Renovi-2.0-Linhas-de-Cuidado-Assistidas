@@ -205,6 +205,13 @@ func (s *EnrollmentStore) Renew(ctx context.Context, id uuid.UUID, months int, n
 		ID: id, ValidUntil: newValidUntil, UpdatedAt: now,
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			// Reativar uma expirada (status volta a 'ativa') pode colidir com
+			// ux_enrollment_viva se o paciente já rematriculou o MESMO code depois do
+			// vencimento: outra matrícula viva ocupa a trava. Mesmo mapeamento do
+			// Enroll — a corrida é uma matrícula viva já existente, não um 500.
+			return Enrollment{}, ErrEnrollmentAlive
+		}
 		return Enrollment{}, fmt.Errorf("renovar matrícula: %w", err)
 	}
 	if n == 0 {

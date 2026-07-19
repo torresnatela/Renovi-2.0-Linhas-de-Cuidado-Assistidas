@@ -79,6 +79,30 @@ func (q *Queries) GetCareLine(ctx context.Context, id uuid.UUID) (CareLine, erro
 	return i, err
 }
 
+const getCareLineForUpdate = `-- name: GetCareLineForUpdate :one
+SELECT id, code, version, name, description, status, published_at, created_at, updated_at FROM care_line WHERE id = $1 FOR UPDATE
+`
+
+// Trava a linha para publicar. O Publish valida o template inteiro e vira o status
+// na MESMA transação; o FOR UPDATE serializa dois publishes concorrentes da mesma
+// linha — o segundo espera e encontra o status já fora de 'draft'.
+func (q *Queries) GetCareLineForUpdate(ctx context.Context, id uuid.UUID) (CareLine, error) {
+	row := q.db.QueryRow(ctx, getCareLineForUpdate, id)
+	var i CareLine
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Version,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getLatestPublishedCareLine = `-- name: GetLatestPublishedCareLine :one
 SELECT id, code, version, name, description, status, published_at, created_at, updated_at FROM care_line
 WHERE code = $1 AND status = 'published'

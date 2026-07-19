@@ -198,7 +198,7 @@ expõem os `Blocks` — foi CONCLUÍDO no Slice 1; ver a seção acima.)_
 - [ ] Auto-conclusão (cron) — jornada avançando já funciona (eventos + expiração
   lazy); o `realizada`/`falta` só existe hoje pela rota de teste
   `force-status` (Slice 1). O cron real fica no worker (Slice 2).
-- [ ] `cmd/seed` real (aplica `saude-mental-v1`, valida DAG)
+- [x] Catálogo montado 100% pela admin API (`/admin/care-lines*`, ADR-022): não há `cmd/seed` — ele foi removido na Fase 0. As linhas do E2E/piloto são criadas pela própria API (Create → AddItem/AddRule → Publish, com validação do DAG no `Publish`).
 - [ ] Telas: Ativação/Login, Minha Jornada, Agendar, Minha Consulta
   - [x] Front de teste da jornada (`apps/web/src/features/journey/`): telas cruas de
     Minha Jornada, Agendar (por item, via `/me/availability` com a Idempotency-Key

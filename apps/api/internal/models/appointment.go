@@ -524,7 +524,10 @@ func (s *BookingStore) releaseCancelledSlot(ctx context.Context, id uuid.UUID, s
 	ctx, cancel := detach(ctx)
 	defer cancel()
 	if err := s.agenda.ReleaseSlot(ctx, slotID); err != nil {
-		s.logger.WarnContext(ctx, "agendamento: consulta cancelada mas horário não devolvido — o worker tenta de novo",
+		// ERROR e não WARN: esta é a ÚNICA sinalização de um slot vazando (retido no
+		// legado sem consulta viva). O worker ainda não varre CANCELLED+held (ADR-023),
+		// então até lá este log é o que um humano precisa ver para soltar o horário.
+		s.logger.ErrorContext(ctx, "agendamento: consulta cancelada mas horário não devolvido — o worker tenta de novo",
 			"appointment_id", id, "slot_id", slotID, "error", err.Error())
 		return
 	}

@@ -922,6 +922,16 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            A conta ainda não está vinculada à Doutor ao Vivo, então não há
+            paciente para pôr na consulta. Não deveria acontecer (só conta ACTIVE
+            autentica, e ACTIVE exige o vínculo), mas o servidor confere antes de
+            criar consulta órfã lá. O MESMO 403 do POST /appointments.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -934,9 +944,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "422":
-          $ref: "#/components/responses/EligibilityBlocked"
+          description: >
+            Dois casos distintos, ambos 422 e ambos no `Problem`, separados por
+            `reason.code`:
+
+            (1) ELIGIBILITY_BLOCKED — o motor de elegibilidade BARROU antes de
+            reservar; o `Problem` traz `blocks[]` com um `EligibilityBlock` por
+            regra violada (o horário existe e está livre — o que não pode é ESTE
+            paciente agendar ESTE item agora). É a resposta EligibilityBlocked.
+
+            (2) BOOKING_REJECTED — a elegibilidade passou e a saga de booking foi
+            adiante, mas a DAV RECUSOU os dados da consulta (o MESMO 422 do
+            POST /appointments). NADA foi criado e o horário foi liberado, então
+            tentar de novo é seguro; nunca diga "pode ter sido marcada" — não foi.
+            Distinto do (1): NÃO traz `blocks[]`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        # O agendamento LÊ e reserva a agenda do legado antes de falar com a DAV;
+        # se o MySQL legado cair, a rota responde 503 (como o POST /appointments).
+        "503":
+          $ref: "#/components/responses/LegacyUnavailable"
         "502":
           $ref: "#/components/responses/BookingUnconfirmed"
   /me/appointments/{care_appointment_id}/cancel:

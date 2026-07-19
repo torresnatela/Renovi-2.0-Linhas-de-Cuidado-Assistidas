@@ -92,6 +92,10 @@ type Querier interface {
 	// Por (id, dono), via a matrícula. Nunca só por id.
 	GetCareAppointmentForPatient(ctx context.Context, arg GetCareAppointmentForPatientParams) (CareAppointment, error)
 	GetCareLine(ctx context.Context, id uuid.UUID) (CareLine, error)
+	// Trava a linha para publicar. O Publish valida o template inteiro e vira o status
+	// na MESMA transação; o FOR UPDATE serializa dois publishes concorrentes da mesma
+	// linha — o segundo espera e encontra o status já fora de 'draft'.
+	GetCareLineForUpdate(ctx context.Context, id uuid.UUID) (CareLine, error)
 	GetEnrollment(ctx context.Context, id uuid.UUID) (Enrollment, error)
 	// Sempre por (id, dono). Nunca só por id: evita que a próxima rota devolva a
 	// matrícula de terceiro por esquecer o WHERE do paciente.

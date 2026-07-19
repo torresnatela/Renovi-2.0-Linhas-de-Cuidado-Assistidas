@@ -419,6 +419,24 @@ replay 200 e a compensação da corrida têm testes de unidade; atomicidade
 linha+evento, keyset de auditoria com empate de `occurred_at` e a expiração
 idempotente têm testes de integração contra Postgres real.
 
+**Consequência — LIMITAÇÃO ACEITA (corrida de quota entre keys DIFERENTES):**
+a idempotência (ADR-025) só neutraliza o duplo-clique da MESMA `Idempotency-Key`.
+Duas requisições `Schedule` CONCORRENTES com keys DIFERENTES **passam as duas pelo
+`Evaluate` antes de qualquer uma commitar o `CreateScheduled`** — cada uma lê um
+estado da jornada em que a outra consulta ainda não existe. Resultado: o paciente
+pode acabar com **max+1 numa janela de QUOTA**, ou **furar o MIN_INTERVAL** entre
+duas consultas do mesmo item. É uma corrida real, não coberta pelo índice único
+(que casa por key, e as keys são distintas). **Por que aceita:** serializar de
+verdade (um lock por matrícula segurado do `Evaluate` até o commit) conflita com a
+disciplina de **não segurar lock atravessando a chamada de ~29s à DAV** — o
+`Book` é lento e insondável, e prender uma linha esse tempo todo estrangularia o
+agendamento e arriscaria conexões presas. O **rate limit por conta**
+(`rateLimitByAccount`) REDUZ a janela — dois POSTs precisam chegar quase juntos —
+mas **não elimina**. **Opção do Slice 2:** reavaliar a elegibilidade DENTRO da TX
+do `CreateScheduled`, contra um snapshot `FOR UPDATE` das consultas da matrícula,
+e **compensar o booking** (`BookingStore.Cancel`) quando a segunda a commitar
+estourar a regra — exatamente como a corrida da MESMA key já compensa hoje.
+
 ## ADR-022 — Admin por token estático (RISCO ACEITO)
 
 **Contexto:** o Slice 1 não tem back-office. As rotas `/admin/care-lines*` e
