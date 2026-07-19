@@ -33,6 +33,8 @@ type Deps struct {
 	// Mood monta /me/mood/* (Verificador de Humor, Anexo C). Nil desliga.
 	// Depende de Auth: exige sessão do paciente.
 	Mood *controllers.MoodController
+	// Assessments monta /me/assessments (WHO-5/PHQ-4). Nil desliga. Depende de Auth.
+	Assessments *controllers.AssessmentController
 	// CareAdmin monta as rotas /admin/* (catálogo + matrícula). Nil desliga (sem
 	// RENOVI_ADMIN_TOKEN ou sem agenda para validar o publish). NÃO depende de Auth:
 	// autentica pelo token de admin, nunca pela sessão do paciente.
@@ -110,6 +112,9 @@ func NewRouter(d Deps) *chi.Mux {
 			if d.Mood != nil {
 				mountMood(r, *d.Mood, *d.Auth)
 			}
+			if d.Assessments != nil {
+				mountAssessments(r, *d.Assessments, *d.Auth)
+			}
 		}
 
 		// As rotas /admin NÃO dependem de Auth: autenticam pelo token de admin, não
@@ -184,6 +189,16 @@ func mountMood(r chi.Router, c controllers.MoodController, auth controllers.Auth
 		r.Post("/me/mood/checkin", c.RecordCheckin)
 		r.Get("/me/mood/today", c.GetToday)
 		r.Get("/me/mood/history", c.GetHistory)
+	})
+}
+
+// mountAssessments monta /me/assessments (Anexo C), atrás de sessão.
+func mountAssessments(r chi.Router, c controllers.AssessmentController, auth controllers.AuthController) {
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+		r.Use(controllers.RequireSession(auth.Sessions))
+		r.Get("/me/assessments/{codigo}", c.GetAvailability)
+		r.Post("/me/assessments", c.Submit)
 	})
 }
 

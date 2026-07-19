@@ -35,7 +35,12 @@ Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
   paleta própria da Renovi). Verificado: scoring/model (integração), controllers
   (fakes), front (Vitest) + typecheck + build. **Browser: pendente** — precisa do
   stack de dev com credenciais DAV (rotas /me só montam com Auth).
-- [ ] Módulo 4 — Anel semanal WHO-5 via `MIN_INTERVAL` (reusa o motor).
+- [x] **Módulo 4 — Anel semanal WHO-5 via MIN_INTERVAL** (ADR-034):
+  `0013_wellbeing_assessment` + `assessment_item_response`. `AssessmentStore`
+  **reusa `careline.Evaluate`** montando a `Journey` com os fatos de atividade
+  (Status=realizada, ScheduledAt=respondido_em) — cadência derivada sob demanda,
+  sem tocar T1–T19. Pontuação WHO-5 com cortes do banco. `GET /me/assessments/{codigo}`,
+  `POST /me/assessments`. Integração (cadência 7d) + controller (409 blocks, 403) verdes.
 - [ ] Módulo 5 — Anel gatilhado PHQ-4 + gatilho puro (`models/mood/trigger`).
 - [ ] Módulo 6 — Roteamento de crise/escalonamento + fechamento.
 

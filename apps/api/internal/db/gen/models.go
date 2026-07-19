@@ -33,6 +33,13 @@ type Appointment struct {
 	UpdatedAt            time.Time          `json:"updated_at"`
 }
 
+type AssessmentItemResponse struct {
+	ID           uuid.UUID `json:"id"`
+	AssessmentID uuid.UUID `json:"assessment_id"`
+	ItemOrdem    int32     `json:"item_ordem"`
+	Valor        int32     `json:"valor"`
+}
+
 type CareAppointment struct {
 	ID             uuid.UUID          `json:"id"`
 	EnrollmentID   uuid.UUID          `json:"enrollment_id"`
@@ -251,4 +258,20 @@ type Session struct {
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 	LastSeenAt time.Time          `json:"last_seen_at"`
 	CreatedAt  time.Time          `json:"created_at"`
+}
+
+type WellbeingAssessment struct {
+	ID             uuid.UUID      `json:"id"`
+	PatientID      uuid.UUID      `json:"patient_id"`
+	EnrollmentID   uuid.UUID      `json:"enrollment_id"`
+	CareLineItemID uuid.UUID      `json:"care_line_item_id"`
+	ConsentID      uuid.UUID      `json:"consent_id"`
+	InstrumentID   uuid.UUID      `json:"instrument_id"`
+	RawScore       pgtype.Numeric `json:"raw_score"`
+	IndexScore     pgtype.Numeric `json:"index_score"`
+	Subscores      []byte         `json:"subscores"`
+	Faixa          string         `json:"faixa"`
+	FlagEncaminhar bool           `json:"flag_encaminhar"`
+	RespondidoEm   time.Time      `json:"respondido_em"`
+	CreatedAt      time.Time      `json:"created_at"`
 }

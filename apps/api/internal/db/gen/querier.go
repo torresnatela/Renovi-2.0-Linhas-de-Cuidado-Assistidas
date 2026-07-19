@@ -6,6 +6,7 @@ package gen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -66,6 +67,9 @@ type Querier interface {
 	// de atividade pedido. É a elegibilidade do check-in, derivada sob demanda dos
 	// fatos imutáveis (matrícula + item do template). Sem linha => não elegível.
 	FindActivityEnrollment(ctx context.Context, arg FindActivityEnrollmentParams) (FindActivityEnrollmentRow, error)
+	// Como FindActivityEnrollment, mas traz a vigência da matrícula — o motor puro
+	// precisa dela para a regra VIGENCIA ao avaliar a cadência do instrumento.
+	FindActivityEnrollmentDetail(ctx context.Context, arg FindActivityEnrollmentDetailParams) (FindActivityEnrollmentDetailRow, error)
 	// "Viva" = não revogada, não expirada E com a conta ainda ACTIVE. O join com o
 	// status é o que faz bloquear uma conta derrubar as sessões dela na hora — o
 	// ganho concreto de sessão opaca sobre JWT (ADR-010).
@@ -110,6 +114,7 @@ type Querier interface {
 	GetMoodCheckinByDay(ctx context.Context, arg GetMoodCheckinByDayParams) (MoodCheckin, error)
 	// Nasce PENDING_DAV: a conta só ativa quando a DAV confirmar o vínculo.
 	InsertAccount(ctx context.Context, arg InsertAccountParams) (PatientAccount, error)
+	InsertAssessmentItemResponse(ctx context.Context, arg InsertAssessmentItemResponseParams) error
 	// Consultas da jornada realizada (tabela care_appointment — migration 0007).
 	//
 	// É a projeção clínica do agendamento (appointment, 0003), amarrada à matrícula.
@@ -142,6 +147,7 @@ type Querier interface {
 	InsertJourneyEvent(ctx context.Context, arg InsertJourneyEventParams) (JourneyEvent, error)
 	// token_hash é o SHA-256 do token opaco. O token em si nunca toca o banco.
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
+	InsertWellbeingAssessment(ctx context.Context, arg InsertWellbeingAssessmentParams) (WellbeingAssessment, error)
 	// Ativa a conta. O CHECK active_exige_vinculo_dav (migration 0002) recusa esta
 	// linha se dav_person_id vier nulo — a regra está no banco, não só aqui.
 	//
@@ -153,6 +159,9 @@ type Querier interface {
 	// aconteceu não é informação para o paciente. DAV_UNKNOWN aparece — ele pode ter
 	// uma consulta de verdade marcada.
 	ListAppointmentsByAccount(ctx context.Context, accountID uuid.UUID) ([]Appointment, error)
+	// Os instantes das aplicações passadas do paciente para um item — o histórico
+	// imutável que o motor lê para MIN_INTERVAL (cadência derivada sob demanda).
+	ListAssessmentTimes(ctx context.Context, arg ListAssessmentTimesParams) ([]time.Time, error)
 	ListCareAppointmentsByEnrollment(ctx context.Context, enrollmentID uuid.UUID) ([]CareAppointment, error)
 	// "Minhas consultas da jornada", com filtro OPCIONAL por status: quando
 	// sqlc.narg('status') é nulo, o predicado some e a lista vem inteira.
@@ -168,6 +177,7 @@ type Querier interface {
 	ListExampleWidgets(ctx context.Context) ([]ExampleWidget, error)
 	ListInstrumentCutoffs(ctx context.Context, instrumentID uuid.UUID) ([]InstrumentCutoff, error)
 	ListInstrumentDimensions(ctx context.Context, instrumentID uuid.UUID) ([]InstrumentDimension, error)
+	ListItemRules(ctx context.Context, careLineItemID uuid.UUID) ([]ListItemRulesRow, error)
 	ListItemsByCareLine(ctx context.Context, careLineID uuid.UUID) ([]CareLineItem, error)
 	// A tela de jornada, paginada por KEYSET (não OFFSET): a página seguinte pede tudo
 	// ANTERIOR ao último (occurred_at, id) que já viu. O índice

@@ -481,3 +481,31 @@ paleta e vocabulário PRÓPRIOS da Renovi na grade (não os do Mood Meter/Yale) 
 nunca recalcula o quadrante — exibe o que o servidor derivou. Rotas `/me/*` só
 sobem quando o Auth está montado (dependem de RequireSession), então a verificação
 no browser exige o stack de dev com credenciais DAV.
+
+## ADR-034 — WHO-5/PHQ-4 reusam o motor de cadência via fatos de atividade
+
+**Contexto:** os anéis periódicos (WHO-5 semanal, PHQ-4 gatilhado) têm cadência
+mínima (`MIN_INTERVAL`). Reimplementar a regra seria duplicar o que o motor puro
+`careline` já faz — e divergir dele. Mas o motor foi escrito para CONSULTAS
+(`JourneyAppointment`), e sua tabela T1–T19 é normativa.
+
+**Decisão:**
+- O `AssessmentStore` monta uma `careline.Journey` cujos `Appointments` são os
+  fatos de execução da ATIVIDADE (aplicações passadas do instrumento) mapeados
+  para o shape `JourneyAppointment{ItemRef, Status: "realizada", ScheduledAt:
+  respondido_em}`, e chama `careline.Evaluate(journey, item, rules, now, now)`.
+  Assim `MIN_INTERVAL` (e futuramente QUOTA) "simplesmente funcionam" — **sem
+  alterar o motor nem a tabela T1–T19**. As regras vêm de `care_line_rule` do item.
+- A vigência (VIGENCIA) é avaliada pelo mesmo motor, com `valid_from/valid_until`
+  da matrícula (`FindActivityEnrollmentDetail`). Se não há matrícula elegível, o
+  store devolve uma `Eligibility` não-permitida com um bloco VIGENCIA — a
+  elegibilidade continua **derivada sob demanda dos fatos imutáveis**.
+- **Alternativa preterida:** generalizar `JourneyAppointment`→`JourneyFact` no
+  motor. Exigiria reescrever a especificação normativa T1–T19; adiada até haver
+  ganho que justifique.
+- A pontuação (WHO-5) usa os cortes carregados de `instrument_cutoff` (ADR-032),
+  passados ao pacote puro `scoring`. `flag_encaminhar` (índice < 28) marca o
+  rastreio positivo que o Módulo 6 roteia à trilha clínica.
+
+**Consequência:** um só motor decide cadência para consultas e atividades. O anel
+diário (que não trava) fica de fora do motor de propósito; só os periódicos o usam.

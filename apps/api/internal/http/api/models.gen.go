@@ -470,6 +470,24 @@ func (e RenewEnrollmentRequestMonths) Valid() bool {
 	}
 }
 
+// Defines values for SubmitAssessmentRequestCodigo.
+const (
+	PHQ4 SubmitAssessmentRequestCodigo = "PHQ4"
+	WHO5 SubmitAssessmentRequestCodigo = "WHO5"
+)
+
+// Valid indicates whether the value is a known member of the SubmitAssessmentRequestCodigo enum.
+func (e SubmitAssessmentRequestCodigo) Valid() bool {
+	switch e {
+	case PHQ4:
+		return true
+	case WHO5:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListMyCareAppointmentsParamsStatus.
 const (
 	Agendada    ListMyCareAppointmentsParamsStatus = "agendada"
@@ -602,6 +620,38 @@ type AppointmentProfessional struct {
 	// FullName O nome como estava no legado no momento do agendamento.
 	FullName string `json:"full_name"`
 	Id       string `json:"id"`
+}
+
+// AssessmentAvailability Se o instrumento pode ser respondido agora, e seu descritor.
+type AssessmentAvailability struct {
+	Codigo string `json:"codigo"`
+
+	// Eligibility O veredito do motor para UM item, no instante avaliado. `allowed` resume (`blocks` vazio); `blocks` diz por que não, quando não. O front usa isto para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o porquê.
+	Eligibility Eligibility `json:"eligibility"`
+
+	// ItemCount Quantos itens o instrumento tem.
+	ItemCount int `json:"item_count"`
+	ValueMax  int `json:"value_max"`
+	ValueMin  int `json:"value_min"`
+}
+
+// AssessmentResult O resultado pontuado de um instrumento periódico.
+type AssessmentResult struct {
+	Codigo string `json:"codigo"`
+
+	// Faixa Derivada dos cortes (normal | sinaliza | encaminha | moderado).
+	Faixa string `json:"faixa"`
+
+	// FlagEncaminhar Rastreio positivo — encaminha à trilha clínica.
+	FlagEncaminhar bool `json:"flag_encaminhar"`
+
+	// IndexScore WHO-5 (0–100); ausente no PHQ-4.
+	IndexScore   *float32  `json:"index_score,omitempty"`
+	RawScore     *float32  `json:"raw_score,omitempty"`
+	RespondidoEm time.Time `json:"respondido_em"`
+
+	// Subscores PHQ-4: {"phq2": x, "gad2": y}.
+	Subscores *map[string]int `json:"subscores,omitempty"`
 }
 
 // AuditPage Uma página do event log. `next_cursor` é OPACO — o cliente o devolve como veio, sem interpretar; ausente significa fim.
@@ -1155,6 +1205,17 @@ type SpecialtyList struct {
 	Items []Specialty `json:"items"`
 }
 
+// SubmitAssessmentRequest defines model for SubmitAssessmentRequest.
+type SubmitAssessmentRequest struct {
+	Codigo SubmitAssessmentRequestCodigo `json:"codigo"`
+
+	// Items Respostas Likert na ordem do instrumento.
+	Items []int `json:"items"`
+}
+
+// SubmitAssessmentRequestCodigo defines model for SubmitAssessmentRequest.Codigo.
+type SubmitAssessmentRequestCodigo string
+
 // AppointmentId defines model for AppointmentId.
 type AppointmentId = openapi_types.UUID
 
@@ -1312,6 +1373,9 @@ type ForceCareAppointmentStatusJSONRequestBody = ForceStatusRequest
 
 // CreateMyCareAppointmentJSONRequestBody defines body for CreateMyCareAppointment for application/json ContentType.
 type CreateMyCareAppointmentJSONRequestBody = CreateCareAppointmentRequest
+
+// SubmitAssessmentJSONRequestBody defines body for SubmitAssessment for application/json ContentType.
+type SubmitAssessmentJSONRequestBody = SubmitAssessmentRequest
 
 // GrantConsentJSONRequestBody defines body for GrantConsent for application/json ContentType.
 type GrantConsentJSONRequestBody = GrantConsentRequest

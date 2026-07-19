@@ -315,6 +315,68 @@ paths:
                   $ref: "#/components/schemas/MoodCheckin"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /me/assessments/{codigo}:
+    get:
+      operationId: getAssessmentAvailability
+      summary: Disponibilidade de um instrumento periódico (WHO-5, PHQ-4).
+      description: >
+        A cadência (MIN_INTERVAL) é avaliada pelo MOTOR de linhas de cuidado sobre
+        o histórico imutável de aplicações — o front NÃO recalcula, exibe o
+        `reason`/`available_from` do bloqueio.
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "Código do instrumento: WHO5 ou PHQ4."
+      responses:
+        "200":
+          description: Disponibilidade e descritor do instrumento.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentAvailability"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /me/assessments:
+    post:
+      operationId: submitAssessment
+      summary: Submete as respostas de um instrumento periódico e o pontua.
+      description: >
+        Pontuação determinística com cortes da validação BR. Respeita a cadência
+        (MIN_INTERVAL) via motor; reaplicação precoce é barrada com `blocks`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitAssessmentRequest"
+      responses:
+        "200":
+          description: Instrumento pontuado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Sem consentimento ativo ou sem matrícula elegível (ver `reason`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Reaplicação precoce — cadência não permite ainda (ver `blocks`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   # ---------------------------------------------------------------------------
   # Agendamento: especialidade -> profissional -> horário -> consulta -> entrar.
   #
@@ -1654,6 +1716,63 @@ components:
         checkin:
           $ref: "#/components/schemas/MoodCheckin"
           nullable: true
+    AssessmentAvailability:
+      description: Se o instrumento pode ser respondido agora, e seu descritor.
+      type: object
+      required: [codigo, eligibility, item_count, value_min, value_max]
+      properties:
+        codigo:
+          type: string
+          example: WHO5
+        eligibility:
+          $ref: "#/components/schemas/Eligibility"
+        item_count:
+          type: integer
+          description: Quantos itens o instrumento tem.
+        value_min:
+          type: integer
+        value_max:
+          type: integer
+    SubmitAssessmentRequest:
+      type: object
+      required: [codigo, items]
+      properties:
+        codigo:
+          type: string
+          enum: [WHO5, PHQ4]
+        items:
+          type: array
+          items:
+            type: integer
+          description: Respostas Likert na ordem do instrumento.
+    AssessmentResult:
+      description: O resultado pontuado de um instrumento periódico.
+      type: object
+      required: [codigo, faixa, flag_encaminhar, respondido_em]
+      properties:
+        codigo:
+          type: string
+        raw_score:
+          type: number
+        index_score:
+          type: number
+          nullable: true
+          description: WHO-5 (0–100); ausente no PHQ-4.
+        subscores:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: integer
+          description: 'PHQ-4: {"phq2": x, "gad2": y}.'
+        faixa:
+          type: string
+          description: Derivada dos cortes (normal | sinaliza | encaminha | moderado).
+        flag_encaminhar:
+          type: boolean
+          description: Rastreio positivo — encaminha à trilha clínica.
+        respondido_em:
+          type: string
+          format: date-time
     HealthStatus:
       type: object
       required: [status, service, version]

@@ -88,6 +88,7 @@ func run() error {
 		Instruments: models.NewInstrumentStore(pool),
 		Checkins:    models.NewMoodCheckinStore(pool),
 	}
+	assessments := &controllers.AssessmentController{Assessments: models.NewAssessmentStore(pool)}
 
 	router := apihttp.NewRouter(apihttp.Deps{
 		Logger:  logger,
@@ -104,12 +105,13 @@ func run() error {
 			}
 			return nil
 		},
-		Auth:       auth,
-		Scheduling: scheduling,
-		Consent:    consent,
-		Mood:       mood,
-		CareAdmin:  careAdmin,
-		AdminToken: cfg.AdminToken,
+		Auth:        auth,
+		Scheduling:  scheduling,
+		Consent:     consent,
+		Mood:        mood,
+		Assessments: assessments,
+		CareAdmin:   careAdmin,
+		AdminToken:  cfg.AdminToken,
 		// O cadastro precisa de um teto maior que o de uma rota normal: ele
 		// espera a DAV de forma síncrona. Derivar do orçamento evita que os dois
 		// números divirjam e a última tentativa seja sempre cortada.
