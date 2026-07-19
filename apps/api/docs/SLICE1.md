@@ -61,9 +61,12 @@ Camadas cobertas:
 - **Schema + role** (integração) — todas as queries contra Postgres real, com o
   role restrito `renovi_app`; prova que `UPDATE`/`DELETE` em `journey_event` é
   recusado no banco (append-only por privilégio).
-- **E2E** (`internal/e2e/`, tag `integration`, **29 passos em 2 cenários**) — API
+- **E2E** (`internal/e2e/`, tag `integration`, **39 passos em 3 cenários**) — API
   real contra Postgres + MySQL (testcontainers) e uma DAV fake: cenário-alvo A
-  (23 passos) e B (6 passos).
+  (23 passos), B (6 passos) e C (10 passos: linha "1 psico/semana + 1 psiq/mês",
+  matrícula de 1 mês — as 4 semanais a exatos 7d, mesma semana bloqueada, nada
+  agendável com tudo cheio, cancelar/reagendar a semana, psiq remarcando para
+  antes e para depois).
 
 ## Onde ficam as constantes de política
 

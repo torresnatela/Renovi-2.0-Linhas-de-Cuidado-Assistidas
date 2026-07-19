@@ -39,13 +39,21 @@ e o worker de auto-conclusão ficam **fora** deste slice.
 - [x] **Cancelamento best-effort na DAV**: `BookingStore.Cancel` marca CANCELLED,
   devolve o horário ao legado (CAS) e tenta o cancel na DAV — que responde **500 em
   HML** (achado #20), tolerado e auditado.
-- [x] **E2E de integração** (`internal/e2e/`, tag `integration`, **29 passos em 2
+- [x] **E2E de integração** (`internal/e2e/`, tag `integration`, **39 passos em 3
   cenários**): sobe a API real contra Postgres + MySQL (testcontainers, role
   restrito `renovi_app`) e uma DAV fake (cancel sempre 500). `TestE2E_A_SaudeMentalBasica`
   (23 passos: publish/validação, cota/intervalo/antecedência/vigência, cancelamento
   com devolução de vaga, renovação contígua, expiração lazy + reativação, auditoria
-  paginada) e `TestE2E_B_ApoioPsicologico` (6 passos: QUOTA `period:total` =
-  bloqueio permanente sem `available_from`).
+  paginada), `TestE2E_B_ApoioPsicologico` (6 passos: QUOTA `period:total` =
+  bloqueio permanente sem `available_from`) e `TestE2E_C_SaudeMentalSemanal`
+  (10 passos, 2026-07-19: os casos de uso do marco "linha semanal" — psico QUOTA
+  1/semana + psiq QUOTA 1/mês, matrícula de 1 mês. UC1 ativação, UC2 as 4
+  semanais a exatos 7d + 1 psiq, UC3 nada mais agendável — QUOTA na vigência,
+  VIGENCIA além, disponibilidade anotada 100% bloqueada —, UC4 mesma semana em
+  qualquer horário = 422, UC5 cancela uma semana e reagenda nela, UC6 psiq
+  remarca para antes E para depois; extras: idempotência do reagendamento,
+  cancel duplo 409, 404, 401 e auditoria com 12 eventos. O teste foi validado
+  por mutação: janela da QUOTA `<` → `<=` derruba o C04).
 - [x] **Percurso ao vivo contra a DAV de homologação** (2026-07-18): o cenário-alvo
   rodado ponta a ponta pela API real. Comprovado: **2 estouros reais de 29s** no
   teto do gateway → **502 fail-closed** (o horário fica retido, nenhuma consulta

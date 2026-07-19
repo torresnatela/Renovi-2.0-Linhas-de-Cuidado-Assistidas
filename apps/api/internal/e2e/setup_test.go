@@ -290,19 +290,29 @@ var (
 	seedOnce   sync.Once
 	anaSlots   map[int][]testsupport.SeededSlot
 	brunoSlots map[int][]testsupport.SeededSlot
+	// Cenário C (linha semanal): offsets DISJUNTOS dos cenários A/B — os três
+	// cenários dividem o mesmo legado sem se pisar.
+	anaSlotsC   map[int][]testsupport.SeededSlot
+	brunoSlotsC map[int][]testsupport.SeededSlot
 )
 
-// seedSlots semeia os horários futuros dos dois cenários UMA vez. Os offsets
-// realizam a aritmética do cenário-alvo (QUOTA 4/mês, MIN_INTERVAL 7d,
-// MAX_ADVANCE 30d, vigência de 30d) — mudar um número aqui muda vereditos lá.
+// seedSlots semeia os horários futuros dos cenários UMA vez. Os offsets
+// realizam a aritmética de cada cenário — A/B: QUOTA 4/mês, MIN_INTERVAL 7d,
+// MAX_ADVANCE 30d, vigência de 30d; C: QUOTA 1/semana (psico +4/+11/+18/+25,
+// com +12/+26 para os bloqueios e +32 para além da vigência) e QUOTA 1/mês
+// (psiq +6, com +13/+27 para remarcar). Mudar um número aqui muda vereditos lá.
 func seedSlots(t *testing.T) {
 	t.Helper()
 	seedOnce.Do(func() {
 		anaSlots = testsupport.SeedFutureSlots(t, env.legacy.RootDSN, anaID, []int{2, 9, 10, 16, 23, 30, 44})
 		brunoSlots = testsupport.SeedFutureSlots(t, env.legacy.RootDSN, brunoID, []int{5, 37})
+		anaSlotsC = testsupport.SeedFutureSlots(t, env.legacy.RootDSN, anaID, []int{4, 11, 12, 18, 25, 26, 32})
+		brunoSlotsC = testsupport.SeedFutureSlots(t, env.legacy.RootDSN, brunoID, []int{6, 13, 27})
 	})
 	require.NotEmpty(t, anaSlots, "seed dos slots falhou num teste anterior")
 	require.NotEmpty(t, brunoSlots, "seed dos slots falhou num teste anterior")
+	require.NotEmpty(t, anaSlotsC, "seed dos slots do cenário C falhou num teste anterior")
+	require.NotEmpty(t, brunoSlotsC, "seed dos slots do cenário C falhou num teste anterior")
 }
 
 // ---------------------------------------------------------------------------
