@@ -41,7 +41,11 @@ Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
   (Status=realizada, ScheduledAt=respondido_em) — cadência derivada sob demanda,
   sem tocar T1–T19. Pontuação WHO-5 com cortes do banco. `GET /me/assessments/{codigo}`,
   `POST /me/assessments`. Integração (cadência 7d) + controller (409 blocks, 403) verdes.
-- [ ] Módulo 5 — Anel gatilhado PHQ-4 + gatilho puro (`models/mood/trigger`).
+- [x] **Módulo 5 — Anel gatilhado PHQ-4 + gatilho puro** (ADR-035): pacote PURO
+  `models/mood/trigger` (máquina de estados C.5.4, `N=4` default) table-driven;
+  PHQ-4 no `AssessmentStore.score` (subescalas PHQ-2/GAD-2, cortes do banco);
+  wiring do gatilho no `MoodCheckinStore.Today` (oferta `offer` + `escalate`
+  derivados do histórico). Integração do caminho completo NORMAL→WHO5→PHQ4→ESCALAR verde.
 - [ ] Módulo 6 — Roteamento de crise/escalonamento + fechamento.
 
 ## 🚧 Slice 1 — Linhas de Cuidado Assistidas (em andamento)

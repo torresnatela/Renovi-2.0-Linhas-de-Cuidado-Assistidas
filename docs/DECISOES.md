@@ -509,3 +509,29 @@ mínima (`MIN_INTERVAL`). Reimplementar a regra seria duplicar o que o motor pur
 
 **Consequência:** um só motor decide cadência para consultas e atividades. O anel
 diário (que não trava) fica de fora do motor de propósito; só os periódicos o usam.
+
+## ADR-035 — Gatilho de aprofundamento fora-de-banda e puro (não no motor)
+
+**Contexto:** a deterioração sustentada no anel diário deve OFERECER o WHO-5;
+WHO-5 sinalizando oferece o PHQ-4; PHQ-4 positivo escala à trilha clínica
+(Anexo C.5.4). Isso NÃO é elegibilidade de agendamento — é "oferecer aprofundar".
+Havia duas modelagens (C.9.1): novo `rule_type` no motor `careline` vs. avaliador
+fora-de-banda.
+
+**Decisão (recomendada e adotada):** avaliador **fora-de-banda**, em pacote PURO
+`internal/models/mood/trigger`, separado do motor `careline`:
+- `Evaluate(Snapshot, Params) State` — máquina de estados NORMAL / OFERECER_WHO5 /
+  OFERECER_PHQ4 / ESCALAR_CLINICO. Precedência: o anel mais PROFUNDO respondido
+  recentemente decide; sem resposta recente, `RiskStreak ≥ N` oferece o WHO-5.
+  Parâmetro `N` (dias consecutivos em risco) = **default 4**, versionável.
+- O `Snapshot` é DERIVADO sob demanda do histórico imutável (sequência de dias em
+  quadrante de risco no `mood_checkin` + últimas aplicações de WHO-5/PHQ-4 dentro
+  de uma janela de 14 dias). O `MoodCheckinStore.Today` monta o Snapshot e expõe
+  `offer`/`escalate` — nada materializado (sem `trigger_state`).
+- Justificativa: manter o motor de agendamento (e a tabela normativa T1–T19)
+  intocado; o gatilho tem semântica e ciclo próprios. Cortes entram via a `faixa`
+  já pontuada (ADR-032/034), não reimplementados.
+
+**Consequência:** `escalate=true` (PHQ-4 positivo) roteia à trilha CLÍNICA — nunca
+ao gestor (Módulo 6). A tabela de testes de `trigger` é a especificação; mudar a
+máquina de estados começa por ela.

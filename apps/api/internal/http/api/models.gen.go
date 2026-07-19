@@ -431,6 +431,24 @@ func (e JourneyEventEventType) Valid() bool {
 	}
 }
 
+// Defines values for MoodTodayOffer.
+const (
+	MoodTodayOfferPHQ4 MoodTodayOffer = "PHQ4"
+	MoodTodayOfferWHO5 MoodTodayOffer = "WHO5"
+)
+
+// Valid indicates whether the value is a known member of the MoodTodayOffer enum.
+func (e MoodTodayOffer) Valid() bool {
+	switch e {
+	case MoodTodayOfferPHQ4:
+		return true
+	case MoodTodayOfferWHO5:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MoodTodayReason.
 const (
 	ConsentRequired MoodTodayReason = "consent_required"
@@ -472,16 +490,16 @@ func (e RenewEnrollmentRequestMonths) Valid() bool {
 
 // Defines values for SubmitAssessmentRequestCodigo.
 const (
-	PHQ4 SubmitAssessmentRequestCodigo = "PHQ4"
-	WHO5 SubmitAssessmentRequestCodigo = "WHO5"
+	SubmitAssessmentRequestCodigoPHQ4 SubmitAssessmentRequestCodigo = "PHQ4"
+	SubmitAssessmentRequestCodigoWHO5 SubmitAssessmentRequestCodigo = "WHO5"
 )
 
 // Valid indicates whether the value is a known member of the SubmitAssessmentRequestCodigo enum.
 func (e SubmitAssessmentRequestCodigo) Valid() bool {
 	switch e {
-	case PHQ4:
+	case SubmitAssessmentRequestCodigoPHQ4:
 		return true
-	case WHO5:
+	case SubmitAssessmentRequestCodigoWHO5:
 		return true
 	default:
 		return false
@@ -1061,9 +1079,18 @@ type MoodToday struct {
 	// Dia Dia local (America/Sao_Paulo).
 	Dia openapi_types.Date `json:"dia"`
 
+	// Escalate true quando o gatilho indica escalonamento à trilha CLÍNICA (PHQ-4 positivo). Nunca vai ao gestor — só ao canal clínico/urgência.
+	Escalate *bool `json:"escalate,omitempty"`
+
+	// Offer Instrumento de aprofundamento OFERECIDO agora pelo gatilho (deterioração sustentada no anel diário → WHO-5; WHO-5 sinalizando → PHQ-4). Nulo quando não há oferta. Derivado sob demanda do histórico.
+	Offer *MoodTodayOffer `json:"offer,omitempty"`
+
 	// Reason Por que não pode registrar, quando `can_checkin` é false.
 	Reason *MoodTodayReason `json:"reason,omitempty"`
 }
+
+// MoodTodayOffer Instrumento de aprofundamento OFERECIDO agora pelo gatilho (deterioração sustentada no anel diário → WHO-5; WHO-5 sinalizando → PHQ-4). Nulo quando não há oferta. Derivado sob demanda do histórico.
+type MoodTodayOffer string
 
 // MoodTodayReason Por que não pode registrar, quando `can_checkin` é false.
 type MoodTodayReason string

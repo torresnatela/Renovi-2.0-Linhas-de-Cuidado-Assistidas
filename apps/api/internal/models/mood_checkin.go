@@ -14,7 +14,12 @@ import (
 
 	"github.com/renovisaude/renovi-care/internal/db/gen"
 	"github.com/renovisaude/renovi-care/internal/models/mood/scoring"
+	"github.com/renovisaude/renovi-care/internal/models/mood/trigger"
 )
+
+// triggerWindow: por quanto tempo uma aplicação de WHO-5/PHQ-4 é considerada
+// "recente" (do ciclo atual) pelo gatilho.
+const triggerWindow = 14 * 24 * time.Hour
 
 // CheckinHumorDiarioRef é o ref do item de atividade do check-in diário na linha.
 const CheckinHumorDiarioRef = "checkin-humor-diario"
@@ -47,12 +52,15 @@ type MoodCheckinInput struct {
 	ContextTags  []string
 }
 
-// MoodToday resume o dia do paciente: elegibilidade + o check-in de hoje.
+// MoodToday resume o dia do paciente: elegibilidade + o check-in de hoje + a
+// oferta do gatilho de aprofundamento (WHO-5/PHQ-4) e o sinal de escalonamento.
 type MoodToday struct {
 	Dia        time.Time // dia local (meia-noite civil)
 	CanCheckin bool
 	Reason     string // "" | "consent_required" | "not_enrolled"
 	Checkin    *MoodCheckin
+	Offer      string // "" | "WHO5" | "PHQ4" (instrumento ofertado agora)
+	Escalate   bool   // true = escalonar à trilha clínica (PHQ-4 positivo)
 }
 
 // Motivos de inelegibilidade (máquina-legíveis para o front).
@@ -208,7 +216,55 @@ func (s *MoodCheckinStore) Today(ctx context.Context, patientID uuid.UUID, now t
 	case !errors.Is(err, pgx.ErrNoRows):
 		return MoodToday{}, fmt.Errorf("consultar check-in de hoje: %w", err)
 	}
+
+	offer, escalate, err := s.computeOffer(ctx, patientID, now)
+	if err != nil {
+		return MoodToday{}, err
+	}
+	out.Offer, out.Escalate = offer, escalate
 	return out, nil
+}
+
+// computeOffer deriva a oferta do gatilho (Anexo C.5.4) do histórico imutável:
+// a sequência de dias em risco no anel diário e as últimas aplicações de WHO-5/PHQ-4.
+func (s *MoodCheckinStore) computeOffer(ctx context.Context, patientID uuid.UUID, now time.Time) (string, bool, error) {
+	rows, err := s.q.ListRecentCheckinQuadrants(ctx, gen.ListRecentCheckinQuadrantsParams{PatientID: patientID, Limit: 30})
+	if err != nil {
+		return "", false, fmt.Errorf("listar quadrantes recentes: %w", err)
+	}
+	streak := 0
+	for _, r := range rows {
+		if !scoring.IsQuadranteRisco(r.Quadrante) {
+			break
+		}
+		streak++
+	}
+	snap := trigger.Snapshot{RiskStreak: streak}
+
+	who5, err := s.q.LatestAssessmentByInstrument(ctx, gen.LatestAssessmentByInstrumentParams{PatientID: patientID, Codigo: Who5Codigo})
+	switch {
+	case err == nil:
+		if !who5.RespondidoEm.Before(now.Add(-triggerWindow)) {
+			snap.WHO5Recent = true
+			snap.WHO5Sinaliza = who5.Faixa == scoring.FaixaSinaliza || who5.Faixa == scoring.FaixaEncaminha
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", false, fmt.Errorf("consultar WHO-5 recente: %w", err)
+	}
+
+	phq4, err := s.q.LatestAssessmentByInstrument(ctx, gen.LatestAssessmentByInstrumentParams{PatientID: patientID, Codigo: Phq4Codigo})
+	switch {
+	case err == nil:
+		if !phq4.RespondidoEm.Before(now.Add(-triggerWindow)) {
+			snap.PHQ4Recent = true
+			snap.PHQ4Positivo = phq4.FlagEncaminhar
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", false, fmt.Errorf("consultar PHQ-4 recente: %w", err)
+	}
+
+	state := trigger.Evaluate(snap, trigger.Params{})
+	return state.Offer(), state.Escalate(), nil
 }
 
 // History devolve os check-ins recentes do paciente (mais novo primeiro).

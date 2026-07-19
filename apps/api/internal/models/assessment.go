@@ -279,10 +279,44 @@ func (s *AssessmentStore) score(ctx context.Context, codigo string, instrumentID
 			RawScore: float64(r.Raw), IndexScore: &index,
 			Faixa: r.Faixa, FlagEncaminhar: r.FlagEncaminhar,
 		}, nil
+	case Phq4Codigo:
+		cutoffs, err := s.phq4Cutoffs(ctx, instrumentID)
+		if err != nil {
+			return AssessmentResult{}, err
+		}
+		r, err := scoring.ScorePHQ4(items, cutoffs)
+		if err != nil {
+			return AssessmentResult{}, fmt.Errorf("%w: %v", ErrAssessmentInvalid, err)
+		}
+		// PHQ-4 não tem índice 0–100; guarda as subescalas PHQ-2/GAD-2.
+		return AssessmentResult{
+			RawScore:       float64(r.Total),
+			Subscores:      map[string]int{"phq2": r.PHQ2, "gad2": r.GAD2},
+			Faixa:          r.Faixa,
+			FlagEncaminhar: r.FlagEncaminhar,
+		}, nil
 	default:
-		// PHQ-4 entra no Módulo 5.
 		return AssessmentResult{}, ErrUnknownInstrument
 	}
+}
+
+// phq4Cutoffs carrega os cortes do PHQ-4 do banco (validação BR versionada).
+func (s *AssessmentStore) phq4Cutoffs(ctx context.Context, instrumentID uuid.UUID) (scoring.PHQ4Cutoffs, error) {
+	rows, err := s.q.ListInstrumentCutoffs(ctx, instrumentID)
+	if err != nil {
+		return scoring.PHQ4Cutoffs{}, fmt.Errorf("listar cortes: %w", err)
+	}
+	c := scoring.PHQ4Cutoffs{SubescalaPositiva: 3, TotalModerado: 6} // defaults se faltar seed
+	for _, r := range rows {
+		v := int(numericToFloat(r.Valor))
+		switch r.Faixa {
+		case "subescala_positiva":
+			c.SubescalaPositiva = v
+		case "moderado":
+			c.TotalModerado = v
+		}
+	}
+	return c, nil
 }
 
 // who5Cutoffs carrega os cortes do WHO-5 do banco (validação BR versionada).

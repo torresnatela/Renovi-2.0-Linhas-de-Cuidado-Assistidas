@@ -148,6 +148,9 @@ type Querier interface {
 	// token_hash é o SHA-256 do token opaco. O token em si nunca toca o banco.
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
 	InsertWellbeingAssessment(ctx context.Context, arg InsertWellbeingAssessmentParams) (WellbeingAssessment, error)
+	// A aplicação mais recente de um instrumento (por código) para o paciente — o
+	// gatilho usa a faixa/flag e o instante para decidir o estado.
+	LatestAssessmentByInstrument(ctx context.Context, arg LatestAssessmentByInstrumentParams) (LatestAssessmentByInstrumentRow, error)
 	// Ativa a conta. O CHECK active_exige_vinculo_dav (migration 0002) recusa esta
 	// linha se dav_person_id vier nulo — a regra está no banco, não só aqui.
 	//
@@ -194,6 +197,9 @@ type Querier interface {
 	// É uma consulta ao banco, e não um estado em memória, para sobreviver a um
 	// restart no meio.
 	ListPendingSlotRelease(ctx context.Context, limit int32) ([]Appointment, error)
+	// Quadrantes dos check-ins recentes (mais novo primeiro) — o gatilho conta a
+	// sequência de dias em risco a partir daqui.
+	ListRecentCheckinQuadrants(ctx context.Context, arg ListRecentCheckinQuadrantsParams) ([]ListRecentCheckinQuadrantsRow, error)
 	// Os eventos mais recentes de UMA matrícula (ex.: para montar o resumo da linha).
 	ListRecentJourneyEventsByEnrollment(ctx context.Context, arg ListRecentJourneyEventsByEnrollmentParams) ([]JourneyEvent, error)
 	// As regras de todos os itens de uma linha, com o ref do item junto (o motor puro

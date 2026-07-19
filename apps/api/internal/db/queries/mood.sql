@@ -40,3 +40,19 @@ SELECT * FROM mood_checkin WHERE patient_id = $1 AND dia_ref = $2;
 
 -- name: ListMoodCheckins :many
 SELECT * FROM mood_checkin WHERE patient_id = $1 ORDER BY respondido_em DESC LIMIT $2;
+
+-- name: ListRecentCheckinQuadrants :many
+-- Quadrantes dos check-ins recentes (mais novo primeiro) — o gatilho conta a
+-- sequência de dias em risco a partir daqui.
+SELECT dia_ref, quadrante FROM mood_checkin
+WHERE patient_id = $1 ORDER BY dia_ref DESC LIMIT $2;
+
+-- name: LatestAssessmentByInstrument :one
+-- A aplicação mais recente de um instrumento (por código) para o paciente — o
+-- gatilho usa a faixa/flag e o instante para decidir o estado.
+SELECT wa.faixa, wa.flag_encaminhar, wa.respondido_em
+FROM wellbeing_assessment wa
+JOIN instrument i ON i.id = wa.instrument_id
+WHERE wa.patient_id = $1 AND i.codigo = $2
+ORDER BY wa.respondido_em DESC
+LIMIT 1;

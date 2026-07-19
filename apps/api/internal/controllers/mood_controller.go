@@ -197,5 +197,11 @@ func toAPIMoodToday(t models.MoodToday) api.MoodToday {
 		ck := toAPIMoodCheckin(*t.Checkin)
 		out.Checkin = &ck
 	}
+	if t.Offer != "" {
+		offer := api.MoodTodayOffer(t.Offer)
+		out.Offer = &offer
+	}
+	escalate := t.Escalate
+	out.Escalate = &escalate
 	return out
 }

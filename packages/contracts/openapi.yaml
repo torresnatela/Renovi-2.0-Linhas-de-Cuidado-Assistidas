@@ -1716,6 +1716,19 @@ components:
         checkin:
           $ref: "#/components/schemas/MoodCheckin"
           nullable: true
+        offer:
+          type: string
+          nullable: true
+          enum: [WHO5, PHQ4]
+          description: >
+            Instrumento de aprofundamento OFERECIDO agora pelo gatilho (deterioração
+            sustentada no anel diário → WHO-5; WHO-5 sinalizando → PHQ-4). Nulo quando
+            não há oferta. Derivado sob demanda do histórico.
+        escalate:
+          type: boolean
+          description: >
+            true quando o gatilho indica escalonamento à trilha CLÍNICA (PHQ-4
+            positivo). Nunca vai ao gestor — só ao canal clínico/urgência.
     AssessmentAvailability:
       description: Se o instrumento pode ser respondido agora, e seu descritor.
       type: object

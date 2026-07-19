@@ -80,6 +80,35 @@ func (q *Queries) GetMoodCheckinByDay(ctx context.Context, arg GetMoodCheckinByD
 	return i, err
 }
 
+const latestAssessmentByInstrument = `-- name: LatestAssessmentByInstrument :one
+SELECT wa.faixa, wa.flag_encaminhar, wa.respondido_em
+FROM wellbeing_assessment wa
+JOIN instrument i ON i.id = wa.instrument_id
+WHERE wa.patient_id = $1 AND i.codigo = $2
+ORDER BY wa.respondido_em DESC
+LIMIT 1
+`
+
+type LatestAssessmentByInstrumentParams struct {
+	PatientID uuid.UUID `json:"patient_id"`
+	Codigo    string    `json:"codigo"`
+}
+
+type LatestAssessmentByInstrumentRow struct {
+	Faixa          string    `json:"faixa"`
+	FlagEncaminhar bool      `json:"flag_encaminhar"`
+	RespondidoEm   time.Time `json:"respondido_em"`
+}
+
+// A aplicação mais recente de um instrumento (por código) para o paciente — o
+// gatilho usa a faixa/flag e o instante para decidir o estado.
+func (q *Queries) LatestAssessmentByInstrument(ctx context.Context, arg LatestAssessmentByInstrumentParams) (LatestAssessmentByInstrumentRow, error) {
+	row := q.db.QueryRow(ctx, latestAssessmentByInstrument, arg.PatientID, arg.Codigo)
+	var i LatestAssessmentByInstrumentRow
+	err := row.Scan(&i.Faixa, &i.FlagEncaminhar, &i.RespondidoEm)
+	return i, err
+}
+
 const listMoodCheckins = `-- name: ListMoodCheckins :many
 SELECT id, patient_id, enrollment_id, care_line_item_id, consent_id, instrument_id, valencia, energia, quadrante, emotion_label, context_tags, dia_ref, respondido_em, created_at, updated_at FROM mood_checkin WHERE patient_id = $1 ORDER BY respondido_em DESC LIMIT $2
 `
@@ -115,6 +144,43 @@ func (q *Queries) ListMoodCheckins(ctx context.Context, arg ListMoodCheckinsPara
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentCheckinQuadrants = `-- name: ListRecentCheckinQuadrants :many
+SELECT dia_ref, quadrante FROM mood_checkin
+WHERE patient_id = $1 ORDER BY dia_ref DESC LIMIT $2
+`
+
+type ListRecentCheckinQuadrantsParams struct {
+	PatientID uuid.UUID `json:"patient_id"`
+	Limit     int32     `json:"limit"`
+}
+
+type ListRecentCheckinQuadrantsRow struct {
+	DiaRef    pgtype.Date `json:"dia_ref"`
+	Quadrante string      `json:"quadrante"`
+}
+
+// Quadrantes dos check-ins recentes (mais novo primeiro) — o gatilho conta a
+// sequência de dias em risco a partir daqui.
+func (q *Queries) ListRecentCheckinQuadrants(ctx context.Context, arg ListRecentCheckinQuadrantsParams) ([]ListRecentCheckinQuadrantsRow, error) {
+	rows, err := q.db.Query(ctx, listRecentCheckinQuadrants, arg.PatientID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentCheckinQuadrantsRow{}
+	for rows.Next() {
+		var i ListRecentCheckinQuadrantsRow
+		if err := rows.Scan(&i.DiaRef, &i.Quadrante); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
