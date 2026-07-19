@@ -1,0 +1,686 @@
+### Roteiro manual do Slice 1 — Saúde Mental Básica de teste + Apoio Psicológico
+#
+# Arquivo REST Client (extensão "REST Client" do VS Code, ou o equivalente do
+# IntelliJ/HTTP Client). Espelha, requisição por requisição, os cenários A e B
+# de `apps/api/internal/e2e` (`scenario_a_test.go` / `scenario_b_test.go`) — o
+# mapeamento 1:1 entre passo do E2E e bloco daqui está no relatório da Fase 8
+# (docs/PROGRESSO.md tem o resumo; o mapeamento completo ficou no relatório da
+# tarefa). Dois passos do E2E (A21, A23) mexem DIRETO no Postgres via
+# superusuário para simular vencimento de vigência e testar o grant do banco —
+# não têm rota HTTP correspondente, então não aparecem aqui.
+#
+# ---------------------------------------------------------------------------
+# Pré-requisitos (nesta ordem)
+# ---------------------------------------------------------------------------
+#   1. `make up`            — sobe Postgres (renovi_care) + mocks (MySQL legado,
+#                              Postgres Gestão).
+#   2. `make migrate-up`    — aplica as migrations no renovi_care. Roda como
+#                              OWNER (renovi): se você separou as credenciais de
+#                              app/migrate no `.env`, confira
+#                              RENOVI_CARE_MIGRATE_DATABASE_URL (senão o migrate
+#                              cai na URL da aplicação, que não tem DDL).
+#   3. `make seed-legacy-slots` — semeia os horários futuros deste roteiro no
+#                              mock do legado (deploy/mysql-legacy/seed-slots.sql,
+#                              idempotente — pode rodar de novo à vontade).
+#   4. Os profissionais do mock (Ana/Psicologia, Bruno/Psiquiatria) já existem
+#      na DAV de HOMOLOGAÇÃO com os MESMOS ids do `tb_professionals.id` — ver
+#      docs/DESENVOLVIMENTO.md, seção "Rodar o agendamento localmente". Só
+#      recrie-os lá (POST /professional) se a HML tiver resetado os dados.
+#   5. Suba a API com as envs deste roteiro (não é só copiar o `.env`: a
+#      aplicação NÃO o lê sozinha — config é 12-factor):
+#
+#        export RENOVI_CARE_DATABASE_URL='postgres://renovi_app:renovi_app@localhost:5432/renovi_care?sslmode=disable'
+#        export RENOVI_LEGACY_DATABASE_URL='renovi:renovi@tcp(localhost:3306)/renovi_legacy'
+#        export RENOVI_DAV_BASE_URL=https://api.v2.hom.doutoraovivo.com.br
+#        export RENOVI_DAV_API_KEY=<sua chave de HML — ver docs/DAV-API-NOTAS.md>
+#        export RENOVI_SESSION_COOKIE_SECURE=false
+#        export RENOVI_ADMIN_TOKEN=dev-admin-token   # bate com @adminToken abaixo
+#        export RENOVI_TEST_ENDPOINTS=true           # liga POST /internal/... (A20)
+#        go -C apps/api run ./cmd/api
+#
+#   6. ⚠️ O `PUT /appointment/{id}/cancel` da DAV de HML responde 500 SEMPRE
+#      (achado #20, docs/DAV-API-NOTAS.md). O cancelamento LOCAL (passo A14)
+#      funciona normalmente e o evento de auditoria registra a falha da DAV
+#      (`dav_cancelled: false`, `dav_error` com o "500") — isto é COMPORTAMENTO
+#      ESPERADO, não um bug deste roteiro.
+#   7. ⚠️ LGPD / HML: este roteiro CRIA PESSOAS E CONSULTAS REAIS na DAV de
+#      homologação (os dois `POST /auth/register` disparam `POST /person` lá).
+#      Nunca aponte `RENOVI_DAV_BASE_URL` para produção.
+#
+# ---------------------------------------------------------------------------
+# Variáveis
+# ---------------------------------------------------------------------------
+@host = http://localhost:8090/api/v1
+# Precisa bater com o RENOVI_ADMIN_TOKEN exportado no passo 5 acima.
+@adminToken = dev-admin-token
+
+# Idempotency-Key fixas de exemplo, uma por tentativa de agendamento do
+# roteiro. Cada rodada LIMPA (banco zerado + `make migrate-up` de novo) pode
+# reusar estes valores; para repetir o roteiro num banco que já rodou antes,
+# troque-as por valores novos (senão um "replay" acidental devolve 200 com uma
+# consulta velha em vez de criar/bloquear a nova).
+@idemA08a = 11111111-2222-4333-8444-555566667001
+@idemA08b = 11111111-2222-4333-8444-555566667002
+@idemA08c = 11111111-2222-4333-8444-555566667003
+@idemA08d = 11111111-2222-4333-8444-555566667004
+@idemA11  = 11111111-2222-4333-8444-555566667011
+@idemA12  = 11111111-2222-4333-8444-555566667012
+@idemA13  = 11111111-2222-4333-8444-555566667013
+@idemA15  = 11111111-2222-4333-8444-555566667015
+@idemA16a = 11111111-2222-4333-8444-555566667161
+@idemA16b = 11111111-2222-4333-8444-555566667162
+@idemA17  = 11111111-2222-4333-8444-555566667017
+@idemA19a = 11111111-2222-4333-8444-555566667191
+@idemA19b = 11111111-2222-4333-8444-555566667192
+@idemB02 = 22222222-3333-4444-8555-666677778002
+@idemB03 = 22222222-3333-4444-8555-666677778003
+@idemB04 = 22222222-3333-4444-8555-666677778004
+@idemB05 = 22222222-3333-4444-8555-666677778005
+
+# ===========================================================================
+# CENÁRIO A — Saúde Mental Básica de teste (paciente 1)
+#   Psicologia: QUOTA 4/mês (rolling) + MIN_INTERVAL 7d + MAX_ADVANCE 30d.
+#   Psiquiatria: QUOTA 1/mês.
+#   Horários (America/Sao_Paulo, hoje+D 09:00/09:30): psico em +2 09:00, +9
+#   09:00, +16 09:30, +23 09:30 (adjacentes a EXATOS 7d, permitido pelo
+#   MIN_INTERVAL); psiq em +5 e +37.
+# ===========================================================================
+
+### A01a — admin sem header nenhum: 401 ADMIN_TOKEN_INVALID
+GET {{host}}/admin/care-lines
+
+### A01b — admin com token ERRADO: 401 ADMIN_TOKEN_INVALID (mesmo motivo)
+GET {{host}}/admin/care-lines
+X-Admin-Token: token-errado
+
+### A02a — cria a linha em draft (201)
+# @name A02_create_line
+POST {{host}}/admin/care-lines
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "code": "saude-mental-basica",
+  "name": "Saúde Mental Básica de teste",
+  "description": "linha do E2E do slice 1"
+}
+
+@lineIdA = {{A02_create_line.response.body.$.id}}
+
+### A02b — item de Psicologia (201)
+# @name A02_item_psico
+POST {{host}}/admin/care-lines/{{lineIdA}}/items
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "ref": "psico",
+  "kind": "CONSULTA",
+  "label": "Psicoterapia",
+  "specialty_code": "Psicologia"
+}
+
+@psicoItemId = {{A02_item_psico.response.body.$.id}}
+
+### A02c — item de Psiquiatria (201)
+# @name A02_item_psiq
+POST {{host}}/admin/care-lines/{{lineIdA}}/items
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "ref": "psiq",
+  "kind": "CONSULTA",
+  "label": "Consulta psiquiátrica",
+  "specialty_code": "Psiquiatria"
+}
+
+@psiqItemId = {{A02_item_psiq.response.body.$.id}}
+
+### A02d — regra QUOTA 4/mês (rolling) no item psico (201)
+POST {{host}}/admin/care-lines/{{lineIdA}}/items/psico/rules
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "rule_type": "QUOTA",
+  "params": { "max": 4, "period": "month", "window": "rolling" }
+}
+
+### A02e — regra MIN_INTERVAL 7d no item psico (201)
+POST {{host}}/admin/care-lines/{{lineIdA}}/items/psico/rules
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "rule_type": "MIN_INTERVAL",
+  "params": { "days": 7 }
+}
+
+### A02f — regra MAX_ADVANCE 30d no item psico (201)
+POST {{host}}/admin/care-lines/{{lineIdA}}/items/psico/rules
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "rule_type": "MAX_ADVANCE",
+  "params": { "days": 30 }
+}
+
+### A02g — regra QUOTA 1/mês no item psiq (201)
+POST {{host}}/admin/care-lines/{{lineIdA}}/items/psiq/rules
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "rule_type": "QUOTA",
+  "params": { "max": 1, "period": "month" }
+}
+
+### A02h — publica a linha (200, status published, 2 items)
+POST {{host}}/admin/care-lines/{{lineIdA}}/publish
+X-Admin-Token: {{adminToken}}
+
+### A02i — linha publicada é imutável: item novo depois do publish → 409 CARE_LINE_PUBLISHED
+POST {{host}}/admin/care-lines/{{lineIdA}}/items
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "ref": "extra",
+  "kind": "CONSULTA",
+  "label": "Extra",
+  "specialty_code": "Psicologia"
+}
+
+### A04a — paciente 1 se registra (201). CPF de teste com DV correto (948.190.898-46 = 94819089846), o mesmo já usado nos testes de auth — NÃO é CPF de pessoa real.
+# @name A04_register
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "full_name": "Paciente Um E2E",
+  "cpf": "948.190.898-46",
+  "birth_date": "1990-03-10",
+  "email": "paciente1.e2e@example.com",
+  "phone": "11999990001",
+  "password": "cavalo-bateria-grampo-1",
+  "address": {
+    "zip_code": "01310-100",
+    "street": "Av. Paulista",
+    "number": "1000",
+    "neighborhood": "Bela Vista",
+    "city": "São Paulo",
+    "state": "SP"
+  }
+}
+
+@accountIdA = {{A04_register.response.body.$.id}}
+
+### A04b — paciente 1 loga (200) — o REST Client guarda o cookie de sessão POR ARQUIVO a partir daqui
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "cpf": "94819089846",
+  "password": "cavalo-bateria-grampo-1"
+}
+
+### A04c — o cookie vale: /me devolve a conta do paciente 1 (confira que o id bate com {{accountIdA}})
+GET {{host}}/me
+
+### A05a — admin matricula o paciente 1 por 1 mês (201, vigência de 30d)
+# @name A05_matricula
+POST {{host}}/admin/enrollments
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "patient_id": "{{accountIdA}}",
+  "care_line_code": "saude-mental-basica",
+  "months": 1
+}
+
+@enrollmentIdA = {{A05_matricula.response.body.$.id}}
+
+### A05b — matricular DE NOVO na mesma linha → 409 ENROLLMENT_ALIVE
+POST {{host}}/admin/enrollments
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "patient_id": "{{accountIdA}}",
+  "care_line_code": "saude-mental-basica",
+  "months": 1
+}
+
+### A06 — jornada do paciente 1: 1 matrícula ativa, 2 itens, ambos allowed=true (200)
+GET {{host}}/me/journey
+
+### A07 — disponibilidade de psico: o slot semeado de hoje+2 09:00 (manual-a-2-s1) aparece, com Ana como profissional e eligibility.allowed=true (200)
+GET {{host}}/me/availability?item_id={{psicoItemId}}
+
+### A08a — agenda psico +2 09:00 (manual-a-2-s1) → 201 agendada
+# @name A08_psico2
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA08a}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-2-s1"
+}
+
+@apptPsico2Id = {{A08_psico2.response.body.$.id}}
+
+### A08b — agenda psico +9 09:00 (manual-a-9-s1) → 201 (exatos 7d do +2 — MIN_INTERVAL permite)
+# @name A08_psico9
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA08b}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-9-s1"
+}
+
+@apptPsico9Id = {{A08_psico9.response.body.$.id}}
+
+### A08c — agenda psico +16 09:30 (manual-a-16-s2) → 201
+# @name A08_psico16
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA08c}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-16-s2"
+}
+
+### A08d — agenda psico +23 09:30 (manual-a-23-s2) → 201 (exatos 7d do +16 — permitido; cota fecha em 4/4)
+# @name A08_psico23
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA08d}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-23-s2"
+}
+
+### A09a — replay: MESMA Idempotency-Key do A08d, mesmo corpo → 200 (não 201!), devolve a MESMA consulta (compare o id com {{A08_psico23.response.body.$.id}})
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA08d}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-23-s2"
+}
+
+### A09b — o replay não criou uma 5ª consulta: /me/appointments continua com as 4 (200)
+GET {{host}}/me/appointments
+
+### A10 — SEM Idempotency-Key → 400 IDEMPOTENCY_KEY_REQUIRED
+POST {{host}}/me/appointments
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-30-s1"
+}
+
+### A11 — 5ª consulta de psico no período → 422 ELIGIBILITY_BLOCKED, block QUOTA com available_from = scheduled(+2) + 30d
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA11}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-30-s1"
+}
+
+### A12 — vizinho a menos de 7d (hoje+10, entre +9 e +16) → 422, block MIN_INTERVAL com available_from = vizinho mais tardio (+16 09:30) + 7d
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA12}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-10-s1"
+}
+
+### A13 — slot já tomado (o mesmo de A08a, hoje+2 09:00) → 409 SLOT_TAKEN
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA13}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-2-s1"
+}
+
+### A14 — cancela a consulta de +9 com antecedência (>24h) → 200 cancelada (não conta na cota; evento registra dav_cancelled=false, ver pré-requisito 6)
+POST {{host}}/me/appointments/{{apptPsico9Id}}/cancel
+
+### A15 — reagenda +9, agora 09:30 (manual-a-9-s2) → 201 (a cancelada com antecedência não conta para MIN_INTERVAL nem QUOTA)
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA15}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-9-s2"
+}
+
+### A16a — psiquiatria +5 (manual-b-5-s1) → 201
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA16a}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psiqItemId}}",
+  "slot_id": "manual-b-5-s1"
+}
+
+### A16b — psiquiatria +37 (manual-b-37-s1) → 422, SÓ block VIGENCIA (fora da vigência de 30d da matrícula; psiquiatria não tem MAX_ADVANCE e a QUOTA 1/mês não pega +5 e +37 juntos), sem available_from (renovar é ação do admin)
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA16b}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psiqItemId}}",
+  "slot_id": "manual-b-37-s1"
+}
+
+### A17 — psicologia +44 (manual-a-44-s1) → 422, blocks MAX_ADVANCE (available_from = intended - 30d) E VIGENCIA (também passa do valid_until)
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA17}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-44-s1"
+}
+
+### A18 — renova a matrícula +1 mês (200): valid_until avança exatos 30d, período novo CONTÍGUO ao valid_until anterior
+POST {{host}}/admin/enrollments/{{enrollmentIdA}}/renew
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "months": 1
+}
+
+### A19a — psiquiatria +37 de novo (mesmo slot do A16b) → agora 201: a 1ª consulta do ciclo 2, agendada ainda dentro do ciclo 1
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA19a}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psiqItemId}}",
+  "slot_id": "manual-b-37-s1"
+}
+
+### A19b — psicologia +44 (mesmo slot do A17) continua 422, mas AGORA só MAX_ADVANCE (a renovação tirou a VIGENCIA; o available_from de MAX_ADVANCE não muda)
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemA19b}}
+Content-Type: application/json
+
+{
+  "item_id": "{{psicoItemId}}",
+  "slot_id": "manual-a-44-s1"
+}
+
+### A20a — rota /internal (RENOVI_TEST_ENDPOINTS=true, sem token/cookie): força a consulta de +2 para "realizada" (200)
+POST {{host}}/internal/appointments/{{apptPsico2Id}}/force-status
+Content-Type: application/json
+
+{
+  "status": "realizada"
+}
+
+### A20b — filtra por status=realizada: só a de +2 aparece (200, 1 item)
+GET {{host}}/me/appointments?status=realizada
+
+### A22a — auditoria completa (limit=50): 11 eventos nesta rodada (na E2E automatizada são 13 — os 2 a mais vêm do passo A21, que expira/reativa a matrícula direto no Postgres via superusuário e não tem rota HTTP). Do mais recente pro mais antigo: consulta_status_forcado (A20), consulta_agendada psiq+37 (A19a), matricula_renovada (A18), consulta_agendada psiq+5 (A16a), consulta_agendada psico+9 09:30 (A15), consulta_cancelada (A14), consulta_agendada psico+23/+16/+9/+2 (A08, ordem DESC), matricula_criada (A05).
+GET {{host}}/me/audit?limit=50
+
+### A22b — mesma auditoria paginada por 5: primeira página vem com 5 itens + next_cursor (11 no total ⇒ 3 páginas: 5+5+1)
+GET {{host}}/me/audit?limit=5
+
+# ===========================================================================
+# CENÁRIO B — Apoio Psicológico (paciente 2)
+#
+# ⚠️ O cookie do REST Client é POR ARQUIVO: a partir do login do B01g, a sessão
+# vira a do paciente 2. Qualquer request de /me/* do Cenário A rodado DEPOIS
+# daqui responderia pela conta do paciente 2, não da 1 — se precisar voltar a
+# testar algo do Cenário A, refaça o login do A04b antes.
+#
+# Linha com item único de Psicologia sob QUOTA {max:1, period:total} (cota da
+# VIDA da matrícula, sem janela que "passa" — bloqueio permanente, sem
+# available_from) + MAX_ADVANCE 30d. Horários usados (Ana: +2 09:30, +16 09:00,
+# +23 09:00) são disjuntos dos que o Cenário A reservou.
+# ===========================================================================
+
+### B01a — cria a linha "Apoio Psicológico" em draft (201)
+# @name B01_create_line
+POST {{host}}/admin/care-lines
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "code": "apoio-psicologico",
+  "name": "Apoio Psicológico"
+}
+
+@lineIdB = {{B01_create_line.response.body.$.id}}
+
+### B01b — item único de Psicologia (201)
+# @name B01_item_apoio
+POST {{host}}/admin/care-lines/{{lineIdB}}/items
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "ref": "apoio",
+  "kind": "CONSULTA",
+  "label": "Sessão de apoio",
+  "specialty_code": "Psicologia"
+}
+
+@apoioItemId = {{B01_item_apoio.response.body.$.id}}
+
+### B01c — regra QUOTA {max:1, period:total} (201)
+POST {{host}}/admin/care-lines/{{lineIdB}}/items/apoio/rules
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "rule_type": "QUOTA",
+  "params": { "max": 1, "period": "total" }
+}
+
+### B01d — regra MAX_ADVANCE 30d (201)
+POST {{host}}/admin/care-lines/{{lineIdB}}/items/apoio/rules
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "rule_type": "MAX_ADVANCE",
+  "params": { "days": 30 }
+}
+
+### B01e — publica a linha (200, 1 item)
+POST {{host}}/admin/care-lines/{{lineIdB}}/publish
+X-Admin-Token: {{adminToken}}
+
+### B01f — paciente 2 se registra (201). CPF de teste com DV correto e zeros à esquerda (00000003700), DISTINTO do paciente 1 — NÃO é CPF de pessoa real.
+# @name B01_register
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "full_name": "Paciente Dois E2E",
+  "cpf": "00000003700",
+  "birth_date": "1988-11-05",
+  "email": "paciente2.e2e@example.com",
+  "phone": "11999990002",
+  "password": "cavalo-bateria-grampo-2",
+  "address": {
+    "zip_code": "01310-100",
+    "street": "Av. Paulista",
+    "number": "2000",
+    "neighborhood": "Bela Vista",
+    "city": "São Paulo",
+    "state": "SP"
+  }
+}
+
+@accountIdB = {{B01_register.response.body.$.id}}
+
+### B01g — paciente 2 loga (200) — TROCA o cookie de sessão do arquivo (era o paciente 1)
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "cpf": "00000003700",
+  "password": "cavalo-bateria-grampo-2"
+}
+
+### B01h — admin matricula o paciente 2 em Apoio Psicológico por 1 mês (201)
+POST {{host}}/admin/enrollments
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "patient_id": "{{accountIdB}}",
+  "care_line_code": "apoio-psicologico",
+  "months": 1
+}
+
+### B02 — agenda a única sessão liberada: +2 09:30 (manual-a-2-s2) → 201
+# @name B02_apoio2
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemB02}}
+Content-Type: application/json
+
+{
+  "item_id": "{{apoioItemId}}",
+  "slot_id": "manual-a-2-s2"
+}
+
+@apptApoio2Id = {{B02_apoio2.response.body.$.id}}
+
+### B03 — 2ª sessão (+16 09:00, manual-a-16-s1, livre) → 422, block QUOTA SEM available_from (period=total: a janela é a vida da matrícula, não há data em que destrava)
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemB03}}
+Content-Type: application/json
+
+{
+  "item_id": "{{apoioItemId}}",
+  "slot_id": "manual-a-16-s1"
+}
+
+### B04a — cancela a de +2 com antecedência (>24h) → 200 cancelada
+POST {{host}}/me/appointments/{{apptApoio2Id}}/cancel
+
+### B04b — a vaga voltou: agenda +16 09:00 (manual-a-16-s1) → 201
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemB04}}
+Content-Type: application/json
+
+{
+  "item_id": "{{apoioItemId}}",
+  "slot_id": "manual-a-16-s1"
+}
+
+### B05 — 2ª sessão de novo (+23 09:00, manual-a-23-s1, livre) → 422, block QUOTA de novo, permanente
+POST {{host}}/me/appointments
+Idempotency-Key: {{idemB05}}
+Content-Type: application/json
+
+{
+  "item_id": "{{apoioItemId}}",
+  "slot_id": "manual-a-23-s1"
+}
+
+### B06a — jornada do paciente 2: só a matrícula de Apoio Psicológico (200) — não vaza a do paciente 1
+GET {{host}}/me/journey
+
+### B06b — consultas do paciente 2: só as 2 de "apoio" (a cancelada + a ativa), nada do paciente 1 (200)
+GET {{host}}/me/appointments
+
+# ===========================================================================
+# BLOCO C — Validações de cadastro (curto, independente de A/B)
+#
+# Reafirma, isolado, o que A01/A03 do E2E cobrem sobre validação de admin:
+# publish revalida o TEMPLATE inteiro (não só o que a inserção barrou na hora) e
+# o token de admin errado nunca passa. Só usa rotas /admin — não depende de
+# sessão de paciente, roda em qualquer ordem.
+# ===========================================================================
+
+### C01a — linha rascunho só para o teste de validação (201)
+# @name C01_create_line
+POST {{host}}/admin/care-lines
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "code": "linha-invalida",
+  "name": "Linha inválida de teste"
+}
+
+@lineIdC = {{C01_create_line.response.body.$.id}}
+
+### C01b — item "a" com especialidade INEXISTENTE no legado (201 — a validação é só no publish)
+POST {{host}}/admin/care-lines/{{lineIdC}}/items
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "ref": "a",
+  "kind": "CONSULTA",
+  "label": "Item A",
+  "specialty_code": "INEXISTENTE"
+}
+
+### C01c — item "b" com especialidade válida (201)
+POST {{host}}/admin/care-lines/{{lineIdC}}/items
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "ref": "b",
+  "kind": "CONSULTA",
+  "label": "Item B",
+  "specialty_code": "Psicologia"
+}
+
+### C01d — PREREQUISITE: "a" depende de "b" (201)
+POST {{host}}/admin/care-lines/{{lineIdC}}/items/a/rules
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "rule_type": "PREREQUISITE",
+  "params": { "item_ref": "b", "status": "realizada", "within_days": 30 }
+}
+
+### C01e — PREREQUISITE: "b" depende de "a" — fecha o CICLO a->b->a (201; o ciclo em si só é pego no publish)
+POST {{host}}/admin/care-lines/{{lineIdC}}/items/b/rules
+X-Admin-Token: {{adminToken}}
+Content-Type: application/json
+
+{
+  "rule_type": "PREREQUISITE",
+  "params": { "item_ref": "a", "status": "realizada", "within_days": 30 }
+}
+
+### C01f — publish revalida o CONJUNTO inteiro → 400 com errors[] citando a especialidade inexistente E o ciclo de pré-requisitos
+POST {{host}}/admin/care-lines/{{lineIdC}}/publish
+X-Admin-Token: {{adminToken}}
+
+### C02 — token de admin errado em qualquer rota /admin → 401 ADMIN_TOKEN_INVALID (mesmo formato do A01b)
+GET {{host}}/admin/care-lines
+X-Admin-Token: token-errado
