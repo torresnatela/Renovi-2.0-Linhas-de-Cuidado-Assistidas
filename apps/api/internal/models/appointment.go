@@ -52,6 +52,11 @@ var (
 	// ErrAppointmentNotFound: não existe, ou não é do dono da sessão. Os dois
 	// respondem igual (404) — ver a resposta NotFound no openapi.yaml.
 	ErrAppointmentNotFound = errors.New("agendamento: consulta não encontrada")
+	// ErrCancelNotAllowed: a consulta existe e é do paciente, mas não está em um
+	// estado que ele possa cancelar (só CONFIRMED cancela; uma consulta ainda em
+	// voo é da saga/worker, e uma já CANCELLED não recancela). O controller mapeia
+	// para 409.
+	ErrCancelNotAllowed = errors.New("agendamento: consulta não pode ser cancelada")
 	// ErrJoinNotAllowed: a janela de entrada não está aberta. Carrega o motivo.
 	ErrJoinNotAllowed = errors.New("agendamento: não é possível entrar agora")
 )
@@ -85,6 +90,7 @@ type AgendaClient interface {
 // cadastro: cada consumidor declara só o que usa.
 type DAVAppointments interface {
 	CreateAppointment(ctx context.Context, in dav.CreateAppointmentInput) (dav.Appointment, error)
+	CancelAppointment(ctx context.Context, id string) error
 }
 
 // Appointment é a consulta como o produto a enxerga.
@@ -164,6 +170,25 @@ func (s *BookingStore) ListSlotPage(ctx context.Context, professionalID string, 
 }
 
 func (s *BookingStore) Location() *time.Location { return s.agenda.Location() }
+
+// SlotInfo resolve um horário (slot + profissional + especialidade) SEM reservar
+// nada. Existe para a jornada conhecer o starts_at do slot antes de rodar o motor
+// de elegibilidade — o Book revalida tudo de novo, então isto é só leitura.
+// Delegado ao LoadBooking do adapter, com o MESMO mapeamento de erros do Book.
+func (s *BookingStore) SlotInfo(ctx context.Context, slotID, specialtyID string) (agenda.Booking, error) {
+	booking, err := s.agenda.LoadBooking(ctx, slotID, specialtyID)
+	switch {
+	case errors.Is(err, agenda.ErrSlotNotFound):
+		return agenda.Booking{}, ErrSlotNotFound
+	case errors.Is(err, agenda.ErrSpecialtyMismatch):
+		return agenda.Booking{}, ErrSpecialtyMismatch
+	case errors.Is(err, agenda.ErrSpecialtyInactive):
+		return agenda.Booking{}, ErrSpecialtyInactive
+	case err != nil:
+		return agenda.Booking{}, err
+	}
+	return booking, nil
+}
 
 // ---------------------------------------------------------------------------
 // A saga
@@ -404,6 +429,115 @@ func (s *BookingStore) createInDAV(ctx context.Context, appointmentID uuid.UUID,
 		"appointment_id", appointmentID, "error", err.Error())
 	s.markUnknown(ctx, appointmentID)
 	return dav.Appointment{}, fmt.Errorf("%w: %v", ErrBookingUnconfirmed, err)
+}
+
+// ---------------------------------------------------------------------------
+// Cancelamento (pelo paciente, a partir da jornada)
+// ---------------------------------------------------------------------------
+
+// CancelBookingResult é o resultado do cancelamento pelo paciente.
+type CancelBookingResult struct {
+	SlotID       string
+	DAVCancelled bool
+	DAVError     string // vazio quando cancelou na DAV; preenchido quando tolerado
+}
+
+// Cancel cancela uma consulta CONFIRMED do próprio paciente: marca CANCELLED no
+// Postgres, devolve o horário ao legado (CAS) e tenta o cancel na DAV (best-effort).
+//
+// A ordem espelha a saga do Book, com a mesma disciplina: a decisão (marcar
+// CANCELLED) roda no ctx do request — se ele cair antes, nada aconteceu e a
+// consulta segue CONFIRMED, sem dano. Depois que o CANCELLED é durável, devolver o
+// horário e cancelar na DAV são efeitos que NÃO podem se perder num cancelamento
+// do request nem desfazer o CANCELLED — rodam desacoplados (detach) e toleram
+// falha. Uma falha ao devolver o horário vira fila do worker; uma falha na DAV
+// (que responde 500 em HML, achado #20) é tolerada e registrada no resultado.
+func (s *BookingStore) Cancel(ctx context.Context, account Account, id uuid.UUID, now time.Time) (CancelBookingResult, error) {
+	row, err := s.q.GetAppointmentForAccount(ctx, gen.GetAppointmentForAccountParams{ID: id, AccountID: account.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CancelBookingResult{}, ErrAppointmentNotFound
+	}
+	if err != nil {
+		// Falha de infra NÃO é "não existe": propaga (vira 5xx), não 404 — o mesmo
+		// cuidado do GetForAccount.
+		return CancelBookingResult{}, fmt.Errorf("buscar consulta: %w", err)
+	}
+	// FAILED nem aparece para o paciente (comprovadamente não aconteceu): trate como
+	// inexistente, não como "não pode cancelar". Espelha GetForAccount/JoinURL.
+	if row.Status == statusRowFailed {
+		return CancelBookingResult{}, ErrAppointmentNotFound
+	}
+	if row.Status != statusRowConfirmed {
+		return CancelBookingResult{}, ErrCancelNotAllowed
+	}
+
+	// Marca CANCELLED de forma estreita (por dono + status CONFIRMED, no UPDATE).
+	// Ainda no ctx do request: até aqui nada externo aconteceu, então se ele cair a
+	// consulta segue CONFIRMED, sem dano. 0 linhas = corrida (outro request
+	// cancelou/confirmou antes) — recusa, não erro.
+	rows, err := s.q.CancelBookingAppointment(ctx, gen.CancelBookingAppointmentParams{ID: id, AccountID: account.ID})
+	if err != nil {
+		return CancelBookingResult{}, fmt.Errorf("cancelar consulta: %w", err)
+	}
+	if rows != 1 {
+		return CancelBookingResult{}, ErrCancelNotAllowed
+	}
+
+	// A partir daqui a consulta JÁ está CANCELLED e durável. O resto é best-effort e
+	// NÃO desfaz o cancelamento: uma falha vira fila do worker (o horário) ou fica
+	// registrada no resultado (a DAV).
+	res := CancelBookingResult{SlotID: row.LegacySlotID}
+
+	s.releaseCancelledSlot(ctx, id, row.LegacySlotID)
+
+	// Só cancela na DAV se houver o que cancelar. Uma consulta CONFIRMED sempre tem
+	// dav_appointment_id (CHECK confirmed_exige_dav), mas conferir é barato e evita
+	// um PUT /appointment//cancel se algum dia esse invariante mudar.
+	if row.DavAppointmentID.Valid && row.DavAppointmentID.String != "" {
+		// Desacoplado do request (detach): a consulta já foi cancelada aqui e no
+		// legado; o cancel na DAV não pode se perder porque o paciente fechou a aba.
+		davCtx, cancel := detach(ctx)
+		defer cancel()
+		if err := s.dav.CancelAppointment(davCtx, row.DavAppointmentID.String); err != nil {
+			// O cancel da DAV responde 500 em HML (achado #20) — por isso é
+			// best-effort. Toleramos: a consulta continua CANCELLED aqui, o link não é
+			// mais entregue (JoinURL exige CONFIRMED) e o horário já voltou. O erro vai
+			// no resultado para o controller decidir o que dizer ao paciente.
+			s.logger.WarnContext(davCtx, "agendamento: cancelamento na DAV falhou — tolerado",
+				"appointment_id", id, "error", err.Error())
+			res.DAVError = err.Error()
+		} else {
+			res.DAVCancelled = true
+		}
+	}
+
+	return res, nil
+}
+
+// releaseCancelledSlot devolve ao legado o horário de uma consulta CANCELLED.
+//
+// Espelha releaseQuietly, mas grava com MarkCancelledSlotReleased (guard CANCELLED,
+// não FAILED). Best-effort e desacoplado (detach): se a devolução falhar, a linha
+// fica CANCELLED com slot_held_at e sem slot_released_at — a fila que o worker
+// varre. NUNCA desfaz o CANCELLED.
+func (s *BookingStore) releaseCancelledSlot(ctx context.Context, id uuid.UUID, slotID string) {
+	ctx, cancel := detach(ctx)
+	defer cancel()
+	if err := s.agenda.ReleaseSlot(ctx, slotID); err != nil {
+		// ERROR e não WARN: esta é a ÚNICA sinalização de um slot vazando (retido no
+		// legado sem consulta viva). O worker ainda não varre CANCELLED+held (ADR-023),
+		// então até lá este log é o que um humano precisa ver para soltar o horário.
+		s.logger.ErrorContext(ctx, "agendamento: consulta cancelada mas horário não devolvido — o worker tenta de novo",
+			"appointment_id", id, "slot_id", slotID, "error", err.Error())
+		return
+	}
+	// MarkCancelledSlotReleased só casa se a linha estiver CANCELLED com slot_held_at
+	// (WHERE + CHECK do 0004). 0 linhas em bordas legítimas (ex.: o hold nunca foi
+	// gravado) é WARN, não erro: o horário já foi solto no legado acima.
+	if rows, err := s.q.MarkCancelledSlotReleased(ctx, id); err != nil || rows != 1 {
+		s.logger.WarnContext(ctx, "agendamento: horário devolvido no legado mas não anotado (cancel, rows!=1)",
+			"appointment_id", id, "rows", rows, "error", errStr(err))
+	}
 }
 
 // ---------------------------------------------------------------------------

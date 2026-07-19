@@ -38,8 +38,16 @@ type Config struct {
 
 	// --- Bancos (ver docs/ARQUITETURA.md, seção "Papel de cada banco") ---
 
-	// CareDatabaseURL: Postgres renovi_care (nosso banco, escrita/leitura).
+	// CareDatabaseURL: Postgres renovi_care, como a APLICAÇÃO conecta em runtime.
+	// Em staging/produção é o role restrito renovi_app (sem UPDATE/DELETE em
+	// journey_event — ver migration 0008).
 	CareDatabaseURL string
+	// CareMigrateDatabaseURL: Postgres renovi_care para rodar as MIGRATIONS. Elas
+	// criam tabelas e o próprio role renovi_app, então precisam do OWNER (renovi),
+	// não do role restrito. Quando RENOVI_CARE_MIGRATE_DATABASE_URL não é definida,
+	// cai no valor de CareDatabaseURL (setup simples em que app e migrate usam o
+	// mesmo usuário — ex.: dev local sem o split de privilégio).
+	CareMigrateDatabaseURL string
 	// LegacyDatabaseURL: MySQL legado (escala/slots). Leitura + escrita restrita
 	// à tabela de agendamento, sempre via Adapter Agenda. Opcional no MVP inicial.
 	LegacyDatabaseURL string
@@ -85,6 +93,21 @@ type Config struct {
 	// desenvolvimento sem TLS; o default é true para que esquecer de configurar
 	// erre para o lado seguro.
 	SessionCookieSecure bool
+
+	// --- Admin / linhas de cuidado (Slice 1) ---
+
+	// AdminToken é o token estático das rotas /admin (header X-Admin-Token). Vazio
+	// DESLIGA as rotas admin (não há tela de admin no Slice 1). NUNCA é logado — ver
+	// LogValue, que só reporta se está setado.
+	AdminToken string
+	// TestEndpoints liga as rotas internas de teste (forçar status de consulta etc.).
+	// PROIBIDO em produção (validate falha): são atalhos que não podem existir num
+	// ambiente com paciente real.
+	TestEndpoints bool
+	// CancelCountThreshold é a antecedência mínima de cancelamento para a consulta
+	// NÃO contar na cota do motor de elegibilidade (usado na Fase 6). Default 24h,
+	// nunca negativo.
+	CancelCountThreshold time.Duration
 }
 
 // LogValue controla como o Config aparece no slog, redigindo os segredos.
@@ -99,6 +122,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("http_addr", c.HTTPAddr),
 		slog.String("log_level", c.LogLevel),
 		slog.Bool("care_database_url_set", c.CareDatabaseURL != ""),
+		slog.Bool("care_migrate_database_url_set", c.CareMigrateDatabaseURL != ""),
 		slog.Bool("legacy_database_url_set", c.LegacyDatabaseURL != ""),
 		slog.Bool("gestao_database_url_set", c.GestaoDatabaseURL != ""),
 		// A URL da DAV não é segredo e dizer qual ambiente foi alvejado já evitou
@@ -109,6 +133,10 @@ func (c Config) LogValue() slog.Value {
 		slog.Int("dav_max_attempts", c.DAVMaxAttempts),
 		slog.Duration("session_ttl", c.SessionTTL),
 		slog.Bool("session_cookie_secure", c.SessionCookieSecure),
+		// O token de admin NUNCA vai para o log; só o fato de estar setado.
+		slog.Bool("admin_token_set", c.AdminToken != ""),
+		slog.Bool("test_endpoints", c.TestEndpoints),
+		slog.Duration("cancel_count_threshold", c.CancelCountThreshold),
 	)
 }
 
@@ -156,7 +184,16 @@ func Load() (Config, error) {
 	if cfg.SessionCookieSecure, err = envBool("RENOVI_SESSION_COOKIE_SECURE", true); err != nil {
 		return Config{}, err
 	}
+	if cfg.TestEndpoints, err = envBool("RENOVI_TEST_ENDPOINTS", false); err != nil {
+		return Config{}, err
+	}
+	// 24h é a decisão do piloto: cancelar com menos de um dia de antecedência ainda
+	// consome a vaga. É config porque é produto (ver models/careline).
+	if cfg.CancelCountThreshold, err = envDuration("RENOVI_CANCEL_COUNT_THRESHOLD", 24*time.Hour); err != nil {
+		return Config{}, err
+	}
 
+	cfg.AdminToken = env("RENOVI_ADMIN_TOKEN", "")
 	cfg.DAVBaseURL = env("RENOVI_DAV_BASE_URL", "")
 	cfg.DAVAPIKey = env("RENOVI_DAV_API_KEY", "")
 
@@ -167,6 +204,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: RENOVI_CARE_DATABASE_URL é obrigatório em produção")
 		}
 		cfg.CareDatabaseURL = defaultCareDatabaseURL
+	}
+
+	// A URL de migração roda como owner (cria tabelas e o role renovi_app). Quando
+	// não é definida, usa a mesma URL da aplicação — cenário simples em que não há
+	// split de privilégio (o próprio usuário é dono do schema).
+	cfg.CareMigrateDatabaseURL = env("RENOVI_CARE_MIGRATE_DATABASE_URL", "")
+	if cfg.CareMigrateDatabaseURL == "" {
+		cfg.CareMigrateDatabaseURL = cfg.CareDatabaseURL
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -228,6 +273,14 @@ func (c Config) validate() error {
 	}
 	if c.DAVTimeout <= 0 || c.SessionTTL <= 0 {
 		return fmt.Errorf("config: RENOVI_DAV_TIMEOUT e RENOVI_SESSION_TTL devem ser > 0")
+	}
+	// As rotas internas de teste não podem existir num ambiente com paciente real.
+	// Falhar na subida é muito mais barato que descobrir o atalho ligado em produção.
+	if c.TestEndpoints && c.Env == EnvProduction {
+		return fmt.Errorf("config: RENOVI_TEST_ENDPOINTS=true é proibido em produção")
+	}
+	if c.CancelCountThreshold < 0 {
+		return fmt.Errorf("config: RENOVI_CANCEL_COUNT_THRESHOLD não pode ser negativo")
 	}
 	return nil
 }

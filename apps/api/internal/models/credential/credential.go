@@ -1,6 +1,6 @@
 // Package credential cuida da senha do paciente: política, hash e verificação.
 //
-// É um pacote PURO (mesma regra do models/eligibility): sem I/O, sem banco, sem
+// É um pacote PURO (mesma regra do models/careline): sem I/O, sem banco, sem
 // time.Now(). A única fonte externa é o gerador de aleatoriedade do salt.
 //
 // Algoritmo: Argon2id, com os parâmetros mínimos recomendados pela OWASP

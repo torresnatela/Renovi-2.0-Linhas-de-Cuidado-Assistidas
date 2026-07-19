@@ -124,3 +124,21 @@ SELECT COUNT(*) FROM appointment WHERE status = 'DAV_UNKNOWN';
 -- consulta na DAV sem paciente.
 SELECT dav_person_id FROM patient_account
 WHERE id = $1 AND status = 'ACTIVE';
+
+-- name: CancelBookingAppointment :execrows
+-- O cancelamento pelo PACIENTE, a partir da jornada. Por (id, dono) e só a partir
+-- de CONFIRMED: uma consulta ainda em voo (PENDING_SLOT/DAV_PENDING) não é do
+-- paciente cancelar — quem a resolve é a saga/worker. :execrows para o model tratar
+-- 0 linhas (consulta que não era dele, ou não estava confirmada) como recusa.
+UPDATE appointment
+SET status = 'CANCELLED', updated_at = now()
+WHERE id = $1 AND account_id = $2 AND status = 'CONFIRMED';
+
+-- name: MarkCancelledSlotReleased :execrows
+-- Espelho do MarkSlotReleased para o cancelamento: registra que o horário de uma
+-- consulta CANCELLED voltou ao mercado. O CHECK liberado_exige_terminal (0004) já
+-- aceita CANCELLED como estado terminal; o guard aqui garante que só se libera o
+-- horário de uma reserva já cancelada e ainda travada.
+UPDATE appointment
+SET slot_released_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'CANCELLED' AND slot_held_at IS NOT NULL AND slot_released_at IS NULL;

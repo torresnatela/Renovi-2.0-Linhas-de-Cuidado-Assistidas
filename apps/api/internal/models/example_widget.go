@@ -5,9 +5,9 @@
 // Ao criar os models reais (PatientAccount, Enrollment, Appointment...), siga
 // esta estrutura e remova o exemplo.
 //
-// Lembrete de arquitetura: a lógica PURA de decisão (motor de elegibilidade)
-// vive em models/eligibility, isolada e sem I/O. Models como este cuidam da
-// orquestração com o banco.
+// Lembrete de arquitetura: a lógica PURA de decisão (ex.: motor da linha de
+// cuidado) vive em pacotes como models/careline, isolada e sem I/O. Models
+// como este cuidam da orquestração com o banco.
 package models
 
 import (

@@ -41,6 +41,7 @@ Makefile         # todos os comandos
 make help              # lista todos os alvos
 make up                # sobe Postgres + mocks (Docker)
 make migrate-up        # aplica migrations no renovi_care
+make seed-legacy-slots # semeia slots futuros no mock do legado (idempotente; Slice 1)
 make test              # testes unitários Go (rápidos)
 make test-integration  # testes de integração (testcontainers; exige Docker)
 make dav-probe         # sonda a API da Doutor ao Vivo (HML) -> docs/DAV-API-NOTAS.md

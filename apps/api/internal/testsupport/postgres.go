@@ -8,6 +8,8 @@ package testsupport
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,11 +22,35 @@ import (
 )
 
 // StartPostgres sobe um Postgres efêmero, aplica as migrations do renovi_care e
-// devolve a URL de conexão. O container é derrubado automaticamente ao fim do teste.
+// devolve a URL de conexão (superusuário renovi). O container é derrubado
+// automaticamente ao fim do teste.
 func StartPostgres(t *testing.T) string {
 	t.Helper()
-	ctx := context.Background()
+	superDSN, _ := StartPostgresDSNs(t)
+	return superDSN
+}
 
+// StartPostgresDSNs sobe o mesmo container do StartPostgres e devolve DUAS URLs:
+//
+//   - superDSN: o superusuário `renovi`, que roda as migrations (é o "owner").
+//   - appDSN:   o role restrito `renovi_app`, como a aplicação conecta em runtime.
+//
+// O role renovi_app é criado pela migration 0008 (com a mesma senha do usuário),
+// então appDSN só é utilizável DEPOIS de `db.MigrateUp`. É por esse role que o
+// append-only de journey_event vale no banco — ver approle_integration_test.go.
+func StartPostgresDSNs(t *testing.T) (superDSN, appDSN string) {
+	t.Helper()
+
+	superDSN, appDSN, stop, err := StartPostgresSharedDSNs(context.Background())
+	require.NoError(t, err, "subir container postgres")
+	t.Cleanup(func() { _ = stop() })
+	return superDSN, appDSN
+}
+
+// StartPostgresSharedDSNs é o StartPostgresDSNs sem *testing.T, para ser chamado
+// de um TestMain e compartilhado por todos os testes do pacote (mesmo racional do
+// StartMySQLShared). Quem chama é dono de chamar o `stop`.
+func StartPostgresSharedDSNs(ctx context.Context) (superDSN, appDSN string, stop func() error, err error) {
 	container, err := postgres.Run(ctx,
 		"postgres:16-alpine",
 		postgres.WithDatabase("renovi_care"),
@@ -36,15 +62,25 @@ func StartPostgres(t *testing.T) string {
 				WithStartupTimeout(60*time.Second),
 		),
 	)
-	require.NoError(t, err, "subir container postgres")
+	if err != nil {
+		return "", "", nil, fmt.Errorf("subir container postgres: %w", err)
+	}
+	stop = func() error { return container.Terminate(context.Background()) }
 
-	t.Cleanup(func() {
-		_ = container.Terminate(context.Background())
-	})
+	superDSN, err = container.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		_ = stop()
+		return "", "", nil, fmt.Errorf("obter connection string: %w", err)
+	}
 
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err, "obter connection string")
+	if err := db.MigrateUp(superDSN); err != nil {
+		_ = stop()
+		return "", "", nil, fmt.Errorf("aplicar migrations: %w", err)
+	}
 
-	require.NoError(t, db.MigrateUp(dsn), "aplicar migrations")
-	return dsn
+	// A migration 0008 criou renovi_app com senha 'renovi_app'. O appDSN é o
+	// superDSN com o par usuário:senha trocado — só a credencial (userinfo) muda,
+	// nunca o dbname 'renovi_care' (que não contém 'renovi:renovi@').
+	appDSN = strings.Replace(superDSN, "renovi:renovi@", "renovi_app:renovi_app@", 1)
+	return superDSN, appDSN, stop, nil
 }

@@ -35,9 +35,12 @@ export function HomePage() {
 
         <div className="mb-6 flex flex-wrap gap-3">
           <Link
-            to="/agendar"
+            to="/jornada"
             className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white"
           >
+            Minha jornada
+          </Link>
+          <Link to="/agendar" className="rounded border px-4 py-2 text-sm">
             Agendar consulta
           </Link>
           <Link to="/consultas" className="rounded border px-4 py-2 text-sm">

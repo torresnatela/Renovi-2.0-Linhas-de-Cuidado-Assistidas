@@ -13,6 +13,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelBookingAppointment = `-- name: CancelBookingAppointment :execrows
+UPDATE appointment
+SET status = 'CANCELLED', updated_at = now()
+WHERE id = $1 AND account_id = $2 AND status = 'CONFIRMED'
+`
+
+type CancelBookingAppointmentParams struct {
+	ID        uuid.UUID `json:"id"`
+	AccountID uuid.UUID `json:"account_id"`
+}
+
+// O cancelamento pelo PACIENTE, a partir da jornada. Por (id, dono) e só a partir
+// de CONFIRMED: uma consulta ainda em voo (PENDING_SLOT/DAV_PENDING) não é do
+// paciente cancelar — quem a resolve é a saga/worker. :execrows para o model tratar
+// 0 linhas (consulta que não era dele, ou não estava confirmada) como recusa.
+func (q *Queries) CancelBookingAppointment(ctx context.Context, arg CancelBookingAppointmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelBookingAppointment, arg.ID, arg.AccountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const confirmAppointment = `-- name: ConfirmAppointment :execrows
 UPDATE appointment
 SET status = 'CONFIRMED',
@@ -386,6 +409,24 @@ WHERE id = $1 AND status = 'DAV_PENDING'
 // o CHECK desconhecido_nao_libera impede que alguém o solte por engano.
 func (q *Queries) MarkAppointmentUnknown(ctx context.Context, id uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, markAppointmentUnknown, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markCancelledSlotReleased = `-- name: MarkCancelledSlotReleased :execrows
+UPDATE appointment
+SET slot_released_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'CANCELLED' AND slot_held_at IS NOT NULL AND slot_released_at IS NULL
+`
+
+// Espelho do MarkSlotReleased para o cancelamento: registra que o horário de uma
+// consulta CANCELLED voltou ao mercado. O CHECK liberado_exige_terminal (0004) já
+// aceita CANCELLED como estado terminal; o guard aqui garante que só se libera o
+// horário de uma reserva já cancelada e ainda travada.
+func (q *Queries) MarkCancelledSlotReleased(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markCancelledSlotReleased, id)
 	if err != nil {
 		return 0, err
 	}

@@ -27,6 +27,21 @@ type Deps struct {
 	// Scheduling monta o agendamento. Nil desliga (ex.: sem DSN do legado no
 	// ambiente local). Depende de Auth: tudo aqui exige sessão.
 	Scheduling *controllers.SchedulingController
+	// CareAdmin monta as rotas /admin/* (catálogo + matrícula). Nil desliga (sem
+	// RENOVI_ADMIN_TOKEN ou sem agenda para validar o publish). NÃO depende de Auth:
+	// autentica pelo token de admin, nunca pela sessão do paciente.
+	CareAdmin *controllers.CareLineAdminController
+	// Journey monta as rotas /me/* da jornada (linhas de cuidado). Nil desliga.
+	// Depende de Auth (sessão) e só é montado pelo main quando o scheduling
+	// existe — a jornada agenda PELO booking.
+	Journey *controllers.JourneyController
+	// Internal monta as rotas /internal/* de teste. Nil desliga — e em produção
+	// é SEMPRE nil (config recusa RENOVI_TEST_ENDPOINTS lá). Sem RequireSession:
+	// o gate é o ambiente.
+	Internal *controllers.InternalController
+	// AdminToken é o token estático exigido pelas rotas /admin (header
+	// X-Admin-Token). Só é usado quando CareAdmin != nil.
+	AdminToken string
 	// RegisterTimeout é o teto da rota de cadastro, que fala com a DAV de forma
 	// síncrona. Deve vir de config.DAVBudget() + folga; zero cai num default.
 	RegisterTimeout time.Duration
@@ -88,9 +103,25 @@ func NewRouter(d Deps) *chi.Mux {
 			if d.Scheduling != nil {
 				mountScheduling(r, *d.Scheduling, *d.Auth, d.BookTimeout)
 			}
+
+			// A jornada (/me/*) também é toda atrás de sessão.
+			if d.Journey != nil {
+				mountJourney(r, *d.Journey, *d.Auth, d.BookTimeout)
+			}
 		}
-		// TODO(mvp): /me/eligibility entra aqui, filtrando ANTES do agendamento.
-		// Ver packages/contracts/openapi.yaml e docs/PROGRESSO.md.
+
+		// As rotas /admin NÃO dependem de Auth: autenticam pelo token de admin, não
+		// pela sessão do paciente. Só sobem quando o controller foi montado (token
+		// presente E agenda disponível — ver cmd/api/main.go).
+		if d.CareAdmin != nil {
+			mountCareAdmin(r, *d.CareAdmin, d.AdminToken)
+		}
+
+		// As rotas internas de teste só EXISTEM quando o main as montou
+		// (RENOVI_TEST_ENDPOINTS): em produção respondem 404 por ausência.
+		if d.Internal != nil {
+			mountInternal(r, *d.Internal)
+		}
 	})
 
 	return r
@@ -130,6 +161,66 @@ func mountScheduling(r chi.Router, s controllers.SchedulingController, auth cont
 			r.Use(rateLimitByAccount(20, 1.0/3.0))
 			r.Use(middleware.Timeout(bookTimeout))
 			r.Post("/appointments", s.Create)
+		})
+	})
+}
+
+// mountJourney monta a jornada do paciente (/me/*), toda atrás de sessão.
+func mountJourney(r chi.Router, j controllers.JourneyController, auth controllers.AuthController, bookTimeout time.Duration) {
+	r.Group(func(r chi.Router) {
+		r.Use(controllers.RequireSession(auth.Sessions))
+
+		// Leituras e cancelamento: Postgres próprio + leituras do legado.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(defaultRouteTimeout))
+			r.Get("/me/journey", j.GetJourney)
+			r.Get("/me/eligibility", j.GetEligibility)
+			r.Get("/me/availability", j.GetAvailability)
+			r.Get("/me/appointments", j.ListCareAppointments)
+			r.Post("/me/appointments/{care_appointment_id}/cancel", j.CancelCareAppointment)
+			r.Get("/me/audit", j.GetAudit)
+		})
+
+		// Agendar pela jornada tem o MESMO perfil do POST /appointments: fala com
+		// a DAV de forma síncrona (timeout próprio) e é a rota mais cara — rate
+		// limit por conta, com os mesmos parâmetros do booking.
+		r.Group(func(r chi.Router) {
+			r.Use(rateLimitByAccount(20, 1.0/3.0))
+			r.Use(middleware.Timeout(bookTimeout))
+			r.Post("/me/appointments", j.CreateCareAppointment)
+		})
+	})
+}
+
+// mountInternal monta as rotas internas de teste. SEM RequireSession: o gate é
+// de AMBIENTE (o main só as monta com RENOVI_TEST_ENDPOINTS, proibido em
+// produção pela config).
+func mountInternal(r chi.Router, c controllers.InternalController) {
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+		r.Post("/internal/appointments/{care_appointment_id}/force-status", c.ForceStatus)
+	})
+}
+
+// mountCareAdmin monta as rotas /admin/*, todas atrás do token de admin.
+//
+// O timeout é o normal: são operações rápidas contra o Postgres próprio. O publish
+// consulta o legado, mas é uma leitura de catálogo, não a saga lenta da DAV — cabe
+// no teto de 30s como as demais rotas.
+func mountCareAdmin(r chi.Router, c controllers.CareLineAdminController, adminToken string) {
+	r.Group(func(r chi.Router) {
+		r.Use(controllers.RequireAdminToken(adminToken))
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+
+		r.Route("/admin", func(r chi.Router) {
+			r.Post("/care-lines", c.CreateCareLine)
+			r.Get("/care-lines", c.ListCareLines)
+			r.Post("/care-lines/{care_line_id}/items", c.CreateCareLineItem)
+			r.Post("/care-lines/{care_line_id}/items/{item_ref}/rules", c.CreateCareLineItemRule)
+			r.Post("/care-lines/{care_line_id}/publish", c.PublishCareLine)
+			r.Post("/enrollments", c.CreateEnrollment)
+			r.Post("/enrollments/{enrollment_id}/renew", c.RenewEnrollment)
+			r.Post("/enrollments/{enrollment_id}/end", c.EndEnrollment)
 		})
 	})
 }

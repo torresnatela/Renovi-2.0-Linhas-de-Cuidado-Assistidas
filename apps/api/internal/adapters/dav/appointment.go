@@ -124,6 +124,32 @@ func (c *Client) CreateAppointment(ctx context.Context, in CreateAppointmentInpu
 	return Appointment{ID: out.ID, PatientJoinURL: joinURL}, nil
 }
 
+// CancelAppointment tenta cancelar a consulta na DAV. UMA tentativa, nunca repete
+// (ADR-011b). Qualquer falha é do chamador decidir tolerar.
+//
+// É best-effort de propósito: em homologação o PUT de cancelamento responde 500
+// (docs/DAV-API-NOTAS.md, achado #20). Insistir não muda esse 500 fixo, e o
+// cancelamento do lado do paciente não pode ficar refém de uma rota que a DAV não
+// implementou direito — por isso o erro sobe para quem chama decidir seguir.
+func (c *Client) CancelAppointment(ctx context.Context, id string) error {
+	const route = "PUT /appointment/{id}/cancel"
+
+	// UMA tentativa (attempts=1): mesmo motivo do CreateAppointment. Não sabemos se
+	// um cancel que estourou pegou; repetir não ajuda e o 500 da HML é determinístico.
+	res, err := c.doWithRetry(ctx, http.MethodPut, "/appointment/"+id+"/cancel", route, nil, 1)
+	if err != nil {
+		// Erro de transporte, contexto cancelado, ou status 5xx (doWithRetry embrulha
+		// em ErrUnavailable, já com rota e status na mensagem — nada de corpo a vazar).
+		return fmt.Errorf("cancelar consulta na DAV: %w", err)
+	}
+	if res.status < 200 || res.status >= 300 {
+		// NÃO vaza o corpo da resposta (LGPD): só o status e o trace, que é seguro e
+		// serve para acionar o suporte da DAV.
+		return fmt.Errorf("%s respondeu %d (trace %s)", route, res.status, traceOf(res.body))
+	}
+	return nil
+}
+
 type participantBody struct {
 	ID   string `json:"id"`
 	Role string `json:"role"`

@@ -1,6 +1,6 @@
 // Package scheduling guarda as decisões PURAS do agendamento.
 //
-// REGRA (mesma do models/eligibility, ADR-002): sem I/O, sem banco, sem HTTP,
+// REGRA (mesma do models/careline, ADR-002): sem I/O, sem banco, sem HTTP,
 // sem relógio implícito. Tudo entra por parâmetro — inclusive `now` e a política.
 // É o que permite testar a fronteira dos 30 minutos com uma tabela em vez de
 // esperar meia hora.

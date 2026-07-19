@@ -12,6 +12,15 @@ import (
 )
 
 type Querier interface {
+	// O cancelamento pelo PACIENTE, a partir da jornada. Por (id, dono) e só a partir
+	// de CONFIRMED: uma consulta ainda em voo (PENDING_SLOT/DAV_PENDING) não é do
+	// paciente cancelar — quem a resolve é a saga/worker. :execrows para o model tratar
+	// 0 linhas (consulta que não era dele, ou não estava confirmada) como recusa.
+	CancelBookingAppointment(ctx context.Context, arg CancelBookingAppointmentParams) (int64, error)
+	// Cancela (grava a data no mesmo passo — o CHECK cancelada_exige_data recusaria
+	// 'cancelada' sem cancelled_at). O guard só deixa cancelar o que ainda está por
+	// acontecer; consulta já realizada/faltada/cancelada casa 0 linhas.
+	CancelCareAppointment(ctx context.Context, arg CancelCareAppointmentParams) (int64, error)
 	// Passo 3: a DAV criou e temos o link. O CHECK confirmed_exige_dav garante que
 	// não dá para chegar em CONFIRMED sem os dois. :execrows para o model não dar
 	// CONFIRMED por bom como sucesso quando o UPDATE não casou nenhuma linha.
@@ -27,7 +36,23 @@ type Querier interface {
 	// Passo 1 da saga: registra a INTENÇÃO antes de tocar em qualquer sistema
 	// externo. O índice único parcial decide a corrida entre dois pacientes nossos.
 	CreateAppointmentIntent(ctx context.Context, arg CreateAppointmentIntentParams) (Appointment, error)
+	// Consultas do catálogo de linhas de cuidado (tabelas care_line, care_line_item,
+	// care_line_rule — migration 0005).
+	//
+	// O catálogo é versionado e imutável por versão: criar é sempre um rascunho novo,
+	// publicar sela a versão. As queries refletem isso — não há UPDATE de conteúdo,
+	// só o PublishCareLine que promove um draft.
+	// Cria um rascunho (status default 'draft', published_at NULL). A versão é
+	// calculada antes, pela NextCareLineVersion, e entra como parâmetro.
+	CreateCareLine(ctx context.Context, arg CreateCareLineParams) (CareLine, error)
 	CreateExampleWidget(ctx context.Context, arg CreateExampleWidgetParams) (ExampleWidget, error)
+	// Encerramento por decisão (concluida | encerrada). O $2 é validado no model — o
+	// CHECK do banco aceita ambos, mas só estes dois fazem sentido aqui.
+	EndEnrollment(ctx context.Context, arg EndEnrollmentParams) (int64, error)
+	// A varredura de vencidas: só expira o que está 'ativa' E já passou da vigência. O
+	// `valid_until < $2` no WHERE torna a operação segura contra clock skew do chamador
+	// — o banco só expira o que de fato venceu.
+	ExpireEnrollment(ctx context.Context, arg ExpireEnrollmentParams) (int64, error)
 	// A consulta comprovadamente NÃO aconteceu (a DAV recusou o payload, ou nem
 	// chegamos a reservar). Só use quando houver certeza: FAILED tira a linha do
 	// índice de reservas vivas e libera o horário para outro paciente. :execrows
@@ -41,6 +66,10 @@ type Querier interface {
 	// status é o que faz bloquear uma conta derrubar as sessões dela na hora — o
 	// ganho concreto de sessão opaca sobre JWT (ADR-010).
 	FindLiveSession(ctx context.Context, tokenHash []byte) (FindLiveSessionRow, error)
+	// A correção manual (admin) do status clínico quando o fluxo automático não deu
+	// conta. O $2 é validado no model. Não alcança consulta já em estado terminal
+	// (realizada/falta/cancelada): o guard casa 0 linhas.
+	ForceCareAppointmentStatus(ctx context.Context, arg ForceCareAppointmentStatusParams) (int64, error)
 	GetAccountByID(ctx context.Context, id uuid.UUID) (PatientAccount, error)
 	// O id do paciente na DAV, que vira o participante PAT do appointment.
 	//
@@ -53,16 +82,64 @@ type Querier interface {
 	// alguém esquecer o WHERE do dono na próxima rota e devolver a consulta de
 	// terceiro — e aqui a consulta carrega o link da sala.
 	GetAppointmentForAccount(ctx context.Context, arg GetAppointmentForAccountParams) (Appointment, error)
+	// Leitura por id SEM dono: EXCLUSIVA do endpoint interno de teste (force-status),
+	// que é gated por ambiente (RENOVI_TEST_ENDPOINTS), não por sessão — lá não há
+	// paciente para conferir. Toda rota de paciente usa a versão ForPatient acima.
+	GetCareAppointment(ctx context.Context, id uuid.UUID) (CareAppointment, error)
+	// O outro lado da idempotência: se a key já existe na matrícula, o handler devolve
+	// a consulta que já foi criada em vez de tentar (e falhar no índice único).
+	GetCareAppointmentByIdemKey(ctx context.Context, arg GetCareAppointmentByIdemKeyParams) (CareAppointment, error)
+	// Por (id, dono), via a matrícula. Nunca só por id.
+	GetCareAppointmentForPatient(ctx context.Context, arg GetCareAppointmentForPatientParams) (CareAppointment, error)
+	GetCareLine(ctx context.Context, id uuid.UUID) (CareLine, error)
+	// Trava a linha para publicar. O Publish valida o template inteiro e vira o status
+	// na MESMA transação; o FOR UPDATE serializa dois publishes concorrentes da mesma
+	// linha — o segundo espera e encontra o status já fora de 'draft'.
+	GetCareLineForUpdate(ctx context.Context, id uuid.UUID) (CareLine, error)
+	GetEnrollment(ctx context.Context, id uuid.UUID) (Enrollment, error)
+	// Sempre por (id, dono). Nunca só por id: evita que a próxima rota devolva a
+	// matrícula de terceiro por esquecer o WHERE do paciente.
+	GetEnrollmentForPatient(ctx context.Context, arg GetEnrollmentForPatientParams) (Enrollment, error)
+	// Trava a linha para uma transição sob concorrência (renovar/encerrar/expirar). O
+	// FOR UPDATE serializa dois processos que mexam na mesma matrícula.
+	GetEnrollmentForUpdate(ctx context.Context, id uuid.UUID) (Enrollment, error)
 	// Queries de EXEMPLO para a tabela example_widget (ver migration 0001).
 	// Demonstram o fluxo sqlc: SQL escrito à mão aqui -> `make generate` -> Go tipado
 	// em internal/db/gen. Ao criar as tabelas reais, substitua estas queries.
 	GetExampleWidget(ctx context.Context, id uuid.UUID) (ExampleWidget, error)
+	// A versão publicada mais recente de um code: é a que rege uma nova matrícula.
+	GetLatestPublishedCareLine(ctx context.Context, code string) (CareLine, error)
 	// Nasce PENDING_DAV: a conta só ativa quando a DAV confirmar o vínculo.
 	InsertAccount(ctx context.Context, arg InsertAccountParams) (PatientAccount, error)
+	// Consultas da jornada realizada (tabela care_appointment — migration 0007).
+	//
+	// É a projeção clínica do agendamento (appointment, 0003), amarrada à matrícula.
+	// As leituras por paciente passam SEMPRE por um JOIN em enrollment que confere o
+	// dono — a consulta carrega dado clínico e não pode vazar por id.
+	// O status inicial entra como parâmetro (tipicamente 'agendada'); a idempotência é
+	// garantida pelo índice único ux_care_appt_idem quando idempotency_key não é nula.
+	InsertCareAppointment(ctx context.Context, arg InsertCareAppointmentParams) (CareAppointment, error)
+	InsertCareLineItem(ctx context.Context, arg InsertCareLineItemParams) (CareLineItem, error)
+	InsertCareLineRule(ctx context.Context, arg InsertCareLineRuleParams) (CareLineRule, error)
 	// Trilha de todo vínculo. É o que permitirá revisar retroativamente quem anexou
 	// prontuário de quem, quando o fator de posse (WhatsApp/e-mail) existir.
 	InsertDavLinkAudit(ctx context.Context, arg InsertDavLinkAuditParams) error
+	// Consultas da matrícula (tabelas enrollment e enrollment_period — migration 0006).
+	//
+	// Cada UPDATE é estreito e traz o status no WHERE, como no agendamento: um
+	// "UpdateEnrollment" genérico deixaria o próximo model gravar qualquer transição.
+	// Todas são :execrows quando o model precisa checar que exatamente 1 linha mudou.
+	InsertEnrollment(ctx context.Context, arg InsertEnrollmentParams) (Enrollment, error)
+	// source usa o default 'admin' (único valor aceito no piloto).
+	InsertEnrollmentPeriod(ctx context.Context, arg InsertEnrollmentPeriodParams) (EnrollmentPeriod, error)
 	InsertIdentity(ctx context.Context, arg InsertIdentityParams) error
+	// Consultas do log da jornada (tabela journey_event — migration 0007).
+	//
+	// É append-only: só INSERT e SELECT. O role renovi_app (0008) NÃO tem UPDATE/DELETE
+	// aqui, então nem existe query de alteração — não teria como rodar.
+	// O id é UUID v7 gerado na app: ordena junto com occurred_at e é a chave de
+	// desempate do keyset de paginação.
+	InsertJourneyEvent(ctx context.Context, arg InsertJourneyEventParams) (JourneyEvent, error)
 	// token_hash é o SHA-256 do token opaco. O token em si nunca toca o banco.
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
 	// Ativa a conta. O CHECK active_exige_vinculo_dav (migration 0002) recusa esta
@@ -76,11 +153,37 @@ type Querier interface {
 	// aconteceu não é informação para o paciente. DAV_UNKNOWN aparece — ele pode ter
 	// uma consulta de verdade marcada.
 	ListAppointmentsByAccount(ctx context.Context, accountID uuid.UUID) ([]Appointment, error)
+	ListCareAppointmentsByEnrollment(ctx context.Context, enrollmentID uuid.UUID) ([]CareAppointment, error)
+	// "Minhas consultas da jornada", com filtro OPCIONAL por status: quando
+	// sqlc.narg('status') é nulo, o predicado some e a lista vem inteira.
+	ListCareAppointmentsByPatient(ctx context.Context, arg ListCareAppointmentsByPatientParams) ([]CareAppointment, error)
+	// O catálogo inteiro, agrupado por code e com a versão mais nova primeiro.
+	ListCareLines(ctx context.Context) ([]CareLine, error)
+	// Todas as versões de um code, da mais nova para a mais antiga.
+	ListCareLinesByCode(ctx context.Context, code string) ([]CareLine, error)
+	ListEnrollmentPeriods(ctx context.Context, enrollmentID uuid.UUID) ([]EnrollmentPeriod, error)
+	ListEnrollmentsByPatient(ctx context.Context, patientID uuid.UUID) ([]Enrollment, error)
 	ListExampleWidgets(ctx context.Context) ([]ExampleWidget, error)
+	ListItemsByCareLine(ctx context.Context, careLineID uuid.UUID) ([]CareLineItem, error)
+	// A tela de jornada, paginada por KEYSET (não OFFSET): a página seguinte pede tudo
+	// ANTERIOR ao último (occurred_at, id) que já viu. O índice
+	// ix_journey_event_patient (patient_id, occurred_at DESC, id DESC) serve isto
+	// diretamente. Para a primeira página, o model passa o maior instante/uuid
+	// possível como cursor.
+	//
+	// A comparação é a forma EXPANDIDA do row-value `(occurred_at, id) < (cursor)` —
+	// idêntica em semântica, mas o sqlc infere o tipo de cada parâmetro corretamente
+	// (o row-value constructor faz o sqlc tipar o id como timestamptz).
+	ListJourneyEventsByPatient(ctx context.Context, arg ListJourneyEventsByPatientParams) ([]JourneyEvent, error)
 	// A fila de compensação do worker: falhou, o horário é nosso e ainda não voltou.
 	// É uma consulta ao banco, e não um estado em memória, para sobreviver a um
 	// restart no meio.
 	ListPendingSlotRelease(ctx context.Context, limit int32) ([]Appointment, error)
+	// Os eventos mais recentes de UMA matrícula (ex.: para montar o resumo da linha).
+	ListRecentJourneyEventsByEnrollment(ctx context.Context, arg ListRecentJourneyEventsByEnrollmentParams) ([]JourneyEvent, error)
+	// As regras de todos os itens de uma linha, com o ref do item junto (o motor puro
+	// resolve PREREQUISITE por ref, então trazê-lo aqui evita um segundo lookup).
+	ListRulesByCareLine(ctx context.Context, careLineID uuid.UUID) ([]ListRulesByCareLineRow, error)
 	// Agendamentos que ficaram no meio do caminho (o processo morreu). O worker
 	// decide o destino de cada um consultando o legado.
 	ListStaleInFlight(ctx context.Context, arg ListStaleInFlightParams) ([]Appointment, error)
@@ -96,6 +199,11 @@ type Querier interface {
 	// saberemos sozinhos (id é deles, não há rota de busca). O horário fica retido —
 	// o CHECK desconhecido_nao_libera impede que alguém o solte por engano.
 	MarkAppointmentUnknown(ctx context.Context, id uuid.UUID) (int64, error)
+	// Espelho do MarkSlotReleased para o cancelamento: registra que o horário de uma
+	// consulta CANCELLED voltou ao mercado. O CHECK liberado_exige_terminal (0004) já
+	// aceita CANCELLED como estado terminal; o guard aqui garante que só se libera o
+	// horário de uma reserva já cancelada e ainda travada.
+	MarkCancelledSlotReleased(ctx context.Context, id uuid.UUID) (int64, error)
 	// Registra que o horário voltou ao mercado no legado. Separado do FailAppointment
 	// porque são dois sistemas: entre marcar FAILED aqui e soltar o booked lá pode
 	// haver um crash, e é essa diferença que o worker usa como fila de compensação.
@@ -104,10 +212,21 @@ type Querier interface {
 	// liberação de uma reserva JÁ terminal. Impede, no nível do banco, gravar
 	// slot_released_at numa consulta ainda viva.
 	MarkSlotReleased(ctx context.Context, id uuid.UUID) (int64, error)
+	// A próxima versão de um code: MAX+1, ou 1 se ainda não existe nenhuma. É o número
+	// que o CreateCareLine grava — calculá-lo aqui evita uma corrida no model.
+	NextCareLineVersion(ctx context.Context, code string) (int32, error)
+	// Promove o rascunho a publicado. O guard `status = 'draft'` no WHERE torna a
+	// operação idempotente-segura: republicar (ou publicar o que não é draft) casa 0
+	// linhas, e o model trata como falha em vez de sobrescrever published_at.
+	PublishCareLine(ctx context.Context, arg PublishCareLineParams) (int64, error)
 	// Reaproveita a linha de uma tentativa que morreu antes da DAV confirmar.
 	// O filtro por status é a trava: uma conta ACTIVE nunca pode ser sobrescrita por
 	// quem apenas conhece o CPF.
 	RefreshPendingAccount(ctx context.Context, arg RefreshPendingAccountParams) (PatientAccount, error)
+	// Renovação: estende a vigência e reativa. Aceita renovar a partir de viva ou
+	// expirada (o caso comum do piloto é renovar o que venceu); concluída/encerrada
+	// são terminais e não voltam por aqui.
+	RenewEnrollment(ctx context.Context, arg RenewEnrollmentParams) (int64, error)
 	RevokeSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	UpsertAddress(ctx context.Context, arg UpsertAddressParams) error
 }
