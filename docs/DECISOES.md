@@ -755,3 +755,29 @@ jamais ao gestor (guardrails 6.1/6.2/6.5 do documento central; Anexo C.5.5).
 **Consequência:** o dado individual do Anexo C nunca transita para o gestor por
 construção (não existe caminho). O escalonamento é um fato na trilha clínica do
 paciente; a integração de roteamento real é o próximo passo (ver PROGRESSO).
+
+## ADR-037 — Correções pós-review (PR #13) do Verificador de Humor
+
+**Contexto:** a revisão da PR #13 apontou três ajustes de correção/robustez sobre
+os ADRs 034/035, sem mudar o contrato nem o schema.
+
+**Decisão:**
+- **Streak = dias de CALENDÁRIO consecutivos (ADR-035).** O gatilho contava
+  *check-ins* em risco em sequência, ignorando lacunas de dia — quem só registrava
+  nos dias ruins acumulava um streak falso. `riskStreak` (helper puro em
+  `mood_checkin.go`, table-driven) agora quebra a sequência numa lacuna de dia,
+  fiel a "N dias consecutivos" (Anexo C.5.4).
+- **Guard de concorrência no `Submit` do assessment (ADR-034).** A cadência era
+  checada FORA da transação (janela TOCTOU: dois submits simultâneos podiam gravar
+  duas aplicações dentro do `MIN_INTERVAL`). Agora o `Submit` adquire um
+  `pg_advisory_xact_lock` por (paciente, instrumento) no início da transação e
+  **reavalia a cadência dentro dela** — o segundo submit vê a aplicação já
+  commitada e é barrado. Coberto por teste de integração determinístico.
+- **Nits:** `History` capa o limite em 120 (teto do contrato) em vez de zerar para
+  30; `getMoodHistory` (front) passa `limit`; grade de humor operável por teclado
+  (setas), com teste; comentário fixando a invariante dos cortes de subescala do
+  PHQ-4 (as duas linhas `subescala_positiva` devem compartilhar o corte).
+
+**Consequência:** o gatilho fica fiel ao spec, o anel semanal ganha um backstop de
+concorrência no servidor (além do botão desabilitado no front) e a captura diária
+fica acessível por teclado. Nada disso muda o `openapi.yaml`.
