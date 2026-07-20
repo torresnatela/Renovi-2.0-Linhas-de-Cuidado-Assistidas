@@ -385,7 +385,10 @@ export const recordMoodCheckin = (body: {
   context_tags?: string[];
 }) => request<MoodCheckin>('/me/mood/checkin', { method: 'POST', body: JSON.stringify(body) });
 
-export const getMoodHistory = () => request<MoodCheckin[]>('/me/mood/history');
+export const getMoodHistory = (limit?: number) =>
+  request<MoodCheckin[]>(
+    `/me/mood/history${limit != null ? `?limit=${encodeURIComponent(limit)}` : ''}`,
+  );
 
 /**
  * Um passo da linha (no Slice 1, sempre uma CONSULTA). `ref` é o código estável

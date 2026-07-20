@@ -103,6 +103,37 @@ describe('MoodPage', () => {
     expect(screen.getByText('Agradável e com energia')).toBeInTheDocument();
   });
 
+  it('permite escolher o humor pelo teclado (acessibilidade)', async () => {
+    const today: MoodToday = { dia: '2026-07-18', can_checkin: true, checkin: null };
+    vi.mocked(api.getMoodToday).mockResolvedValue(today);
+    const salvo: MoodCheckin = {
+      valencia: 55,
+      energia: 55,
+      quadrante: 'agradavel_ativado',
+      respondido_em: '2026-07-18T10:00:00-03:00',
+    };
+    vi.mocked(api.recordMoodCheckin).mockResolvedValue(salvo);
+
+    renderPage();
+
+    const grade = await screen.findByRole('button', {
+      name: 'Grade de humor: valência por energia',
+    });
+    grade.focus();
+    // Do centro (50,50): uma seta para a direita e uma para cima => (55, 55).
+    fireEvent.keyDown(grade, { key: 'ArrowRight' });
+    fireEvent.keyDown(grade, { key: 'ArrowUp' });
+    expect(screen.getByTestId('mood-marker')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar meu humor' }));
+
+    expect(await screen.findByText(/Humor de hoje registrado/)).toBeInTheDocument();
+    expect(vi.mocked(api.recordMoodCheckin).mock.calls[0][0]).toMatchObject({
+      valencia: 55,
+      energia: 55,
+    });
+  });
+
   it('oferece o WHO-5 quando o gatilho pede e mostra o resultado', async () => {
     const today: MoodToday = { dia: '2026-07-18', can_checkin: true, checkin: null, offer: 'WHO5' };
     vi.mocked(api.getMoodToday).mockResolvedValue(today);

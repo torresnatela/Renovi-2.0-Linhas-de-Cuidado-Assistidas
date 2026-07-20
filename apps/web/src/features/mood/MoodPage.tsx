@@ -181,6 +181,32 @@ function CheckinSection({ existente }: { existente: MoodCheckin | null }) {
     setPonto({ valencia: Math.round(x * 100), energia: Math.round((1 - y) * 100) });
   }
 
+  // Acessibilidade: a grade também é operável por teclado. As setas movem o ponto
+  // em passos de 5; partindo do centro (50,50) quando ainda não há ponto.
+  function ajustar(dValencia: number, dEnergia: number) {
+    setPonto((prev) => {
+      const base = prev ?? { valencia: 50, energia: 50 };
+      return {
+        valencia: Math.min(100, Math.max(0, base.valencia + dValencia)),
+        energia: Math.min(100, Math.max(0, base.energia + dEnergia)),
+      };
+    });
+  }
+
+  function teclado(e: React.KeyboardEvent<HTMLDivElement>) {
+    const passo = 5;
+    const movimentos: Record<string, [number, number]> = {
+      ArrowLeft: [-passo, 0],
+      ArrowRight: [passo, 0],
+      ArrowUp: [0, passo],
+      ArrowDown: [0, -passo],
+    };
+    const mov = movimentos[e.key];
+    if (!mov) return;
+    e.preventDefault();
+    ajustar(mov[0], mov[1]);
+  }
+
   function registrar() {
     if (!ponto) return;
     record.mutate({
@@ -204,8 +230,8 @@ function CheckinSection({ existente }: { existente: MoodCheckin | null }) {
 
       <div className="rounded-lg border border-slate-200 bg-white p-6">
         <p className="mb-1 text-sm text-slate-600">
-          Toque no ponto que representa como você se sente. O eixo horizontal é o quão agradável;
-          o vertical, o quanto de energia.
+          Toque no ponto que representa como você se sente (ou use as setas do teclado). O eixo
+          horizontal é o quão agradável; o vertical, o quanto de energia.
         </p>
 
         <div className="mx-auto mt-4 max-w-sm">
@@ -217,6 +243,7 @@ function CheckinSection({ existente }: { existente: MoodCheckin | null }) {
             <div
               ref={gridRef}
               onClick={selecionar}
+              onKeyDown={teclado}
               role="button"
               tabIndex={0}
               aria-label="Grade de humor: valência por energia"
