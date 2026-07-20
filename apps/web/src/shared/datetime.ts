@@ -15,6 +15,17 @@
  * TypeScript recusa a chamada sem ele.
  */
 
+/**
+ * O fuso em que as datas SEM `time_zone` próprio são exibidas.
+ *
+ * Slots e consultas trazem o fuso da agenda embutido no dado (`time_zone`); já a
+ * vigência da matrícula, os eventos e o `available_from` de um bloqueio são
+ * instantes sem fuso anexo. A plataforma opera em hora de parede de São Paulo (o
+ * legado é de lá), então é esse o fuso de LEITURA — explícito, nunca o do browser
+ * (a mesma regra deste módulo: um runner de CI em UTC mentiria a data).
+ */
+export const FUSO_PADRAO = 'America/Sao_Paulo';
+
 /** "09:00" */
 export function formatTime(iso: string, timeZone: string): string {
   return new Date(iso).toLocaleTimeString('pt-BR', {
@@ -42,6 +53,33 @@ export function formatDateTimeShort(iso: string, timeZone: string): string {
     month: '2-digit',
   });
   return `${dia} às ${formatTime(iso, timeZone)}`;
+}
+
+/** "30/09/2026" — data numérica com ano (ex.: vigência do plano). */
+export function formatDate(iso: string, timeZone: string): string {
+  return new Date(iso).toLocaleDateString('pt-BR', {
+    timeZone,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+/**
+ * "jul" — mês abreviado (sem o ponto que o pt-BR anexa), para o selo de data.
+ *
+ * O caixa-alta ("JUL") é do CSS, não da fonte: a string aqui é minúscula para o
+ * nome acessível continuar legível.
+ */
+export function monthAbbrev(iso: string, timeZone: string): string {
+  return new Date(iso)
+    .toLocaleDateString('pt-BR', { timeZone, month: 'short' })
+    .replace(/\.$/, '');
+}
+
+/** "23" — o dia do mês, no fuso da agenda, para o selo de data. */
+export function dayOfMonth(iso: string, timeZone: string): string {
+  return new Date(iso).toLocaleDateString('pt-BR', { timeZone, day: '2-digit' });
 }
 
 /**
