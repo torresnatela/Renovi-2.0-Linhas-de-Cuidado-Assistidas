@@ -96,6 +96,12 @@ Regras:
   golang-migrate × transaction pooling). Na escala do piloto, endpoint direto
   para tudo (ADR-027).
 - A host key da VPS está **fixada** no workflow (não usa `ssh-keyscan` cego).
+- A borda Hostinger roda **anti-DDoS** que descarta *intermitentemente* o 1º SYN
+  do IP (efêmero) do runner. O job faz **warm-up com retry** (6× · `ConnectTimeout=10`)
+  da conexão SSH **antes** do `scp` — senão um único pacote perdido derruba o deploy
+  com `connect ... port 22: Connection timed out`. **Não é allowlist de IP**: os
+  outros sistemas da VPS deployam pelo mesmo caminho (o `renovi_saude_publica`
+  também repete a 1ª conexão) e a 22 responde da máquina do dev (IP "quente").
 
 ## Rollback
 
@@ -120,6 +126,7 @@ curl -fsS http://127.0.0.1:8084/readyz
 
 | Sintoma | Diagnóstico | Ação |
 |---|---|---|
+| Deploy falha no `scp`/`ssh` com `connect ... port 22: Connection timed out` | anti-DDoS da borda Hostinger descartou o 1º SYN do IP novo do runner — **não é allowlist** (os vizinhos deployam pelo mesmo caminho) | o job já faz warm-up com retry (6×); se estourar as 6, **re-executar o job `deploy`** (novo IP/janela); da sua máquina `nc -zv 2.25.184.35 22` deve abrir |
 | Site fora (`app.renovisaude.com.br` não resolve/TLS) | `dig +short app.renovisaude.com.br` deve dar `2.25.184.35` (não IPs 104.x — nuvem laranja da Cloudflare é topologia errada); logs do cert: `docker logs renovi-caddy-1 \| grep -i acme` | corrigir DNS na Cloudflare (DNS only); aguardar retry do Caddy |
 | SPA abre, API não (502 em `/api`) | `ssh renovi-prod`; `docker ps` — `renovi-care-api-1` de pé? `docker compose -f /opt/renovi-care/docker-compose.prod.yml logs --tail 100 api` | se crash-loop por config: conferir `.env.api`; se OOM: `docker stats` |
 | `/readyz` 503 | corpo não diz a causa (de propósito — LGPD); ver logs da api: falha de ping no Postgres (Neon) ou no MySQL legado | Neon: status.neon.tech + testar `psql` da VM; legado: `nc -zv <host> 3306` da VM — se o firewall do legado bloqueou o IP da VPS, o **login continua ok e o agendamento fica fora** até liberar |
