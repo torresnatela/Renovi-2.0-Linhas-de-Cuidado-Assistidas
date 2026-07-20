@@ -101,6 +101,10 @@ func (s *EnrollmentStore) Enroll(ctx context.Context, patientID uuid.UUID, careL
 	if !validMonths(months) {
 		return Enrollment{}, ErrInvalidMonths
 	}
+	// TIMESTAMPTZ guarda microssegundos: sem truncar, a linha (µs, lida do banco)
+	// e o payload do evento (ns, serializado da memória) registrariam instantes
+	// DIFERENTES para o mesmo fato.
+	now = now.Truncate(time.Microsecond)
 
 	// O paciente precisa existir (reusa a query de conta do auth).
 	if _, err := s.q.GetAccountByID(ctx, patientID); err != nil {
@@ -173,6 +177,8 @@ func (s *EnrollmentStore) Renew(ctx context.Context, id uuid.UUID, months int, n
 	if !validMonths(months) {
 		return Enrollment{}, ErrInvalidMonths
 	}
+	// Mesma razão do Enroll: linha e evento devem registrar o mesmo instante.
+	now = now.Truncate(time.Microsecond)
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

@@ -334,6 +334,15 @@ forjável. **Tratar antes do go-live**, junto do ajuste do `deploy/Caddyfile`.
 ajuste do Caddy. Registrado aqui para não se perder — é o maior item aberto de
 segurança do piloto, ao lado do fator de posse do ADR-013.
 
+**Atualização (2026-07-19) — pendência de infra resolvida na borda:** o bloco
+`app.renovisaude.com.br` do Caddy de borda (`deploy/edge-snippet.Caddyfile`)
+**deleta `True-Client-IP`** e **sobrescreve `X-Real-IP` com `{client_ip}`**; o
+`X-Forwarded-For` de cliente não confiável o Caddy ≥ 2.5 já descarta sozinho.
+Com isso o `middleware.RealIP` do chi passa a ler valor controlado pela borda e
+os rate limits por IP (login/cadastro) e o IP da auditoria deixam de ser
+spoofáveis. Trocar o `RealIP` deprecated por derivação com allowlist explícita
+fica como melhoria futura (defesa em profundidade), não bloqueia o go-live.
+
 ## ADR-020 — Quota das linhas de cuidado é janela MÓVEL GERAL, não mês civil
 
 **Contexto:** o Slice 1 (Linhas de Cuidado) precisa de um motor de elegibilidade
@@ -568,6 +577,81 @@ operação; reusá-la para OUTRO item da mesma matrícula devolvia a consulta do
 A quando o cliente pediu o item B (confirmação de agendamento silenciosamente
 errada). O `Schedule` agora confere `care_appointment.care_line_item_id` contra o
 item pedido antes de replayar e, se divergir, responde `422 IDEMPOTENCY_KEY_REUSE`.
+
+## ADR-026 — Deploy: GitHub Actions + GHCR + compose numa VPS compartilhada
+
+**Contexto:** ir a produção em `app.renovisaude.com.br` usando a VPS Hostinger
+já existente (2.25.184.35, AlmaLinux 10, 1 vCPU/4 GB), que roda outros dois
+sistemas da empresa (o "renovi" antigo e o renovi-gestao) atrás de um Caddy de
+borda comum (projeto `/opt/renovi`, portas 80/443). Requisitos: build no GitHub,
+segredos no GitHub, não afetar os vizinhos nem o SSH.
+
+**Decisão:**
+- **Pipeline única** (`.github/workflows/ci.yml`): testes → (PR) build-check das
+  imagens sem push → (main, com **aprovação manual** no environment
+  `production`) build+push no **GHCR** (`renovi-care-api`/`renovi-care-web`,
+  tags `<sha>` + `latest`) → deploy via **SSH** (chave dedicada; host key
+  fixada) → `deploy/deploy-remote.sh` na VPS. `workflow_run` foi descartado
+  (mesmo SHA e environment ficam naturais com `needs` no mesmo workflow).
+- **Migrations antes do `up -d`**: se falharem, a versão antiga segue no ar.
+- **Projeto isolado `renovi-care`** em `/opt/renovi-care` (o nome `renovi` já
+  pertence ao sistema antigo): rede própria + entrada na rede externa
+  `renovi_default` só com aliases `care-api`/`care-web`; portas de smoke
+  `127.0.0.1:8083/8084`; `mem_limit` e log com rotação (padrão da VM).
+- **A imagem web embarca o dist do artifact do CI** (não rebuilda no Docker):
+  o que foi testado é o que vai pro ar.
+- **1 instância de API sempre** (rate limiter em memória — ADR-019). Escalar
+  exige antes mover o rate limit para armazenamento compartilhado.
+- **Rollback por tag**: `IMAGE_TAG=<sha anterior>` no `.env` da VPS + `up -d`;
+  imagens de 7 dias mantidas na VM (`prune --filter until=168h`).
+- Concurrency do CI: PRs cancelam runs antigos; na main **enfileira**
+  (`cancel-in-progress` condicional) — cancelar na main mataria deploy no meio.
+
+**Consequência:** deploy auditável e reversível com um clique de aprovação;
+custo: dependência do GHCR e do SSH da VPS. Runbook em `docs/DEPLOY.md`.
+
+## ADR-027 — Banco de produção no Neon (Postgres 17), endpoint direto
+
+**Contexto:** o `renovi_care` de produção precisa de Postgres gerenciado com
+backup; a VPS de 4 GB compartilhados não é lugar para o banco do piloto.
+
+**Decisão:** **Neon** (Postgres 17, TLS obrigatório). A URL vai em
+`RENOVI_CARE_DATABASE_URL` com `?sslmode=require` — o pgx usa o DSN como está,
+zero mudança de código. **Endpoint direto (host sem `-pooler`) para tudo**: o
+endpoint pooled (PgBouncer em transaction pooling) quebra o advisory lock do
+golang-migrate, e na escala do piloto (1 instância, pool pequeno do pgx) o
+pooler não agrega nada. Autosuspend aceito (cold start ~1 s pós-ociosidade).
+A separação de roles do ADR-024 vale no Neon: a app conecta como `renovi_app`
+(criado pela migration 0008; senha trocada via `ALTER ROLE` no provisionamento)
+e as migrations como o owner, via `RENOVI_CARE_MIGRATE_DATABASE_URL`.
+
+**Consequência:** backup/PITR e upgrades por conta do Neon; latência app↔banco
+vira dependência de internet (mitigada por timeouts já existentes). Se um dia
+houver muitas instâncias, revisitar o pooler (aí migrations continuam no direto).
+
+## ADR-028 — Borda: vhost aditivo no Caddy existente; Cloudflare DNS-only
+
+**Contexto:** as portas 80/443 da VPS pertencem ao Caddy de borda do projeto
+`/opt/renovi`, que já serve os outros dois sistemas e detém o TLS de todos.
+
+**Decisão:**
+- O Renovi 2.0 entra como **mais um bloco de site** (`app.renovisaude.com.br`)
+  no `/opt/renovi/Caddyfile` — cópia versionada em
+  `deploy/edge-snippet.Caddyfile`. Mudanças na borda: sempre aditivas, com
+  backup `Caddyfile.bak.<ts>`, `caddy validate` antes do reload gracioso, e
+  edição **in-place** (o arquivo é bind-mount único; `mv` troca o inode).
+- **Cloudflare em DNS only** (nuvem cinza): o Caddy emite/renova Let's Encrypt
+  via HTTP-01 sozinho — zero gestão de certificado. Nuvem laranja é topologia
+  diferente (cert de origem, headers CF) e exigiria novo ADR.
+- O container `web` (`renovi-care-web`) tem um Caddy **interno** só de SPA
+  estática; roteamento de path e headers de segurança (HSTS etc.) ficam no
+  bloco da borda, seguindo o padrão da VM (é assim que a gestao funciona).
+
+**Consequência:** um único ponto de TLS na VM; o Renovi 2.0 depende do
+container de borda do projeto antigo (aceito: já era verdade para os demais).
+Se a borda um dia for extraída para um projeto próprio "edge", todos os blocos
+migram juntos (fora do escopo).
+
 ---
 
 > **Nota de numeração — Verificador Diário de Humor (Anexo C).** A feature do

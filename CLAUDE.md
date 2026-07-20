@@ -20,8 +20,9 @@ SPEC v1 (documento de contexto) e em `docs/ARQUITETURA.md`.
 | Externo | **Doutor ao Vivo** (dados de saúde + teleconsulta) — comportamento real em `docs/DAV-API-NOTAS.md` |
 | Contrato | OpenAPI (`packages/contracts/openapi.yaml`) — **fonte da verdade** · oapi-codegen |
 | Front | React 18 · TypeScript · Vite · Tailwind · TanStack Query · Vitest |
-| Banco próprio | PostgreSQL `renovi_care` |
+| Banco próprio | PostgreSQL `renovi_care` — produção no **Neon** (Postgres 17, ADR-021) |
 | Infra local | Docker Compose (Postgres + mocks do legado/Gestão) |
+| Infra prod | VPS Hostinger compartilhada · GHCR + deploy via GitHub Actions (aprovação manual) · Caddy de borda — ver `docs/DEPLOY.md` |
 
 ## Estrutura do monorepo
 
@@ -31,7 +32,7 @@ apps/web/        # front React       — ver apps/web/CLAUDE.md
 packages/contracts/   # openapi.yaml (fonte da verdade)
 packages/api-client/  # cliente TS gerado (orval) — placeholder
 deploy/          # docker-compose, Caddyfile, mocks dos bancos
-docs/            # ARQUITETURA, DESENVOLVIMENTO, DECISOES, PROGRESSO
+docs/            # ARQUITETURA, DESENVOLVIMENTO, DECISOES, PROGRESSO, DEPLOY
 Makefile         # todos os comandos
 ```
 

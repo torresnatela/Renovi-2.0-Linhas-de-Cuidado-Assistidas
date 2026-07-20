@@ -1,0 +1,70 @@
+# Stack de produção do Renovi 2.0 (Plataforma do Paciente) na VPS compartilhada.
+#
+# Uso na VPS (em /opt/renovi-care, com .env e .env.api ao lado):
+#   docker compose -f docker-compose.prod.yml pull
+#   docker run --rm --env-file .env.api ghcr.io/<owner>/renovi-care-api:<sha> /migrate up
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# IMAGE_TAG é escrito pelo deploy (SHA do commit); rollback = fixar um SHA
+# anterior no .env e `up -d`. Detalhes e runbook: docs/DEPLOY.md.
+#
+# Convivência na VPS: o projeto chama-se renovi-care (o nome "renovi" pertence
+# ao sistema antigo em /opt/renovi). O tráfego real chega pelo Caddy de borda
+# daquele projeto, via aliases care-api/care-web na rede externa renovi_default.
+# As portas 127.0.0.1:808x existem só para smoke test via SSH.
+
+name: renovi-care
+
+services:
+  web:
+    image: ghcr.io/${GHCR_OWNER:-torresnatela}/renovi-care-web:${IMAGE_TAG:?defina IMAGE_TAG no .env}
+    restart: unless-stopped
+    mem_limit: 128m
+    ports:
+      - "127.0.0.1:8083:80"
+    networks:
+      internal: {}
+      caddy_shared:
+        aliases: [care-web]
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  api:
+    image: ghcr.io/${GHCR_OWNER:-torresnatela}/renovi-care-api:${IMAGE_TAG:?defina IMAGE_TAG no .env}
+    restart: unless-stopped
+    mem_limit: 512m
+    # Segredos da aplicação (chmod 600, renderizado pelo deploy — nunca commitado).
+    env_file: .env.api
+    ports:
+      - "127.0.0.1:8084:8090"
+    networks:
+      internal: {}
+      caddy_shared:
+        aliases: [care-api]
+    # Liveness apenas (processo de pé). O /readyz (Neon + MySQL legado) é
+    # verificado no passo de deploy e no monitoramento: container "unhealthy"
+    # por dependência externa fora do nosso controle não ajuda em nada.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  internal:
+    name: renovi-care
+  # Rede do projeto preexistente /opt/renovi, onde vive o Caddy de borda.
+  # Entramos nela apenas com os aliases exclusivos care-api/care-web.
+  caddy_shared:
+    external: true
+    name: renovi_default

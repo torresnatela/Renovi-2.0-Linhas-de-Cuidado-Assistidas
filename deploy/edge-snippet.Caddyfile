@@ -1,0 +1,46 @@
+# REFERÊNCIA (não montado em container nenhum deste projeto).
+#
+# Este bloco é ADICIONADO ao Caddyfile de borda da VPS (/opt/renovi/Caddyfile,
+# projeto compose preexistente "renovi", container renovi-caddy-1), que detém
+# as portas 80/443 e o TLS de todos os domínios da VM. Mudanças lá são sempre
+# ADITIVAS e com backup (padrão Caddyfile.bak.<timestamp>) — nunca alterar os
+# blocos dos outros projetos. Procedimento completo em docs/DEPLOY.md.
+
+# Renovi 2.0 — Plataforma do Paciente (projeto /opt/renovi-care, aliases
+# care-api/care-web na rede renovi_default). Mudanças sempre aditivas.
+app.renovisaude.com.br {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# ADR-019: o chi middleware.RealIP confia em True-Client-IP > X-Real-IP >
+	# X-Forwarded-For (spoofáveis). A borda vira dona desses headers:
+	# True-Client-IP é deletado (o Caddy não o remove sozinho) e X-Real-IP é
+	# sobrescrito com o IP real da conexão. O X-Forwarded-For de clientes não
+	# confiáveis o Caddy >= 2.5 já descarta por conta própria.
+	handle /api/* {
+		reverse_proxy care-api:8090 {
+			header_up -True-Client-IP
+			header_up X-Real-IP {client_ip}
+		}
+	}
+
+	# Rotas de infra na raiz (verificação externa de deploy/monitoramento).
+	handle /healthz {
+		reverse_proxy care-api:8090
+	}
+	handle /readyz {
+		reverse_proxy care-api:8090
+	}
+
+	# Restante: SPA estática (Caddy interno do container care-web).
+	handle {
+		reverse_proxy care-web:80
+	}
+}
