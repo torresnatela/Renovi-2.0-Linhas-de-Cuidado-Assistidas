@@ -284,6 +284,12 @@ e ADR-010 a ADR-013 em `docs/DECISOES.md`.
   soluções documentados no runbook do `docs/DEPLOY.md` (inode do bind da borda,
   política de senha do Neon). Pendências de hardening: usuário restrito no MySQL
   legado; rotacionar credenciais compartilhadas durante o go-live.
+- [x] **Fix de flakiness do deploy (2026-07-20)**: o `scp` do job `deploy`
+  estourava `connect ... port 22: Connection timed out` quando o anti-DDoS da
+  borda Hostinger descartava o 1º SYN do IP efêmero do runner. Adicionado
+  **warm-up com retry** (6× · `ConnectTimeout=10`) antes do `scp`, espelhando o
+  `renovi_saude_publica`. Não é allowlist — os vizinhos deployam pelo mesmo
+  caminho. Detalhe no runbook do `docs/DEPLOY.md` e na revisão do ADR-026.
 
 ## ⏳ Próximo passo
 

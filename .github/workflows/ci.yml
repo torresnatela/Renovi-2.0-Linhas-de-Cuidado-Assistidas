@@ -184,6 +184,26 @@ jobs:
           # Host key da VPS fixada (evita TOFU/MITM; pública, não é segredo).
           echo '2.25.184.35 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID2TSqt0Z7XViNHSS9J4i0yR7jNU8mN5gWUDcaX+Dos+' >> ~/.ssh/known_hosts
 
+      - name: Aguardar SSH da VPS (warm-up com retry)
+        # A borda Hostinger tem anti-DDoS que descarta INTERMITENTEMENTE o 1º SYN
+        # do IP (novo a cada run) do runner. Sem isto, um único pacote perdido
+        # derruba o deploy com "connect ... port 22: Connection timed out" — o scp
+        # não tem retry. Aquece a conexão antes; os vizinhos da VPS fazem o mesmo
+        # (ver docs/DEPLOY.md). NÃO é allowlist de IP: a 22 responde da máquina do
+        # dev; o que falha é o 1º contato do IP efêmero do runner.
+        env:
+          SSH_DEST: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+        run: |
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=10"
+          for i in $(seq 1 6); do
+            if ssh $SSH_OPTS "$SSH_DEST" true 2>/tmp/ssh.err; then
+              echo "SSH ok na tentativa $i/6"; exit 0
+            fi
+            echo "tentativa $i/6 falhou; aguardando 10s..."; sleep 10
+          done
+          echo "SSH não estabeleceu após 6 tentativas (anti-DDoS Hostinger?):" >&2
+          cat /tmp/ssh.err >&2; exit 1
+
       - name: Render .env e .env.api
         # printf com env vars (nunca interpolação de shell): senhas com
         # caracteres especiais chegam intactas ao arquivo.
@@ -213,7 +233,7 @@ jobs:
         env:
           SSH_DEST: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
         run: |
-          SSH_OPTS="-i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes"
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=10"
           scp $SSH_OPTS deploy/docker-compose.prod.yml "$SSH_DEST:/opt/renovi-care/docker-compose.prod.yml"
           scp $SSH_OPTS deploy/deploy-remote.sh       "$SSH_DEST:/opt/renovi-care/deploy-remote.sh"
           scp $SSH_OPTS deploy/.env.render            "$SSH_DEST:/opt/renovi-care/.env"
@@ -225,7 +245,7 @@ jobs:
           SSH_DEST: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
           GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
-          SSH_OPTS="-i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes"
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=10"
           # Token via stdin: nunca aparece em argv/ps da VPS.
           printf '%s' "$GHCR_PULL_TOKEN" | ssh $SSH_OPTS "$SSH_DEST" \
             'docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin'
@@ -235,7 +255,7 @@ jobs:
         env:
           SSH_DEST: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
         run: |
-          SSH_OPTS="-i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes"
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=10"
           curl -fsS --retry 20 --retry-delay 15 --retry-all-errors \
             https://app.renovisaude.com.br/readyz
           echo "app OK"

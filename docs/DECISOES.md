@@ -610,6 +610,13 @@ segredos no GitHub, não afetar os vizinhos nem o SSH.
 **Consequência:** deploy auditável e reversível com um clique de aprovação;
 custo: dependência do GHCR e do SSH da VPS. Runbook em `docs/DEPLOY.md`.
 
+**Revisão (2026-07-20):** a 1ª conexão SSH do job (o `scp`) era feita sem retry e
+estourava `connect ... port 22: Connection timed out` quando o anti-DDoS da borda
+Hostinger descartava o SYN do IP efêmero do runner — intermitente, **não** allowlist
+(os outros sistemas da VPS deployam pelo mesmo caminho; o `renovi_saude_publica`
+já repetia a 1ª conexão). Adicionado **warm-up com retry** (6× · `ConnectTimeout=10`)
+antes do `scp`, sem mudança de firewall nem de postura de segurança.
+
 ## ADR-027 — Banco de produção no Neon (Postgres 17), endpoint direto
 
 **Contexto:** o `renovi_care` de produção precisa de Postgres gerenciado com
