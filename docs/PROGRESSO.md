@@ -3,7 +3,8 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-19 — **Correções pós-review (PR #13)** do Verificador de Humor: streak = dias consecutivos de calendário (gatilho), guard de concorrência (advisory lock + rechecagem na tx) no Submit do assessment, e nits (teto do History em 120, `limit` no `getMoodHistory`, grade operável por teclado). `make ci` + integração verdes. Ver ADR-037.
+_Última atualização: 2026-07-20 — **Revisão do CodeRabbit na PR #13** endereçada (ADR-037, 2ª rodada): cortes na conexão da tx, streak recente, locks de consentimento (Grant/Revoke/Record), a11y (aria-live + aria-pressed), clamp de limit, `maxItems: 120` no contrato, e fix de teste flaky (meia-noite BR). Não aplicado: `NOT VALID` nas migrations (golang-migrate roda em tx única; desproporcional no piloto). `make ci` + integração completa (incl. e2e) + front verdes.
+Antes: 2026-07-19 — **Correções pós-review (PR #13)** do Verificador de Humor: streak = dias consecutivos de calendário (gatilho), guard de concorrência (advisory lock + rechecagem na tx) no Submit do assessment, e nits (teto do History em 120, `limit` no `getMoodHistory`, grade operável por teclado). `make ci` + integração verdes. Ver ADR-037.
 Antes: 2026-07-19 — **Verificador Diário de Humor (Anexo C): completo (Módulos 0–6 + telas de WHO-5/PHQ-4)**, pronto para merge na main, sobre o Slice 1 concluído._
 
 ## 🌡️ Verificador Diário de Humor — Anexo C (em andamento, branch `feat/verificador-humor`)

@@ -780,4 +780,42 @@ os ADRs 034/035, sem mudar o contrato nem o schema.
 
 **Consequência:** o gatilho fica fiel ao spec, o anel semanal ganha um backstop de
 concorrência no servidor (além do botão desabilitado no front) e a captura diária
-fica acessível por teclado. Nada disso muda o `openapi.yaml`.
+fica acessível por teclado.
+
+### Segunda rodada — revisão do CodeRabbit (PR #13)
+
+O CodeRabbit revisou o push das correções acima e apontou 10 itens; os válidos
+foram aplicados:
+
+- **Cortes na conexão da tx (Major):** `AssessmentStore.score`/`who5Cutoffs`/
+  `phq4Cutoffs` liam por `s.q` (pool) enquanto o `Submit` segurava a tx + advisory
+  lock — pediria uma 2ª conexão por Submit (risco de pool-starvation sob
+  concorrência). Passam a receber o `q` da tx.
+- **Streak precisa ser RECENTE (Major):** `riskStreak` agora exige que o check-in
+  mais novo seja hoje ou ontem — um streak antigo e interrompido não oferece mais o
+  WHO-5 indefinidamente (o `Snapshot` fala em dias "recentes").
+- **Consentimento serializado (Major):** `Grant`, `Revoke` e o `Record` do check-in
+  passam a compartilhar um `pg_advisory_xact_lock` por (paciente, finalidade), e as
+  pré-condições do `Record` foram movidas para DENTRO da tx. Fecha a janela em que
+  uma revogação se intrometeria entre a checagem e a gravação, e evita a
+  unique-violation crua de duas concessões concorrentes.
+- **Acessibilidade (Major):** a grade anuncia o ponto escolhido por uma região
+  `aria-live` (leitor de tela); botões-toggle (Likert e tags de contexto) ganham
+  `aria-pressed`.
+- **Nits:** o controller valida/capa o `limit` do histórico (controller fino); a
+  resposta de `getMoodHistory` ganha `maxItems: 120` no contrato (sem drift de
+  código gerado — é validação, não muda o codegen).
+- **Bug de teste pré-existente (achado na verificação):** `TestMoodCheckinStore_Fluxo`
+  usava `time.Now()` e assumia `now` e `now+1h` no mesmo dia local — perto da
+  meia-noite de Brasília caíam em dias diferentes (2 linhas). Ancorado a um `now`
+  fixo ao meio-dia UTC.
+
+**Não aplicado — `CHECK` sem `NOT VALID` nas migrations (o CodeRabbit marcou como
+Crítico):** trocar o `CHECK` de `journey_event` sem `NOT VALID` faz um scan sob
+`ACCESS EXCLUSIVE` (bloqueia escrita). Porém o `golang-migrate` (usado via
+`NewWithSourceInstance`) roda cada arquivo de migration como UMA transação
+implícita, então `ADD ... NOT VALID` + `VALIDATE` no mesmo arquivo mantêm o
+`ACCESS EXCLUSIVE` por toda a transação — **não** entregam zero-downtime. O fix real
+exigiria dividir cada extensão de `event_type` em duas migrations (add / validate),
+desproporcional para o piloto (tabela `journey_event` minúscula). Registrado como
+follow-up se/quando a tabela crescer.
