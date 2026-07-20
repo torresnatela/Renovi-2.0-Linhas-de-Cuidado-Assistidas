@@ -1,8 +1,15 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { ApiError, type MoodCheckin } from '../../shared/api';
-import { useGrantConsent, useMoodInstrument, useMoodToday, useRecordCheckin } from './useMood';
+import { ApiError, type AssessmentCode, type MoodCheckin, type MoodToday } from '../../shared/api';
+import { AssessmentForm } from './AssessmentForm';
+import {
+  useGrantConsent,
+  useHelpNow,
+  useMoodInstrument,
+  useMoodToday,
+  useRecordCheckin,
+} from './useMood';
 
 /** Versão do termo de consentimento aceito nesta tela. */
 const TERMO_VERSAO = 'v1';
@@ -42,9 +49,77 @@ export function MoodPage() {
       {today.data && today.data.reason === 'consent_required' && <ConsentCard />}
       {today.data && today.data.reason === 'not_enrolled' && <NotEnrolledCard />}
       {today.data && today.data.can_checkin && (
-        <CheckinSection existente={today.data.checkin ?? null} />
+        <div className="space-y-6">
+          <CheckinSection existente={today.data.checkin ?? null} />
+          <DeepeningSection today={today.data} />
+        </div>
       )}
+
+      {/* Afordância permanente de ajuda (guardrail 6.2): triagem, não tratamento. */}
+      {today.data && <HelpNowCard />}
     </main>
+  );
+}
+
+/**
+ * Anel gatilhado no front: quando o gatilho oferece um instrumento (WHO-5/PHQ-4),
+ * mostra o convite e o formulário; quando escala, mostra o encaminhamento clínico.
+ * O front NÃO decide nada disto — só exibe `offer`/`escalate` que o servidor mandou.
+ */
+function DeepeningSection({ today }: { today: MoodToday }) {
+  const [aberto, setAberto] = useState<AssessmentCode | null>(null);
+  const offer = today.offer ?? null;
+
+  return (
+    <div className="space-y-4">
+      {today.escalate && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+          <strong>Vale conversar com a equipe de cuidado.</strong> Seu histórico recente sugere
+          buscar apoio. Isso segue apenas para a trilha clínica — nunca para gestores.
+        </div>
+      )}
+
+      {offer && !aberto && (
+        <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-sm text-emerald-900">
+            {offer === 'WHO5'
+              ? 'Que tal um check-in um pouco mais completo? (2 min)'
+              : 'Um último passo rápido nos ajuda a entender melhor. (1 min)'}
+          </p>
+          <button
+            type="button"
+            onClick={() => setAberto(offer)}
+            className="shrink-0 rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+          >
+            Responder {offer === 'WHO5' ? 'WHO-5' : 'PHQ-4'}
+          </button>
+        </div>
+      )}
+
+      {aberto && <AssessmentForm codigo={aberto} onDone={() => setAberto(null)} />}
+    </div>
+  );
+}
+
+function HelpNowCard() {
+  const help = useHelpNow();
+  return (
+    <section className="mt-6">
+      {help.data ? (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900" role="status">
+          <strong>{help.data.label}.</strong> {help.data.message}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => help.mutate()}
+          disabled={help.isPending}
+          className="text-sm font-medium text-sky-700 underline disabled:opacity-60"
+        >
+          {help.isPending ? 'Conectando…' : 'Preciso de ajuda agora'}
+        </button>
+      )}
+    </section>
   );
 }
 

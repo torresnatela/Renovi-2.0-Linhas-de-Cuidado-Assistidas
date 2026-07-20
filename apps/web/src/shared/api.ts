@@ -244,12 +244,68 @@ export interface MoodCheckin {
 export type MoodReason = 'consent_required' | 'not_enrolled';
 
 /** O check-in de hoje (ou nulo) e a elegibilidade do paciente. */
+export type AssessmentCode = 'WHO5' | 'PHQ4';
+
 export interface MoodToday {
   dia: string;
   can_checkin: boolean;
   reason?: MoodReason | null;
   checkin?: MoodCheckin | null;
+  /** Instrumento de aprofundamento ofertado agora pelo gatilho (ou nulo). */
+  offer?: AssessmentCode | null;
+  /** true quando o gatilho indica escalonamento à trilha clínica. */
+  escalate?: boolean;
 }
+
+/** Um bloqueio do motor, JÁ pronto para exibir (o front não recalcula). */
+export interface EligibilityBlock {
+  rule_type: string;
+  reason: string;
+  available_from?: string | null;
+}
+
+export interface Eligibility {
+  allowed: boolean;
+  blocks: EligibilityBlock[];
+}
+
+/** Disponibilidade de um instrumento periódico + seu descritor. */
+export interface AssessmentAvailability {
+  codigo: string;
+  eligibility: Eligibility;
+  item_count: number;
+  value_min: number;
+  value_max: number;
+}
+
+/** Resultado pontuado de um instrumento periódico. */
+export interface AssessmentResult {
+  codigo: string;
+  raw_score?: number;
+  index_score?: number | null;
+  subscores?: Record<string, number> | null;
+  faixa: string;
+  flag_encaminhar: boolean;
+  respondido_em: string;
+}
+
+/** Canal de urgência/care navigation (triagem, não tratamento). */
+export interface HelpChannel {
+  type: string;
+  label: string;
+  message: string;
+}
+
+export const getAssessmentAvailability = (codigo: string) =>
+  request<AssessmentAvailability>(`/me/assessments/${encodeURIComponent(codigo)}`);
+
+export const submitAssessment = (codigo: AssessmentCode, items: number[]) =>
+  request<AssessmentResult>('/me/assessments', {
+    method: 'POST',
+    body: JSON.stringify({ codigo, items }),
+  });
+
+export const moodHelpNow = () => request<HelpChannel>('/me/mood/help-now', { method: 'POST' });
 
 export interface InstrumentDimension {
   dimensao: string;

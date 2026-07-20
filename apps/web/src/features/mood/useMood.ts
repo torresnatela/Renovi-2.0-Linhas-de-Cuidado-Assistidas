@@ -6,6 +6,7 @@ export const moodKeys = {
   all: ['mood'] as const,
   today: () => [...moodKeys.all, 'today'] as const,
   instrument: (codigo: string) => [...moodKeys.all, 'instrument', codigo] as const,
+  availability: (codigo: string) => [...moodKeys.all, 'availability', codigo] as const,
 };
 
 /** A config do instrumento muda raramente (reference data versionada). */
@@ -44,4 +45,28 @@ export function useRecordCheckin() {
     mutationFn: api.recordMoodCheckin,
     onSuccess: () => qc.invalidateQueries({ queryKey: moodKeys.today() }),
   });
+}
+
+/** Disponibilidade de um instrumento periódico (cadência avaliada pelo motor). */
+export function useAssessmentAvailability(codigo: string | null) {
+  return useQuery({
+    queryKey: moodKeys.availability(codigo ?? ''),
+    queryFn: () => api.getAssessmentAvailability(codigo!),
+    enabled: Boolean(codigo),
+  });
+}
+
+/** Submete um instrumento periódico e revalida o dia (o gatilho reage). */
+export function useSubmitAssessment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ codigo, items }: { codigo: api.AssessmentCode; items: number[] }) =>
+      api.submitAssessment(codigo, items),
+    onSuccess: () => qc.invalidateQueries({ queryKey: moodKeys.today() }),
+  });
+}
+
+/** Aciona a afordância "preciso de ajuda agora" (roteia ao canal de urgência). */
+export function useHelpNow() {
+  return useMutation({ mutationFn: api.moodHelpNow });
 }

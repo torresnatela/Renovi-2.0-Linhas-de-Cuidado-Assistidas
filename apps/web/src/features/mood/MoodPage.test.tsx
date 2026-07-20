@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -15,6 +15,9 @@ vi.mock('../../shared/api', async () => {
     grantConsent: vi.fn(),
     getMoodInstrument: vi.fn(),
     recordMoodCheckin: vi.fn(),
+    getAssessmentAvailability: vi.fn(),
+    submitAssessment: vi.fn(),
+    moodHelpNow: vi.fn(),
   };
 });
 const api = await import('../../shared/api');
@@ -98,5 +101,49 @@ describe('MoodPage', () => {
       energia: 75,
     });
     expect(screen.getByText('Agradável e com energia')).toBeInTheDocument();
+  });
+
+  it('oferece o WHO-5 quando o gatilho pede e mostra o resultado', async () => {
+    const today: MoodToday = { dia: '2026-07-18', can_checkin: true, checkin: null, offer: 'WHO5' };
+    vi.mocked(api.getMoodToday).mockResolvedValue(today);
+    vi.mocked(api.getAssessmentAvailability).mockResolvedValue({
+      codigo: 'WHO5',
+      eligibility: { allowed: true, blocks: [] },
+      item_count: 5,
+      value_min: 0,
+      value_max: 5,
+    });
+    vi.mocked(api.submitAssessment).mockResolvedValue({
+      codigo: 'WHO5',
+      index_score: 20,
+      raw_score: 5,
+      faixa: 'encaminha',
+      flag_encaminhar: true,
+      respondido_em: '2026-07-18T10:00:00-03:00',
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    // O gatilho oferece o WHO-5 → abrir o formulário.
+    await user.click(await screen.findByRole('button', { name: 'Responder WHO-5' }));
+
+    // Responder os 5 itens: em cada um, escolher o valor 1 (botão "1 · ...").
+    await screen.findByText(/Nas últimas duas semanas/);
+    const botoes1 = screen.getAllByRole('button').filter((b) => b.textContent?.startsWith('1 ·'));
+    expect(botoes1).toHaveLength(5);
+    for (const b of botoes1) {
+      await user.click(b);
+    }
+    const enviar = screen.getByRole('button', { name: 'Enviar respostas' });
+    expect(enviar).toBeEnabled();
+    await user.click(enviar);
+    await waitFor(() => expect(api.submitAssessment).toHaveBeenCalled());
+
+    expect(await screen.findByRole('heading', { name: /— resultado/ })).toBeInTheDocument();
+    expect(vi.mocked(api.submitAssessment).mock.calls[0]).toEqual(['WHO5', [1, 1, 1, 1, 1]]);
+    expect(screen.getByText(/Índice de bem-estar:/)).toBeInTheDocument();
+    // Rastreio positivo → mensagem de encaminhamento à trilha clínica.
+    expect(screen.getByText(/vale conversar com a equipe de cuidado/)).toBeInTheDocument();
   });
 });
