@@ -308,22 +308,32 @@ func (s *CareLineStore) AddRule(ctx context.Context, careLineID uuid.UUID, itemR
 // indisponível sobe intacto (o controller vira 503); template inconsistente vira
 // ErrCareLineInvalid (400 com a lista toda).
 func (s *CareLineStore) Publish(ctx context.Context, id uuid.UUID, now time.Time) (CareLine, error) {
-	line, err := s.q.GetCareLine(ctx, id)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return CareLine{}, fmt.Errorf("abrir transação: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+
+	// FOR UPDATE: valida o template e vira o status na MESMA transação, para que dois
+	// publishes concorrentes da mesma linha não validem os dois contra o estado draft
+	// e selem duas vezes — o segundo espera a trava e vê o status já publicado.
+	line, err := q.GetCareLineForUpdate(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return CareLine{}, ErrCareLineNotFound
 		}
-		return CareLine{}, fmt.Errorf("carregar linha: %w", err)
+		return CareLine{}, fmt.Errorf("travar linha: %w", err)
 	}
 	if line.Status != careLineStatusDraft {
 		return CareLine{}, ErrCareLinePublished
 	}
 
-	items, err := s.q.ListItemsByCareLine(ctx, id)
+	items, err := q.ListItemsByCareLine(ctx, id)
 	if err != nil {
 		return CareLine{}, fmt.Errorf("listar itens: %w", err)
 	}
-	ruleRows, err := s.q.ListRulesByCareLine(ctx, id)
+	ruleRows, err := q.ListRulesByCareLine(ctx, id)
 	if err != nil {
 		return CareLine{}, fmt.Errorf("listar regras: %w", err)
 	}
@@ -344,15 +354,19 @@ func (s *CareLineStore) Publish(ctx context.Context, id uuid.UUID, now time.Time
 		return CareLine{}, ErrCareLineInvalid{Errors: problems}
 	}
 
-	n, err := s.q.PublishCareLine(ctx, gen.PublishCareLineParams{
+	n, err := q.PublishCareLine(ctx, gen.PublishCareLineParams{
 		ID: id, PublishedAt: pgtype.Timestamptz{Time: now, Valid: true},
 	})
 	if err != nil {
 		return CareLine{}, fmt.Errorf("publicar linha: %w", err)
 	}
 	if n == 0 {
-		// O guard status='draft' não casou: alguém publicou entre a leitura e aqui.
+		// O guard status='draft' não casou: a linha travada não era mais draft.
 		return CareLine{}, ErrCareLinePublished
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return CareLine{}, fmt.Errorf("commit: %w", err)
 	}
 	return s.Get(ctx, id)
 }

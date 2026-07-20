@@ -103,6 +103,10 @@ down: ## Derruba a infraestrutura local
 logs: ## Mostra logs dos containers
 	$(COMPOSE) logs -f
 
+.PHONY: seed-legacy-slots
+seed-legacy-slots: ## Semeia shifts/slots futuros no mock do legado (idempotente)
+	docker exec -i renovi-mysql-legacy mysql -uroot -proot renovi_legacy < deploy/mysql-legacy/seed-slots.sql
+
 # ---------------------------------------------------------------------------
 # Front-end (web)
 # ---------------------------------------------------------------------------

@@ -92,12 +92,20 @@ type Querier interface {
 	// alguém esquecer o WHERE do dono na próxima rota e devolver a consulta de
 	// terceiro — e aqui a consulta carrega o link da sala.
 	GetAppointmentForAccount(ctx context.Context, arg GetAppointmentForAccountParams) (Appointment, error)
+	// Leitura por id SEM dono: EXCLUSIVA do endpoint interno de teste (force-status),
+	// que é gated por ambiente (RENOVI_TEST_ENDPOINTS), não por sessão — lá não há
+	// paciente para conferir. Toda rota de paciente usa a versão ForPatient acima.
+	GetCareAppointment(ctx context.Context, id uuid.UUID) (CareAppointment, error)
 	// O outro lado da idempotência: se a key já existe na matrícula, o handler devolve
 	// a consulta que já foi criada em vez de tentar (e falhar no índice único).
 	GetCareAppointmentByIdemKey(ctx context.Context, arg GetCareAppointmentByIdemKeyParams) (CareAppointment, error)
 	// Por (id, dono), via a matrícula. Nunca só por id.
 	GetCareAppointmentForPatient(ctx context.Context, arg GetCareAppointmentForPatientParams) (CareAppointment, error)
 	GetCareLine(ctx context.Context, id uuid.UUID) (CareLine, error)
+	// Trava a linha para publicar. O Publish valida o template inteiro e vira o status
+	// na MESMA transação; o FOR UPDATE serializa dois publishes concorrentes da mesma
+	// linha — o segundo espera e encontra o status já fora de 'draft'.
+	GetCareLineForUpdate(ctx context.Context, id uuid.UUID) (CareLine, error)
 	GetEnrollment(ctx context.Context, id uuid.UUID) (Enrollment, error)
 	// Sempre por (id, dono). Nunca só por id: evita que a próxima rota devolva a
 	// matrícula de terceiro por esquecer o WHERE do paciente.

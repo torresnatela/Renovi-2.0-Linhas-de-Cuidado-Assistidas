@@ -371,13 +371,209 @@ calendário civil (semana ISO/mês civil, sem acúmulo)" caiu — o martelo bate
 janela móvel. Os demais pontos do ADR-009 (auto-conclusão, antecedência de
 cancelamento, ativação manual) seguem valendo até serem martelados.
 
+## ADR-021 — Jornada do paciente: elegibilidade no servidor, agendamento idempotente com compensação, expiração lazy
+
+**Contexto:** a Fase 6 do Slice 1 liga o motor puro (`models/careline`) ao
+booking existente (`models/appointment.go`) nas rotas `/me/*`. Três problemas
+inevitáveis: (1) o front poderia "confiar" no veredito que ele mesmo exibiu;
+(2) o POST de agendamento fala com a DAV (lenta, insondável) e o duplo-clique
+criaria duas consultas REAIS; (3) matrícula vencida só é verdade depois que
+alguém a expira — e não há cron ainda.
+
+**Decisão:**
+- **Elegibilidade é SEMPRE reavaliada no servidor**, no instante do slot
+  (`Evaluate(intendedAt = slot.StartsAt)`), ANTES de tocar o booking. Motor
+  barrou → 422 com `blocks[]` completos e reason `ELIGIBILITY_BLOCKED`; o front
+  só exibe.
+- **Idempotência por `Idempotency-Key`** (header obrigatório, 400 sem ele) via
+  índice único parcial `ux_care_appt_idem (enrollment_id, idempotency_key)`.
+  Replay → 200 com a MESMA consulta. **Corrida** de duas requisições com a mesma
+  key: o índice escolhe o vencedor dentro do `CreateScheduled`; o perdedor
+  **compensa o booking que criou** (`BookingStore.Cancel`, log ERROR se falhar)
+  e devolve o vencedor como replay. A corrida é reconhecida PELO NOME da
+  constraint — outra unique violation é bug, não replay.
+- **Expiração LAZY**: toda leitura da jornada que encontra matrícula `ativa` com
+  `valid_until` no passado a expira na hora (`ExpireEnrollment` + evento
+  `matricula_expirada` actor=`sistema`, na MESMA TX, `FOR UPDATE` contra
+  corrida; idempotente — 0 linhas = sem evento). O futuro cron do worker vira
+  otimização, não requisito de corretude.
+- **Toda escrita da jornada grava linha+evento na MESMA transação**
+  (`consulta_agendada`, `consulta_cancelada`, `consulta_status_forcado`), com
+  payloads como structs nomeadas (contrato de auditoria). O cancelamento grava o
+  bookkeeping (`hours_before`, `counts_for_quota` — a MESMA semântica do
+  `counts()` do motor, `dav_cancelled`/`dav_error`); dessincronia com o booking
+  (já cancelado lá) é tolerada com log ERROR: o paciente não fica preso.
+- **`/internal/appointments/{id}/force-status`** só EXISTE quando
+  `RENOVI_TEST_ENDPOINTS` (proibido em produção pela config); sem sessão — o
+  gate é o ambiente. Ganhou a única query por id sem dono
+  (`GetCareAppointment`), exclusiva dessa rota.
+- **Rate limit do POST /me/appointments por CONTA** (`rateLimitByAccount`,
+  mesmos parâmetros do POST /appointments), pela razão do ADR-019 — a rota é
+  autenticada e IP sob NAT pune inocentes.
+
+**Consequência:** `JourneyStore` declara as duas interfaces que consome
+(ADR-012): `BookingService` (implementada pelo `*BookingStore` real — a jornada
+agenda PELO booking, um store só) e `journeyStorage` (implementada por
+`JourneyRepo` e por um fake em memória nos testes). O 422 de elegibilidade, o
+replay 200 e a compensação da corrida têm testes de unidade; atomicidade
+linha+evento, keyset de auditoria com empate de `occurred_at` e a expiração
+idempotente têm testes de integração contra Postgres real.
+
+**Consequência — LIMITAÇÃO ACEITA (corrida de quota entre keys DIFERENTES):**
+a idempotência (ADR-025) só neutraliza o duplo-clique da MESMA `Idempotency-Key`.
+Duas requisições `Schedule` CONCORRENTES com keys DIFERENTES **passam as duas pelo
+`Evaluate` antes de qualquer uma commitar o `CreateScheduled`** — cada uma lê um
+estado da jornada em que a outra consulta ainda não existe. Resultado: o paciente
+pode acabar com **max+1 numa janela de QUOTA**, ou **furar o MIN_INTERVAL** entre
+duas consultas do mesmo item. É uma corrida real, não coberta pelo índice único
+(que casa por key, e as keys são distintas). **Por que aceita:** serializar de
+verdade (um lock por matrícula segurado do `Evaluate` até o commit) conflita com a
+disciplina de **não segurar lock atravessando a chamada de ~29s à DAV** — o
+`Book` é lento e insondável, e prender uma linha esse tempo todo estrangularia o
+agendamento e arriscaria conexões presas. O **rate limit por conta**
+(`rateLimitByAccount`) REDUZ a janela — dois POSTs precisam chegar quase juntos —
+mas **não elimina**. **Opção do Slice 2:** reavaliar a elegibilidade DENTRO da TX
+do `CreateScheduled`, contra um snapshot `FOR UPDATE` das consultas da matrícula,
+e **compensar o booking** (`BookingStore.Cancel`) quando a segunda a commitar
+estourar a regra — exatamente como a corrida da MESMA key já compensa hoje.
+
+**Revisão pós-review (2026-07-19):**
+
+- **Renovação decide por TEMPO, não pelo flag `status`.** A expiração lazy só roda
+  nas leituras da JORNADA do paciente; o caminho ADMIN (`EnrollmentStore.Renew`)
+  nunca a dispara. Uma matrícula podia então estar `ativa`/`pausada` com
+  `valid_until` no passado, e renovar de forma CONTÍGUA a partir desse
+  `valid_until` velho gerava um período INTEIRO no passado (o paciente pagava por
+  dias já vencidos, sem que o CHECK `valid_until > valid_from` pegasse). `Renew`
+  agora reativa a partir de `now` sempre que a vigência já venceu
+  (`status == expirada` **ou** `valid_until <= now`). A afirmação "o cron vira
+  otimização, não requisito de corretude" só se sustenta porque essa decisão
+  passou a ser por tempo — antes era falsa no admin. Coberto por
+  `TestRenew_MatriculaVencidaSemMarcarExpirada_ReativaDeNow`.
+- **`Idempotency-Key` vinculada ao ITEM (ver ADR-025).** Reusar a MESMA key para
+  outro item da matrícula devolvia a consulta ERRADA como replay 200; agora vira
+  `422 IDEMPOTENCY_KEY_REUSE`.
+- **Seção crítica pós-`Book` desanexa do ctx da requisição** (`context.WithoutCancel`):
+  gravar a projeção e compensar a corrida de key rodavam no ctx do request, então
+  uma DESCONEXÃO do cliente (o duplo-clique num POST lento) deixava o booking REAL
+  órfão e travava o retry da mesma key em `ErrSlotTaken`. Com o detach a projeção e
+  a compensação completam mesmo sem o cliente. (Um CRASH do processo nessa janela
+  continua sem cobertura — só uma *intent* persistida ANTES do `Book` resolveria, o
+  que é mudança de schema; fica para o Slice 2.)
+- **`available_from` de QUOTA em janela super-lotada** (`n > max`) usava a consulta
+  mais antiga da janela + period — um instante que ainda estaria bloqueado. Agora
+  usa a `(n-max+1)`-ésima mais antiga da janela de âncora mais antiga (com `n == max`
+  é idêntico ao anterior, o que preserva a tabela T e o E2E semanal). Coberto por
+  `X05_quota_janela_super_lotada...` e pela mutação da janela do cenário C.
+
+## ADR-022 — Admin por token estático (RISCO ACEITO)
+
+**Contexto:** o Slice 1 não tem back-office. As rotas `/admin/care-lines*` e
+`/admin/enrollments*` (montar catálogo, publicar, matricular/renovar/encerrar)
+são operadas por gente do time via `curl`/`apps/api/docs/slice1.http`, fora de
+banda — nunca pela sessão do paciente.
+
+**Decisão:** um único token estático no header `X-Admin-Token`
+(`controllers/admin_middleware.go`), comparado em tempo constante
+(`crypto/subtle.ConstantTimeCompare`) com `RENOVI_ADMIN_TOKEN`. **Token vazio =
+rotas desligadas**: o middleware recusa qualquer requisição (inclusive header
+vazio, que casaria por acaso num compare de dois vazios). Ausente e errado
+respondem IGUAL (401 `ADMIN_TOKEN_INVALID`), para não dar oráculo pelo tempo nem
+pela mensagem. **Não há role de operador no schema** — o token é o único fator; o
+admin não é um usuário do banco.
+
+**Consequência — risco aceito:** é um segredo compartilhado, sem rotação, sem
+escopo por operação e **sem auditoria de QUEM operou** (o efeito fica no
+`journey_event` com `actor='admin'` genérico — `enrollment.go`). Mesma dívida do
+ADR-013 (fator de posse): aceitável no piloto, **revisar quando houver
+back-office** com login de operador. O token NUNCA é logado (`config.LogValue` só
+expõe `admin_token_set`).
+
+## ADR-023 — `care_appointment` separado da saga de booking (referência lógica, sem FK)
+
+**Contexto:** a tabela `appointment` (migration 0003) é o **espelho técnico** da
+saga MySQL+DAV do agendamento (ADR-011/016). A jornada clínica tem vocabulário
+(status em PT-BR) e ciclo de vida próprios, e não deve acoplar seu esquema ao da
+saga.
+
+**Decisão:** `care_appointment` (migration 0007) é a projeção clínica: status
+PT-BR (`agendada/confirmada/em_andamento/realizada/falta/cancelada`) e
+**`booking_id UUID NOT NULL` SEM FK** para `appointment`. A garantia "um booking,
+uma consulta de jornada" vem do índice único `ux_care_appt_booking`, não de uma
+FK que acoplaria os dois esquemas. O booking é consumido atrás da interface
+`BookingService`, **declarada no consumidor** (`models/care_journey.go`, ADR-012)
+e implementada pelo `*BookingStore` real.
+
+**Consequência — LIMITAÇÕES CONHECIDAS:**
+- **(a) Espelhos podem divergir** se a TX final falhar depois do `Book`: em
+  `Schedule`, se `CreateScheduled` falha após o booking já existir, há uma
+  consulta REAL na DAV sem projeção de jornada. Não há compensação segura
+  genérica — fica log ERROR com os ids (filosofia falha-fechada: gente resolve).
+- **(b) `CANCELLED` com slot retido fica órfão.** A fila do worker
+  (`ListPendingSlotRelease`, `queries/scheduling.sql`) hoje varre **só `FAILED`**
+  com `slot_held_at` e sem `slot_released_at`. Mas `releaseCancelledSlot`
+  (`appointment.go`) pode deixar uma consulta **`CANCELLED` com `slot_held_at` e
+  sem `slot_released_at`** quando o `ReleaseSlot` no legado falha — e essa linha
+  **não** entra na fila varrida. Fica órfã até o worker do Slice 2 cobrir
+  `CANCELLED`+held+not-released (o comentário do código já promete essa varredura;
+  a query ainda não a faz).
+
+## ADR-024 — Role `renovi_app` e `journey_event` append-only por PRIVILÉGIO de banco
+
+**Contexto:** o `journey_event` é a trilha de auditoria da jornada. Append-only
+por desenho (sem `updated_at`) não basta: um bug — ou um app comprometido — que
+emita `UPDATE`/`DELETE` reescreveria a história.
+
+**Decisão:** a migration 0008 cria o role `renovi_app` (num bloco `DO $$` — o DDL
+de role é string opaca para o sqlc) com os privilégios de DML e então **`REVOKE
+UPDATE, DELETE ON journey_event`**. A aplicação em runtime conecta como
+`renovi_app` (`RENOVI_CARE_DATABASE_URL`); as **migrations** rodam como OWNER
+(`renovi`), porque criam tabelas e o próprio role — via
+`RENOVI_CARE_MIGRATE_DATABASE_URL`, que **cai em `RENOVI_CARE_DATABASE_URL`**
+quando não definida (`config.go`; `cmd/migrate` usa a de migração, `cmd/api` a do
+app).
+
+**Consequência:** a trilha fica à prova de app comprometida — um `UPDATE`/`DELETE`
+em `journey_event` recebe SQLSTATE 42501, no banco, não por disciplina de código
+(mesmo espírito do CHECK `active_exige_vinculo_dav` e do grant do legado, ADR-014).
+Custo: a senha do role na migration é de DEV (bate com o compose/`.env`); em
+staging/produção o operador roda `ALTER ROLE renovi_app PASSWORD ...` com um
+segredo fora do controle de versão — **documentado no README do slice**
+(`apps/api/docs/SLICE1.md`).
+
+## ADR-025 — Idempotência do agendamento por coluna UNIQUE (sem tabela própria)
+
+**Contexto:** o `POST /me/appointments` fala com a DAV, que é lenta e insondável;
+o duplo-clique criaria duas consultas REAIS. O ADR-021 já registra o comportamento
+em runtime (motor antes do booking, replay 200, corrida compensada). Esta ADR
+registra a **decisão de schema** e o **limite** da idempotência.
+
+**Decisão:** nenhuma tabela de idempotency-keys. A chave mora numa **coluna** —
+`care_appointment.idempotency_key` — com **índice único PARCIAL por matrícula**
+(`ux_care_appt_idem (enrollment_id, idempotency_key) WHERE idempotency_key IS NOT
+NULL`, migration 0007). Replay da mesma key devolve a MESMA consulta com 200. A
+corrida de dois requests com a mesma key é decidida pelo próprio índice dentro do
+`CreateScheduled`; o perdedor **compensa o booking que criou** (`BookingStore.Cancel`,
+log ERROR se falhar) e devolve o vencedor como replay. A corrida é reconhecida
+PELO NOME da constraint — outra unique violation é bug, não replay.
+
+**Consequência:** a idempotência garante **um agendamento de jornada por key**;
+ela **não** torna a escrita na DAV idempotente — `POST /appointment` continua
+não-idempotente e insondável, e o fail-closed do ADR-011b/016 segue INTACTO
+(quem estoura no `Book` sobe o erro; a jornada não reescreve nem retenta a DAV).
+Parcial porque a maioria das linhas não traz key (nulos não colidem).
+
+**Revisão pós-review (2026-07-19):** o replay é VINCULADO ao item. A key vale por
+operação; reusá-la para OUTRO item da mesma matrícula devolvia a consulta do item
+A quando o cliente pediu o item B (confirmação de agendamento silenciosamente
+errada). O `Schedule` agora confere `care_appointment.care_line_item_id` contra o
+item pedido antes de replayar e, se divergir, responde `422 IDEMPOTENCY_KEY_REUSE`.
 ---
 
 > **Nota de numeração — Verificador Diário de Humor (Anexo C).** A feature do
-> Anexo C é desenvolvida no branch `feat/verificador-humor` (ramo do Slice 1). O
-> SDD do Slice 1 reserva ADR-021..024 para sua "Fase 10"; para não colidir, os
-> ADRs do Verificador de Humor começam em **ADR-030**. Reconciliar a numeração no
-> merge, se necessário.
+> Anexo C foi desenvolvida no branch `feat/verificador-humor` (ramo do Slice 1).
+> O Slice 1 usou ADR-021..025; para não colidir, os ADRs do Verificador de Humor
+> começam em **ADR-030**.
 
 ## ADR-030 — `care_line_item.kind` ganha ATIVIDADE (item não-consulta)
 

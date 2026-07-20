@@ -74,7 +74,7 @@ func run() error {
 		defer closeAgenda()
 	}
 
-	scheduling, schedulingReady, err := newSchedulingController(cfg, pool, agendaClient, logger)
+	scheduling, bookingStore, schedulingReady, err := newSchedulingController(cfg, pool, agendaClient, logger)
 	if err != nil {
 		return err
 	}
@@ -89,6 +89,10 @@ func run() error {
 		Checkins:    models.NewMoodCheckinStore(pool),
 	}
 	assessments := &controllers.AssessmentController{Assessments: models.NewAssessmentStore(pool)}
+
+	// A jornada agenda PELO booking: reusa o MESMO BookingStore do scheduling.
+	// Sem booking montado, não há jornada (nem endpoint interno de teste).
+	journey, internal := newJourneyControllers(cfg, pool, bookingStore, logger)
 
 	router := apihttp.NewRouter(apihttp.Deps{
 		Logger:  logger,
@@ -111,6 +115,8 @@ func run() error {
 		Mood:        mood,
 		Assessments: assessments,
 		CareAdmin:   careAdmin,
+		Journey:     journey,
+		Internal:    internal,
 		AdminToken:  cfg.AdminToken,
 		// O cadastro precisa de um teto maior que o de uma rota normal: ele
 		// espera a DAV de forma síncrona. Derivar do orçamento evita que os dois
@@ -226,15 +232,16 @@ func newAgendaClient(cfg config.Config, logger *slog.Logger) (*agenda.Client, fu
 }
 
 // newSchedulingController monta a cadeia do agendamento: legado + DAV -> models
-// -> controller. Recebe o cliente do legado já pronto (compartilhado) e devolve um
-// ping de readiness (nil se desligado).
+// -> controller. Recebe o cliente do legado já pronto (compartilhado) e devolve
+// TAMBÉM o BookingStore (a jornada agenda por ele — um store só, uma verdade só)
+// e um ping de readiness (nil se desligado).
 //
 // Sem cliente do legado ou sem credencial da DAV, devolve nil e o agendamento não
 // sobe — mesma política do cadastro sem credencial da DAV. Só acontece em `local`.
-func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, agendaClient *agenda.Client, logger *slog.Logger) (*controllers.SchedulingController, func(context.Context) error, error) {
+func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, agendaClient *agenda.Client, logger *slog.Logger) (*controllers.SchedulingController, *models.BookingStore, func(context.Context) error, error) {
 	if agendaClient == nil || cfg.DAVBaseURL == "" || cfg.DAVAPIKey == "" {
 		logger.Warn("rotas de agendamento DESLIGADAS: faltam RENOVI_LEGACY_DATABASE_URL ou credenciais da DAV")
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	davClient, err := dav.New(dav.Config{
@@ -245,7 +252,7 @@ func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, agendaClient
 		Logger:      logger,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// A política da janela é montada AQUI, e não na config, para que o pacote de
@@ -262,7 +269,36 @@ func newSchedulingController(cfg config.Config, pool *pgxpool.Pool, agendaClient
 		// certo. Manter os dois derivados da mesma fonte evita que divirjam.
 		BookDeadline: cfg.DAVTimeout + 30*time.Second,
 	}
-	return ctrl, agendaClient.Ping, nil
+	return ctrl, store, agendaClient.Ping, nil
+}
+
+// newJourneyControllers monta a jornada do paciente (/me/*) e, se o ambiente
+// permitir, o endpoint interno de teste. Os dois usam o MESMO JourneyStore.
+//
+//   - Journey só sobe quando o scheduling subiu (bookingStore != nil): a jornada
+//     agenda pelo booking, e sem ele /me/journey mentiria "pode agendar".
+//   - Internal só sobe com RENOVI_TEST_ENDPOINTS (proibido em produção pela
+//     config) — em produção a rota simplesmente não existe.
+func newJourneyControllers(cfg config.Config, pool *pgxpool.Pool, bookingStore *models.BookingStore, logger *slog.Logger) (*controllers.JourneyController, *controllers.InternalController) {
+	if bookingStore == nil {
+		logger.Warn("rotas da jornada DESLIGADAS: agendamento não montado (a jornada agenda pelo booking)")
+		return nil, nil
+	}
+
+	store := models.NewJourneyStore(models.NewJourneyRepo(pool), bookingStore, cfg.CancelCountThreshold, logger)
+	journey := &controllers.JourneyController{
+		Journeys: store,
+		// Mesma derivação do scheduling: o deadline de escrita precisa cobrir a
+		// chamada síncrona à DAV com folga sobre o timeout da rota.
+		BookDeadline: cfg.DAVTimeout + 30*time.Second,
+	}
+
+	var internal *controllers.InternalController
+	if cfg.TestEndpoints {
+		logger.Warn("rotas internas de TESTE ligadas (RENOVI_TEST_ENDPOINTS) — nunca use em produção")
+		internal = &controllers.InternalController{Journeys: store}
+	}
+	return journey, internal
 }
 
 // newCareAdminController monta as rotas /admin (catálogo + matrícula). Duas

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/renovisaude/renovi-care/internal/controllers"
 	"github.com/renovisaude/renovi-care/internal/models"
+	"github.com/renovisaude/renovi-care/internal/models/careline"
 )
 
 func TestRouter_Healthz(t *testing.T) {
@@ -116,4 +118,118 @@ func TestRouter_AdminLigado_SemToken_401(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// fakeInternalJourneys é o mínimo para a fiação de /internal (o mapeamento fino
+// é testado no pacote controllers).
+type fakeInternalJourneys struct{}
+
+func (fakeInternalJourneys) ForceStatus(context.Context, uuid.UUID, string, time.Time) (models.CareAppointment, error) {
+	return models.CareAppointment{Status: "realizada"}, nil
+}
+
+// Por default (sem Internal), as rotas internas NEM EXISTEM: 404. É o
+// comportamento de produção, onde a config proíbe RENOVI_TEST_ENDPOINTS.
+func TestRouter_InternalDesligadoPorDefault_404(t *testing.T) {
+	r := NewRouter(Deps{Version: "test"})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := http.Post(
+		srv.URL+"/api/v1/internal/appointments/"+uuid.NewString()+"/force-status",
+		"application/json", strings.NewReader(`{"status":"realizada"}`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// Com Internal injetado (RENOVI_TEST_ENDPOINTS), a rota existe e responde SEM
+// autenticação — o gate é o ambiente.
+func TestRouter_InternalLigado_200(t *testing.T) {
+	r := NewRouter(Deps{
+		Version:  "test",
+		Internal: &controllers.InternalController{Journeys: fakeInternalJourneys{}},
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := http.Post(
+		srv.URL+"/api/v1/internal/appointments/"+uuid.NewString()+"/force-status",
+		"application/json", strings.NewReader(`{"status":"realizada"}`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// Sem Journey injetado, /me/journey não existe (404) — mesmo com Auth montado o
+// grupo da jornada só sobe quando o main o construiu (exige o booking).
+func TestRouter_JourneyDesligado_404(t *testing.T) {
+	r := NewRouter(Deps{Version: "test"})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/me/journey")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// fakeRouterSessions/fakeRouterJourneys são o mínimo para a fiação: /me (auth) e
+// /me/journey (jornada) nascem em GROUPS diferentes do mesmo mux, e este teste
+// prova que convivem na trie do chi.
+type fakeRouterSessions struct{}
+
+func (fakeRouterSessions) Create(context.Context, uuid.UUID) (string, time.Time, error) {
+	return "tok", time.Now().Add(time.Hour), nil
+}
+func (fakeRouterSessions) Validate(context.Context, string) (models.Account, error) {
+	return models.Account{ID: uuid.New(), FullName: "Maria"}, nil
+}
+func (fakeRouterSessions) Revoke(context.Context, string) error { return nil }
+
+type fakeRouterJourneys struct{}
+
+func (fakeRouterJourneys) Journey(context.Context, models.Account, time.Time) ([]models.JourneyEnrollment, error) {
+	return []models.JourneyEnrollment{}, nil
+}
+func (fakeRouterJourneys) Eligibility(context.Context, models.Account, uuid.UUID, *time.Time, time.Time) (careline.Eligibility, error) {
+	return careline.Eligibility{Allowed: true}, nil
+}
+func (fakeRouterJourneys) Availability(context.Context, models.Account, uuid.UUID, *time.Time, *time.Time, time.Time) (models.CareAvailability, error) {
+	return models.CareAvailability{}, nil
+}
+func (fakeRouterJourneys) Schedule(context.Context, models.ScheduleInput) (models.CareAppointment, bool, error) {
+	return models.CareAppointment{}, false, nil
+}
+func (fakeRouterJourneys) CancelCare(context.Context, models.Account, uuid.UUID, time.Time) (models.CareAppointment, error) {
+	return models.CareAppointment{}, nil
+}
+func (fakeRouterJourneys) ListCare(context.Context, models.Account, *string) ([]models.CareAppointment, error) {
+	return []models.CareAppointment{}, nil
+}
+func (fakeRouterJourneys) Audit(context.Context, models.Account, *string, int) (models.CareAuditPage, error) {
+	return models.CareAuditPage{}, nil
+}
+func (fakeRouterJourneys) Location() *time.Location { return time.UTC }
+
+func TestRouter_JourneyLigado_MeEJornadaConvivem(t *testing.T) {
+	auth := &controllers.AuthController{Sessions: fakeRouterSessions{}}
+	journey := &controllers.JourneyController{Journeys: fakeRouterJourneys{}}
+	r := NewRouter(Deps{Version: "test", Auth: auth, Journey: journey})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	get := func(path string) int {
+		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: controllers.SessionCookieName, Value: "tok"})
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	assert.Equal(t, http.StatusOK, get("/api/v1/me"), "/me (auth) continua vivo")
+	assert.Equal(t, http.StatusOK, get("/api/v1/me/journey"), "/me/journey (jornada) montado junto")
+	assert.Equal(t, http.StatusOK, get("/api/v1/me/audit"))
 }

@@ -8,6 +8,7 @@ package testsupport
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -39,8 +40,17 @@ func StartPostgres(t *testing.T) string {
 // append-only de journey_event vale no banco — ver approle_integration_test.go.
 func StartPostgresDSNs(t *testing.T) (superDSN, appDSN string) {
 	t.Helper()
-	ctx := context.Background()
 
+	superDSN, appDSN, stop, err := StartPostgresSharedDSNs(context.Background())
+	require.NoError(t, err, "subir container postgres")
+	t.Cleanup(func() { _ = stop() })
+	return superDSN, appDSN
+}
+
+// StartPostgresSharedDSNs é o StartPostgresDSNs sem *testing.T, para ser chamado
+// de um TestMain e compartilhado por todos os testes do pacote (mesmo racional do
+// StartMySQLShared). Quem chama é dono de chamar o `stop`.
+func StartPostgresSharedDSNs(ctx context.Context) (superDSN, appDSN string, stop func() error, err error) {
 	container, err := postgres.Run(ctx,
 		"postgres:16-alpine",
 		postgres.WithDatabase("renovi_care"),
@@ -52,20 +62,25 @@ func StartPostgresDSNs(t *testing.T) (superDSN, appDSN string) {
 				WithStartupTimeout(60*time.Second),
 		),
 	)
-	require.NoError(t, err, "subir container postgres")
-
-	t.Cleanup(func() {
-		_ = container.Terminate(context.Background())
-	})
+	if err != nil {
+		return "", "", nil, fmt.Errorf("subir container postgres: %w", err)
+	}
+	stop = func() error { return container.Terminate(context.Background()) }
 
 	superDSN, err = container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err, "obter connection string")
+	if err != nil {
+		_ = stop()
+		return "", "", nil, fmt.Errorf("obter connection string: %w", err)
+	}
 
-	require.NoError(t, db.MigrateUp(superDSN), "aplicar migrations")
+	if err := db.MigrateUp(superDSN); err != nil {
+		_ = stop()
+		return "", "", nil, fmt.Errorf("aplicar migrations: %w", err)
+	}
 
 	// A migration 0008 criou renovi_app com senha 'renovi_app'. O appDSN é o
 	// superDSN com o par usuário:senha trocado — só a credencial (userinfo) muda,
 	// nunca o dbname 'renovi_care' (que não contém 'renovi:renovi@').
 	appDSN = strings.Replace(superDSN, "renovi:renovi@", "renovi_app:renovi_app@", 1)
-	return superDSN, appDSN
+	return superDSN, appDSN, stop, nil
 }

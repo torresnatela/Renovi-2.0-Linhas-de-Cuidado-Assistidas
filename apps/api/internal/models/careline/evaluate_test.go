@@ -374,6 +374,37 @@ func TestEvaluate_TabelaNormativa(t *testing.T) {
 				assert.Equal(t, "Sua matrícula está pausada", b.Reason)
 			},
 		},
+		{
+			name: "X04_prerequisite_futuro_nao_satisfaz",
+			// A consulta do pré-requisito está agendada 35d DEPOIS do horário
+			// pretendido: "realize primeiro" é uma janela retroativa, então uma
+			// consulta futura não pode satisfazê-la.
+			j: activeJourney(careline.JourneyAppointment{
+				ItemRef: "psiquiatria", Status: careline.StatusRealizada,
+				ScheduledAt: day(5).AddDate(0, 0, 35),
+			}),
+			rules:      []careline.Rule{prerequisite("psiquiatria", careline.StatusRealizada, 90)},
+			intendedAt: day(5),
+			wantTypes:  []string{careline.RulePrerequisite},
+			check: func(t *testing.T, got careline.Eligibility) {
+				b := findBlock(got, careline.RulePrerequisite)
+				require.NotNil(t, b)
+				assert.Nil(t, b.AvailableFrom, "depende de ação, não de tempo")
+			},
+		},
+		{
+			name: "X05_quota_janela_super_lotada_available_from_pela_max_esima",
+			// count > max na janela (config reduzida/dados migrados): a vaga abre
+			// quando a (max)-ésima consulta mais recente envelhece — d06 + 30d —,
+			// NÃO a mais antiga (d05). d05+30d ainda estaria bloqueado.
+			j:          activeJourney(agendada(5), agendada(6)),
+			rules:      []careline.Rule{quotaMonthly(1)},
+			intendedAt: day(7),
+			wantTypes:  []string{careline.RuleQuota},
+			check: func(t *testing.T, got careline.Eligibility) {
+				requireAvailableFrom(t, findBlock(got, careline.RuleQuota), day(6).Add(careline.MonthWindow))
+			},
+		},
 	}
 
 	for _, tt := range tests {

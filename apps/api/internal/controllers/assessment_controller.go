@@ -11,7 +11,6 @@ import (
 
 	"github.com/renovisaude/renovi-care/internal/http/api"
 	"github.com/renovisaude/renovi-care/internal/models"
-	"github.com/renovisaude/renovi-care/internal/models/careline"
 )
 
 // AssessmentService é o que o controller precisa dos anéis periódicos (WHO-5/PHQ-4).
@@ -89,26 +88,6 @@ func (c AssessmentController) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, toAPIAssessmentResult(res))
-}
-
-func toAPIEligibility(e careline.Eligibility) api.Eligibility {
-	blocks := make([]api.EligibilityBlock, 0, len(e.Blocks))
-	for _, b := range e.Blocks {
-		blocks = append(blocks, api.EligibilityBlock{
-			RuleType:      api.EligibilityBlockRuleType(b.RuleType),
-			Reason:        b.Reason,
-			AvailableFrom: b.AvailableFrom,
-		})
-	}
-	return api.Eligibility{Allowed: e.Allowed, Blocks: blocks}
-}
-
-func toProblemBlocks(bs []careline.Block) []ProblemBlock {
-	out := make([]ProblemBlock, 0, len(bs))
-	for _, b := range bs {
-		out = append(out, ProblemBlock{RuleType: b.RuleType, Reason: b.Reason, AvailableFrom: b.AvailableFrom})
-	}
-	return out
 }
 
 func toAPIAssessmentAvailability(a models.AssessmentAvailability) api.AssessmentAvailability {

@@ -197,39 +197,38 @@ func quotaBlock(j Journey, item Item, p QuotaParams, intendedAt time.Time, thres
 		return !t.Before(w.start) && t.Before(end)
 	}
 
-	// Entre as janelas bloqueantes, fica a de âncora mais antiga; AvailableFrom
-	// é a consulta mais antiga dela + period (quando essa consulta "sai" da
-	// janela, abre vaga).
+	// Entre as janelas que bloqueiam, fica a de ÂNCORA mais antiga; AvailableFrom é
+	// quando ELA libera. A vaga só abre quando consultas suficientes "saem" da
+	// janela: é preciso esperar a (max)-ésima mais RECENTE envelhecer, ou seja, a
+	// (n-max+1)-ésima mais ANTIGA da janela + period. Com n == max isso é a mais
+	// antiga + period (preserva T02/T03/T18 e o E2E semanal); só diverge quando a
+	// janela está super-lotada (n > max: config reduzida, override, dados migrados),
+	// caso em que a mais antiga + period ainda estaria bloqueado.
 	var blocking *window
-	var oldestInBlocking time.Time
+	var af time.Time
 	for i := range wins {
 		w := wins[i]
 		if !contains(w, intendedAt) {
 			continue
 		}
-		n := 0
-		var oldest time.Time
+		var inWin []time.Time // consultas da janela em ordem crescente (cand já ordenado)
 		for _, c := range cand {
 			if contains(w, c) {
-				n++
-				if oldest.IsZero() || c.Before(oldest) {
-					oldest = c
-				}
+				inWin = append(inWin, c)
 			}
 		}
-		if n < p.Max {
+		if len(inWin) < p.Max {
 			continue
 		}
 		if blocking == nil || w.start.Before(blocking.start) {
 			ww := w
 			blocking = &ww
-			oldestInBlocking = oldest
+			af = inWin[len(inWin)-p.Max].Add(period)
 		}
 	}
 	if blocking == nil {
 		return nil
 	}
-	af := oldestInBlocking.Add(period)
 	return &Block{
 		RuleType: RuleQuota,
 		Reason: fmt.Sprintf("Você atingiu o limite de %d consulta(s) por %s. Disponível a partir de %s",
@@ -291,7 +290,11 @@ func maxAdvanceBlock(p MaxAdvanceParams, intendedAt, now time.Time) *Block {
 func prerequisiteBlock(j Journey, p PrerequisiteParams, intendedAt time.Time) *Block {
 	cutoff := intendedAt.Add(-time.Duration(p.WithinDays) * 24 * time.Hour)
 	for _, a := range j.Appointments {
-		if a.ItemRef == p.ItemRef && a.Status == p.Status && !a.ScheduledAt.Before(cutoff) {
+		// Janela RETROATIVA [intendedAt-within, intendedAt]: uma consulta do
+		// pré-requisito marcada DEPOIS do horário pretendido não satisfaz
+		// "realize primeiro" — o limite superior é tão obrigatório quanto o cutoff.
+		if a.ItemRef == p.ItemRef && a.Status == p.Status &&
+			!a.ScheduledAt.Before(cutoff) && !a.ScheduledAt.After(intendedAt) {
 			return nil
 		}
 	}

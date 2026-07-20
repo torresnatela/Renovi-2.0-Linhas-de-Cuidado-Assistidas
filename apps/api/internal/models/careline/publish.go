@@ -27,14 +27,14 @@ func ValidatePublish(items []Item, rules map[string][]Rule, specialtyNames []str
 	// normalizada: maiúsculas, sem acentos, sem espaços nas pontas).
 	known := make(map[string]bool, len(specialtyNames))
 	for _, n := range specialtyNames {
-		known[normalizeSpecialty(n)] = true
+		known[NormalizeSpecialty(n)] = true
 	}
 	for _, it := range items {
 		// Atividades (ex.: check-in de humor) não têm especialidade — pula a checagem.
 		if it.Kind == KindAtividade {
 			continue
 		}
-		if !known[normalizeSpecialty(it.SpecialtyCode)] {
+		if !known[NormalizeSpecialty(it.SpecialtyCode)] {
 			errs = append(errs, fmt.Sprintf(
 				"item %q: especialidade %q não encontrada no legado", it.Ref, it.SpecialtyCode))
 		}
@@ -128,9 +128,11 @@ var accentFold = map[rune]rune{
 	'Ç': 'C',
 }
 
-// normalizeSpecialty compara código/nome de especialidade de forma tolerante:
-// "PSICOLOGIA" casa "Psicologia"; "NUTRICAO" casa "Nutrição".
-func normalizeSpecialty(s string) string {
+// NormalizeSpecialty compara código/nome de especialidade de forma tolerante:
+// "PSICOLOGIA" casa "Psicologia"; "NUTRICAO" casa "Nutrição". Exportada porque a
+// jornada resolve a especialidade do item contra o catálogo do legado com a MESMA
+// normalização do publish — duas cópias divergiriam no primeiro acento.
+func NormalizeSpecialty(s string) string {
 	s = strings.ToUpper(strings.TrimSpace(s))
 	var b strings.Builder
 	b.Grow(len(s))

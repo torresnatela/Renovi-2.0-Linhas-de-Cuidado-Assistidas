@@ -171,6 +171,25 @@ func (s *BookingStore) ListSlotPage(ctx context.Context, professionalID string, 
 
 func (s *BookingStore) Location() *time.Location { return s.agenda.Location() }
 
+// SlotInfo resolve um horário (slot + profissional + especialidade) SEM reservar
+// nada. Existe para a jornada conhecer o starts_at do slot antes de rodar o motor
+// de elegibilidade — o Book revalida tudo de novo, então isto é só leitura.
+// Delegado ao LoadBooking do adapter, com o MESMO mapeamento de erros do Book.
+func (s *BookingStore) SlotInfo(ctx context.Context, slotID, specialtyID string) (agenda.Booking, error) {
+	booking, err := s.agenda.LoadBooking(ctx, slotID, specialtyID)
+	switch {
+	case errors.Is(err, agenda.ErrSlotNotFound):
+		return agenda.Booking{}, ErrSlotNotFound
+	case errors.Is(err, agenda.ErrSpecialtyMismatch):
+		return agenda.Booking{}, ErrSpecialtyMismatch
+	case errors.Is(err, agenda.ErrSpecialtyInactive):
+		return agenda.Booking{}, ErrSpecialtyInactive
+	case err != nil:
+		return agenda.Booking{}, err
+	}
+	return booking, nil
+}
+
 // ---------------------------------------------------------------------------
 // A saga
 // ---------------------------------------------------------------------------
@@ -505,7 +524,10 @@ func (s *BookingStore) releaseCancelledSlot(ctx context.Context, id uuid.UUID, s
 	ctx, cancel := detach(ctx)
 	defer cancel()
 	if err := s.agenda.ReleaseSlot(ctx, slotID); err != nil {
-		s.logger.WarnContext(ctx, "agendamento: consulta cancelada mas horário não devolvido — o worker tenta de novo",
+		// ERROR e não WARN: esta é a ÚNICA sinalização de um slot vazando (retido no
+		// legado sem consulta viva). O worker ainda não varre CANCELLED+held (ADR-023),
+		// então até lá este log é o que um humano precisa ver para soltar o horário.
+		s.logger.ErrorContext(ctx, "agendamento: consulta cancelada mas horário não devolvido — o worker tenta de novo",
 			"appointment_id", id, "slot_id", slotID, "error", err.Error())
 		return
 	}

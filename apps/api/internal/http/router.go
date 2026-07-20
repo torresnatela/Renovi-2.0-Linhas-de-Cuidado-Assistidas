@@ -39,6 +39,14 @@ type Deps struct {
 	// RENOVI_ADMIN_TOKEN ou sem agenda para validar o publish). NÃO depende de Auth:
 	// autentica pelo token de admin, nunca pela sessão do paciente.
 	CareAdmin *controllers.CareLineAdminController
+	// Journey monta as rotas /me/* da jornada (linhas de cuidado). Nil desliga.
+	// Depende de Auth (sessão) e só é montado pelo main quando o scheduling
+	// existe — a jornada agenda PELO booking.
+	Journey *controllers.JourneyController
+	// Internal monta as rotas /internal/* de teste. Nil desliga — e em produção
+	// é SEMPRE nil (config recusa RENOVI_TEST_ENDPOINTS lá). Sem RequireSession:
+	// o gate é o ambiente.
+	Internal *controllers.InternalController
 	// AdminToken é o token estático exigido pelas rotas /admin (header
 	// X-Admin-Token). Só é usado quando CareAdmin != nil.
 	AdminToken string
@@ -115,6 +123,11 @@ func NewRouter(d Deps) *chi.Mux {
 			if d.Assessments != nil {
 				mountAssessments(r, *d.Assessments, *d.Auth)
 			}
+
+			// A jornada (/me/*) também é toda atrás de sessão.
+			if d.Journey != nil {
+				mountJourney(r, *d.Journey, *d.Auth, d.BookTimeout)
+			}
 		}
 
 		// As rotas /admin NÃO dependem de Auth: autenticam pelo token de admin, não
@@ -123,8 +136,12 @@ func NewRouter(d Deps) *chi.Mux {
 		if d.CareAdmin != nil {
 			mountCareAdmin(r, *d.CareAdmin, d.AdminToken)
 		}
-		// TODO(mvp): /me/eligibility entra aqui, filtrando ANTES do agendamento.
-		// Ver packages/contracts/openapi.yaml e docs/PROGRESSO.md.
+
+		// As rotas internas de teste só EXISTEM quando o main as montou
+		// (RENOVI_TEST_ENDPOINTS): em produção respondem 404 por ausência.
+		if d.Internal != nil {
+			mountInternal(r, *d.Internal)
+		}
 	})
 
 	return r
@@ -200,6 +217,43 @@ func mountAssessments(r chi.Router, c controllers.AssessmentController, auth con
 		r.Use(controllers.RequireSession(auth.Sessions))
 		r.Get("/me/assessments/{codigo}", c.GetAvailability)
 		r.Post("/me/assessments", c.Submit)
+	})
+}
+
+// mountJourney monta a jornada do paciente (/me/*), toda atrás de sessão.
+func mountJourney(r chi.Router, j controllers.JourneyController, auth controllers.AuthController, bookTimeout time.Duration) {
+	r.Group(func(r chi.Router) {
+		r.Use(controllers.RequireSession(auth.Sessions))
+
+		// Leituras e cancelamento: Postgres próprio + leituras do legado.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(defaultRouteTimeout))
+			r.Get("/me/journey", j.GetJourney)
+			r.Get("/me/eligibility", j.GetEligibility)
+			r.Get("/me/availability", j.GetAvailability)
+			r.Get("/me/appointments", j.ListCareAppointments)
+			r.Post("/me/appointments/{care_appointment_id}/cancel", j.CancelCareAppointment)
+			r.Get("/me/audit", j.GetAudit)
+		})
+
+		// Agendar pela jornada tem o MESMO perfil do POST /appointments: fala com
+		// a DAV de forma síncrona (timeout próprio) e é a rota mais cara — rate
+		// limit por conta, com os mesmos parâmetros do booking.
+		r.Group(func(r chi.Router) {
+			r.Use(rateLimitByAccount(20, 1.0/3.0))
+			r.Use(middleware.Timeout(bookTimeout))
+			r.Post("/me/appointments", j.CreateCareAppointment)
+		})
+	})
+}
+
+// mountInternal monta as rotas internas de teste. SEM RequireSession: o gate é
+// de AMBIENTE (o main só as monta com RENOVI_TEST_ENDPOINTS, proibido em
+// produção pela config).
+func mountInternal(r chi.Router, c controllers.InternalController) {
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+		r.Post("/internal/appointments/{care_appointment_id}/force-status", c.ForceStatus)
 	})
 }
 

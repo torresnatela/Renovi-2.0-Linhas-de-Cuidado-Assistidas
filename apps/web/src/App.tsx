@@ -4,6 +4,9 @@ import { LoginPage } from './features/auth/LoginPage';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { RegisterPage } from './features/auth/RegisterPage';
 import { HomePage } from './features/home/HomePage';
+import { CareAppointmentsPage } from './features/journey/CareAppointmentsPage';
+import { JourneyPage } from './features/journey/JourneyPage';
+import { ScheduleCarePage } from './features/journey/ScheduleCarePage';
 import { MoodPage } from './features/mood/MoodPage';
 import { AppointmentPage, AppointmentsPage } from './features/scheduling/AppointmentsPage';
 import { ProfessionalPickerPage, SpecialtyPickerPage } from './features/scheduling/SchedulingPages';
@@ -62,6 +65,15 @@ export default function App() {
 
               {/* Verificador Diário de Humor (Anexo C). */}
               <Route path="/humor" element={<MoodPage />} />
+
+              {/*
+                Minha jornada (SPEC §7): a linha de cuidado do paciente. O agendar
+                é por ITEM da linha (passa pelo motor de elegibilidade), distinto do
+                wizard de /agendar (booking cru por especialidade).
+              */}
+              <Route path="/jornada" element={<JourneyPage />} />
+              <Route path="/jornada/agendar/:itemId" element={<ScheduleCarePage />} />
+              <Route path="/jornada/consultas" element={<CareAppointmentsPage />} />
             </Route>
 
             <Route path="*" element={<NaoEncontrada />} />

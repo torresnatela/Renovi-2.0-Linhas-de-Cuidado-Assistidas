@@ -22,6 +22,12 @@ WHERE code = $1;
 -- name: GetCareLine :one
 SELECT * FROM care_line WHERE id = $1;
 
+-- name: GetCareLineForUpdate :one
+-- Trava a linha para publicar. O Publish valida o template inteiro e vira o status
+-- na MESMA transação; o FOR UPDATE serializa dois publishes concorrentes da mesma
+-- linha — o segundo espera e encontra o status já fora de 'draft'.
+SELECT * FROM care_line WHERE id = $1 FOR UPDATE;
+
 -- name: ListCareLinesByCode :many
 -- Todas as versões de um code, da mais nova para a mais antiga.
 SELECT * FROM care_line

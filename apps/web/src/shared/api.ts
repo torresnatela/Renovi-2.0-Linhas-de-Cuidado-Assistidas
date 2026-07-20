@@ -54,6 +54,13 @@ export class ApiError extends Error {
     readonly detail?: string,
     /** Presente quando a API quer que o cliente DECIDA algo, e não só exiba. */
     readonly reason?: Reason,
+    /**
+     * Os bloqueios do motor de elegibilidade — presentes SÓ no 422 de agendamento
+     * de linha (ELIGIBILITY_BLOCKED). Cada um traz uma frase JÁ pronta (`reason`) e,
+     * quando o desbloqueio depende do relógio, o `available_from`. É extensão da
+     * RFC 7807 (§3.2), espelhada aqui como o `reason` já é.
+     */
+    readonly blocks?: EligibilityBlock[],
   ) {
     // `detail` já é a frase pronta para o usuário — a API a escreve pensando
     // nele, e é ela que distingue "e-mail já em uso" de "dados inválidos".
@@ -74,7 +81,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const problem = await res.json().catch(() => null);
-    throw new ApiError(res.status, problem?.title ?? 'erro', problem?.detail, problem?.reason);
+    throw new ApiError(
+      res.status,
+      problem?.title ?? 'erro',
+      problem?.detail,
+      problem?.reason,
+      problem?.blocks,
+    );
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -243,9 +256,9 @@ export interface MoodCheckin {
 
 export type MoodReason = 'consent_required' | 'not_enrolled';
 
-/** O check-in de hoje (ou nulo) e a elegibilidade do paciente. */
 export type AssessmentCode = 'WHO5' | 'PHQ4';
 
+/** O check-in de hoje (ou nulo) e a elegibilidade do paciente. */
 export interface MoodToday {
   dia: string;
   can_checkin: boolean;
@@ -257,13 +270,32 @@ export interface MoodToday {
   escalate?: boolean;
 }
 
-/** Um bloqueio do motor, JÁ pronto para exibir (o front não recalcula). */
+// ---------------------------------------------------------------------------
+// Jornada (linha de cuidado) — rotas /me/*
+// ---------------------------------------------------------------------------
+
+/**
+ * Qual regra barrou o item. VIGENCIA é da MATRÍCULA (fora do período de
+ * validade); as outras quatro são regras do template. O front reage por CÓDIGO
+ * (não por texto) quando quer — o `reason` do bloco já é a frase pronta.
+ */
+export type EligibilityRuleType = 'VIGENCIA' | 'QUOTA' | 'MIN_INTERVAL' | 'MAX_ADVANCE' | 'PREREQUISITE';
+
+/**
+ * Um motivo, JÁ PRONTO PARA EXIBIR, de o motor ter barrado um item.
+ *
+ * `reason` é escrito pelo servidor pensando no paciente — NÃO se re-traduz aqui
+ * (ao contrário do `Reason.code` dos erros). `available_from` só vem quando o
+ * desbloqueio depende do relógio (cota, intervalo, antecedência); um pré-requisito
+ * não tem data.
+ */
 export interface EligibilityBlock {
-  rule_type: string;
+  rule_type: EligibilityRuleType;
   reason: string;
-  available_from?: string | null;
+  available_from?: string;
 }
 
+/** O veredito do motor para UM item: `allowed`, e o porquê do não em `blocks`. */
 export interface Eligibility {
   allowed: boolean;
   blocks: EligibilityBlock[];
@@ -354,3 +386,166 @@ export const recordMoodCheckin = (body: {
 }) => request<MoodCheckin>('/me/mood/checkin', { method: 'POST', body: JSON.stringify(body) });
 
 export const getMoodHistory = () => request<MoodCheckin[]>('/me/mood/history');
+
+/**
+ * Um passo da linha (no Slice 1, sempre uma CONSULTA). `ref` é o código estável
+ * dentro da linha (o que os pré-requisitos referenciam), distinto do `id` (UUID).
+ */
+export interface CareLineItemInfo {
+  id: string;
+  ref: string;
+  kind: 'CONSULTA';
+  specialty_code: string;
+  label: string;
+  /** Cadência em texto livre, só informativa. As regras que valem vêm no motor. */
+  recurrence?: string | null;
+  sort_order: number;
+}
+
+export interface JourneyItem {
+  item: CareLineItemInfo;
+  eligibility: Eligibility;
+}
+
+export interface EnrollmentPeriod {
+  id: string;
+  starts_at: string;
+  ends_at: string;
+  source: 'admin';
+}
+
+export type EnrollmentStatus = 'ativa' | 'pausada' | 'concluida' | 'encerrada' | 'expirada';
+
+/** O vínculo do paciente a uma versão publicada da linha. */
+export interface Enrollment {
+  id: string;
+  care_line_code: string;
+  care_line_version: number;
+  status: EnrollmentStatus;
+  valid_from: string;
+  valid_until: string;
+  periods: EnrollmentPeriod[];
+}
+
+export type JourneyEventType =
+  | 'matricula_criada'
+  | 'matricula_renovada'
+  | 'matricula_expirada'
+  | 'matricula_encerrada'
+  | 'consulta_agendada'
+  | 'consulta_cancelada'
+  | 'consulta_status_forcado';
+
+export type JourneyActor = 'paciente' | 'sistema' | 'admin';
+
+/** Um fato da jornada (event log append-only). `payload` varia por tipo. */
+export interface JourneyEvent {
+  id: string;
+  event_type: JourneyEventType;
+  actor: JourneyActor;
+  occurred_at: string;
+  payload: Record<string, unknown>;
+}
+
+/** Uma matrícula pronta para a tela: matrícula + nome + itens avaliados + eventos. */
+export interface JourneyEnrollment {
+  enrollment: Enrollment;
+  care_line_name: string;
+  items: JourneyItem[];
+  recent_events: JourneyEvent[];
+}
+
+export interface Journey {
+  enrollments: JourneyEnrollment[];
+}
+
+export type CareAppointmentStatus =
+  | 'agendada'
+  | 'confirmada'
+  | 'em_andamento'
+  | 'realizada'
+  | 'falta'
+  | 'cancelada';
+
+/**
+ * A consulta de um item da linha, na visão da JORNADA — distinta de `Appointment`
+ * (o booking). `booking_id` é a ponte: é o `id` usado em /appointments/{id} e
+ * .../join. `time_zone` segue a mesma regra do Slot (exibir no fuso da agenda).
+ */
+export interface CareAppointment {
+  id: string;
+  item_ref: string;
+  label: string;
+  status: CareAppointmentStatus;
+  scheduled_at: string;
+  time_zone: string;
+  cancelled_at?: string;
+  booking_id: string;
+}
+
+/**
+ * Um horário livre JÁ com o profissional e o veredito do motor embutidos. A
+ * disponibilidade de uma LINHA agrega horários de VÁRIOS profissionais, por isso
+ * o profissional vai por slot (diferente do SlotPage, de um profissional só).
+ */
+export interface AnnotatedSlot extends Slot {
+  professional: AppointmentProfessional;
+  eligibility: Eligibility;
+}
+
+export interface AvailabilityPage {
+  item_id: string;
+  from: string;
+  to: string;
+  items: AnnotatedSlot[];
+}
+
+/** Uma página do event log. `next_cursor` é OPACO; ausente = fim. */
+export interface AuditPage {
+  items: JourneyEvent[];
+  next_cursor?: string;
+}
+
+export const getJourney = () => request<Journey>('/me/journey');
+
+export const getEligibility = (itemId: string, date?: string) => {
+  const q = new URLSearchParams({ item_id: itemId });
+  if (date) q.set('date', date);
+  return request<Eligibility>(`/me/eligibility?${q.toString()}`);
+};
+
+export const getAvailability = (itemId: string, from?: string, to?: string) => {
+  const q = new URLSearchParams({ item_id: itemId });
+  if (from) q.set('from', from);
+  if (to) q.set('to', to);
+  return request<AvailabilityPage>(`/me/availability?${q.toString()}`);
+};
+
+/**
+ * Agenda a consulta de um item. É IDEMPOTENTE pelo header `Idempotency-Key`: a
+ * MESMA key devolve a MESMA consulta sem criar outra. A key NÃO nasce aqui — ela
+ * é a identidade da INTENÇÃO do paciente e chega pronta de quem chamou, para que
+ * um retry da mesma intenção reuse a mesma key (ver useScheduleCare).
+ */
+export const createCareAppointment = (body: { item_id: string; slot_id: string }, idemKey: string) =>
+  request<CareAppointment>('/me/appointments', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { 'Idempotency-Key': idemKey },
+  });
+
+export const cancelCareAppointment = (id: string) =>
+  request<CareAppointment>(`/me/appointments/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+
+export const listCareAppointments = (status?: string) => {
+  const q = status ? `?${new URLSearchParams({ status }).toString()}` : '';
+  return request<ListOf<CareAppointment>>(`/me/appointments${q}`).then((r) => r.items);
+};
+
+export const getAudit = (cursor?: string, limit?: number) => {
+  const q = new URLSearchParams();
+  if (cursor) q.set('cursor', cursor);
+  if (limit) q.set('limit', String(limit));
+  const qs = q.toString();
+  return request<AuditPage>(`/me/audit${qs ? `?${qs}` : ''}`);
+};

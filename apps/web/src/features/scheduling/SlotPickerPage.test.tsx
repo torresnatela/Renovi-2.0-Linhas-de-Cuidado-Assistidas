@@ -166,4 +166,28 @@ describe('SlotPickerPage', () => {
     expect(screen.queryByRole('button', { name: /Confirmar consulta/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /tentar de novo/i })).not.toBeInTheDocument();
   });
+
+  /**
+   * Regressão pega em teste AO VIVO: no 502, o onSettled invalida os horários e a
+   * lista refaz o fetch SEM o slot recém-reservado. Se o painel dependesse da lista
+   * (buscar o slot por id), ele desmontaria e a mensagem "pode ter sido marcada"
+   * sumiria — o paciente ficava sem aviso nenhum. O painel tem que sobreviver ao
+   * slot sair da lista.
+   */
+  it('mantém o aviso de 502 mesmo quando o horário some da lista no refetch', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.createAppointment).mockRejectedValue(
+      new ApiError(502, 'Não conseguimos confirmar', 'texto da api', { code: 'BOOKING_UNCONFIRMED' }),
+    );
+    renderPage();
+
+    await escolherPrimeiroHorario(user);
+    // Depois do clique, a lista "refaz o fetch" e o slot-1 (o escolhido) já era.
+    vi.mocked(api.listSlots).mockResolvedValue({ ...pagina, items: [pagina.items[1]] });
+    await user.click(screen.getByRole('button', { name: /Confirmar consulta/i }));
+
+    const alerta = await screen.findByRole('alert');
+    expect(alerta).toHaveTextContent(/pode ter sido marcada/i);
+    expect(screen.getByRole('link', { name: /Ver minhas consultas/i })).toBeInTheDocument();
+  });
 });
