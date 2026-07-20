@@ -22,7 +22,10 @@ func TestMoodCheckinStore_Fluxo(t *testing.T) {
 	catalog, enroll, pool := newCareStores(t, aceitaAmbas())
 	consents := models.NewConsentStore(pool)
 	mood := models.NewMoodCheckinStore(pool)
-	now := time.Now().UTC().Truncate(time.Microsecond)
+	// `now` fixo ao meio-dia UTC (09h em São Paulo): o teste depende de `now` e
+	// `now+1h` caírem no MESMO dia local (upsert do dia). Com time.Now() real, rodar
+	// perto da meia-noite de Brasília jogaria os dois em dias diferentes (2 linhas).
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
 
 	// Linha publicada com o item de atividade checkin-humor-diario.
 	line, err := catalog.Create(ctx, "bem-estar", "Bem-estar", "")
