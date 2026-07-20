@@ -1,26 +1,24 @@
-# Caddyfile de PRODUÇÃO (referência). TLS automático + proxy reverso.
-# Ajuste o domínio após a decisão do §10.5 do SPEC. Não é usado no dev local
-# (onde a API sobe via `go run` e o web via Vite).
+# Caddy INTERNO do container web (imagem renovi-care-web): serve só a SPA.
 #
-# Topologia: Caddy -> Web SPA (estático) + /api -> API Go.
+# O TLS, o domínio (app.renovisaude.com.br) e o roteamento /api -> care-api:8090
+# ficam no Caddy de BORDA da VPS (/opt/renovi/Caddyfile, projeto compose
+# preexistente "renovi") — ver deploy/edge-snippet.Caddyfile e docs/DEPLOY.md.
+{
+	# Sem admin API: container imutável, config nunca muda em runtime.
+	admin off
+	auto_https off
+}
 
-# renovi.example.com {
-#     encode zstd gzip
-#
-#     # API (a porta deve casar com RENOVI_HTTP_ADDR — default :8090)
-#     handle /api/* {
-#         reverse_proxy api:8090
-#     }
-#
-#     # SPA (arquivos estáticos do build do front)
-#     handle {
-#         root * /srv/web
-#         try_files {path} /index.html
-#         file_server
-#     }
-# }
-
-# Placeholder local (evita erro se alguém subir o Caddy sem domínio configurado).
 :80 {
-	respond "Renovi 2.0 — configure o domínio no Caddyfile (SPEC §10.5)." 200
+	root * /srv/web
+	encode gzip
+
+	# SPA fallback: rotas do React caem no index.html.
+	try_files {path} /index.html
+	file_server
+
+	# Assets do Vite têm hash no nome -> cache imutável.
+	header /assets/* Cache-Control "public, max-age=31536000, immutable"
+	# index.html nunca deve ser cacheado (aponta para os assets novos).
+	header / Cache-Control "no-cache"
 }

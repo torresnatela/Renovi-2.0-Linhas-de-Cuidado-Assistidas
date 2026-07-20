@@ -1,0 +1,10 @@
+# Contexto do build da imagem web (apps/web/Dockerfile, contexto = raiz).
+# O payload é apps/web/dist + deploy/Caddyfile; todo o resto é ruído.
+.git
+.claude
+**/node_modules
+apps/api
+docs
+packages
+deploy/mysql-legacy
+deploy/pg-gestao
