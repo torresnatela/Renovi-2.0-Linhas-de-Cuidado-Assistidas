@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math/big"
 	"time"
 
@@ -94,7 +95,7 @@ func (s *AssessmentStore) Availability(ctx context.Context, patientID uuid.UUID,
 	if !ok {
 		return AssessmentAvailability{}, ErrUnknownInstrument
 	}
-	_, elig, _, err := s.resolve(ctx, patientID, spec.itemRef, now)
+	_, elig, _, err := s.resolve(ctx, s.q, patientID, spec.itemRef, now)
 	if err != nil {
 		return AssessmentAvailability{}, err
 	}
@@ -108,8 +109,10 @@ func (s *AssessmentStore) Availability(ctx context.Context, patientID uuid.UUID,
 // de wiring central do módulo: os fatos de execução da ATIVIDADE entram no shape
 // de JourneyAppointment (Status=realizada, ScheduledAt=respondido_em), sem tocar
 // a tabela normativa T1–T19 do motor.
-func (s *AssessmentStore) resolve(ctx context.Context, patientID uuid.UUID, itemRef string, now time.Time) (gen.FindActivityEnrollmentDetailRow, careline.Eligibility, bool, error) {
-	det, err := s.q.FindActivityEnrollmentDetail(ctx, gen.FindActivityEnrollmentDetailParams{
+// O querier entra por parâmetro para que o Submit possa reavaliar a cadência
+// DENTRO da transação (sobre o mesmo `q` do lock), fechando a janela TOCTOU.
+func (s *AssessmentStore) resolve(ctx context.Context, q *gen.Queries, patientID uuid.UUID, itemRef string, now time.Time) (gen.FindActivityEnrollmentDetailRow, careline.Eligibility, bool, error) {
+	det, err := q.FindActivityEnrollmentDetail(ctx, gen.FindActivityEnrollmentDetailParams{
 		PatientID: patientID, ValidFrom: now, Ref: itemRef,
 	})
 	if err != nil {
@@ -122,7 +125,7 @@ func (s *AssessmentStore) resolve(ctx context.Context, patientID uuid.UUID, item
 		return det, careline.Eligibility{}, false, fmt.Errorf("consultar matrícula: %w", err)
 	}
 
-	ruleRows, err := s.q.ListItemRules(ctx, det.CareLineItemID)
+	ruleRows, err := q.ListItemRules(ctx, det.CareLineItemID)
 	if err != nil {
 		return det, careline.Eligibility{}, false, fmt.Errorf("listar regras: %w", err)
 	}
@@ -131,7 +134,7 @@ func (s *AssessmentStore) resolve(ctx context.Context, patientID uuid.UUID, item
 		rules = append(rules, careline.Rule{Type: r.RuleType, Params: json.RawMessage(r.Params)})
 	}
 
-	times, err := s.q.ListAssessmentTimes(ctx, gen.ListAssessmentTimesParams{
+	times, err := q.ListAssessmentTimes(ctx, gen.ListAssessmentTimesParams{
 		PatientID: patientID, CareLineItemID: det.CareLineItemID,
 	})
 	if err != nil {
@@ -164,7 +167,21 @@ func (s *AssessmentStore) Submit(ctx context.Context, patientID uuid.UUID, codig
 		return AssessmentResult{}, ErrAssessmentInvalid
 	}
 
-	consent, err := s.q.GetActiveConsent(ctx, gen.GetActiveConsentParams{PatientID: patientID, Finalidade: ConsentCheckinHumor})
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return AssessmentResult{}, fmt.Errorf("abrir transação: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+
+	// Lock transacional por (paciente, instrumento): serializa submits concorrentes
+	// do MESMO instrumento e fecha a janela TOCTOU entre a checagem de cadência e a
+	// inserção (duas respostas dentro do MIN_INTERVAL). Liberado no commit/rollback.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, advisoryLockKey(patientID.String(), spec.itemRef)); err != nil {
+		return AssessmentResult{}, fmt.Errorf("adquirir lock de cadência: %w", err)
+	}
+
+	consent, err := q.GetActiveConsent(ctx, gen.GetActiveConsentParams{PatientID: patientID, Finalidade: ConsentCheckinHumor})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return AssessmentResult{}, ErrNoActiveConsent
@@ -172,7 +189,9 @@ func (s *AssessmentStore) Submit(ctx context.Context, patientID uuid.UUID, codig
 		return AssessmentResult{}, fmt.Errorf("consultar consentimento: %w", err)
 	}
 
-	det, elig, enrolled, err := s.resolve(ctx, patientID, spec.itemRef, now)
+	// Reavaliada DENTRO do lock/tx: com o lock adquirido, o histórico lido aqui já
+	// reflete qualquer submit concorrente que tenha commitado antes de nós.
+	det, elig, enrolled, err := s.resolve(ctx, q, patientID, spec.itemRef, now)
 	if err != nil {
 		return AssessmentResult{}, err
 	}
@@ -183,7 +202,7 @@ func (s *AssessmentStore) Submit(ctx context.Context, patientID uuid.UUID, codig
 		return AssessmentResult{}, ErrAssessmentBlocked{Blocks: elig.Blocks}
 	}
 
-	inst, err := s.q.GetActiveInstrument(ctx, codigo)
+	inst, err := q.GetActiveInstrument(ctx, codigo)
 	if err != nil {
 		return AssessmentResult{}, fmt.Errorf("carregar instrumento: %w", err)
 	}
@@ -192,13 +211,6 @@ func (s *AssessmentStore) Submit(ctx context.Context, patientID uuid.UUID, codig
 	if err != nil {
 		return AssessmentResult{}, err
 	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return AssessmentResult{}, fmt.Errorf("abrir transação: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	q := s.q.WithTx(tx)
 
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -332,6 +344,11 @@ func (s *AssessmentStore) phq4Cutoffs(ctx context.Context, instrumentID uuid.UUI
 		return scoring.PHQ4Cutoffs{}, fmt.Errorf("listar cortes: %w", err)
 	}
 	c := scoring.PHQ4Cutoffs{SubescalaPositiva: 3, TotalModerado: 6} // defaults se faltar seed
+	// O scorer puro tem UM corte de subescala aplicado a PHQ-2 e GAD-2. O seed traz
+	// uma linha 'subescala_positiva' por dimensão (depressao, ansiedade) com o MESMO
+	// valor; casá-las por faixa é intencional. INVARIANTE: as duas devem compartilhar
+	// o corte — se um dia divergirem, o modelo de dados precisa de um corte por
+	// subescala (e o scorer, de dois campos), não deste last-wins silencioso.
 	for _, r := range rows {
 		v := int(numericToFloat(r.Valor))
 		switch r.Faixa {
@@ -366,9 +383,22 @@ func (s *AssessmentStore) who5Cutoffs(ctx context.Context, instrumentID uuid.UUI
 	return c, nil
 }
 
-// numericFromInt embrulha um int como pgtype.Numeric válido.
+// numericFromInt embrulha um int como pgtype.Numeric válido. Exp fica 0, então o
+// valor é exatamente `i` — válido porque todos os escores deste anexo são inteiros
+// por construção (índice WHO-5 0–100, bruto 0–25, total PHQ-4 0–12).
 func numericFromInt(i int) pgtype.Numeric {
 	return pgtype.Numeric{Int: big.NewInt(int64(i)), Valid: true}
+}
+
+// advisoryLockKey deriva uma chave estável (int64) para pg_advisory_xact_lock a
+// partir de partes textuais (ex.: id do paciente + ref do instrumento).
+func advisoryLockKey(parts ...string) int64 {
+	h := fnv.New64a()
+	for _, p := range parts {
+		_, _ = h.Write([]byte(p))
+		_, _ = h.Write([]byte{0}) // separador: evita colisão por concatenação
+	}
+	return int64(h.Sum64())
 }
 
 // numericPtr embrulha um *float64 como pgtype.Numeric (nil -> nulo). Usa a parte
