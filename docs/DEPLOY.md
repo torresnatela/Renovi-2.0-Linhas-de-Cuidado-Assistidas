@@ -22,7 +22,7 @@ Cloudflare (DNS only, nuvem cinza)
   /opt/renovi-care — docker compose project "renovi-care"
         ├── web  ghcr.io/torresnatela/renovi-care-web:<sha>   (Caddy interno, SPA)
         └── api  ghcr.io/torresnatela/renovi-care-api:<sha>   (Go, 1 instância)
-              ├── Neon Postgres 17 (renovi_care)  — TLS, endpoint direto
+              ├── Neon Postgres 17 (database neondb) — TLS, endpoint direto
               ├── MySQL legado (escala/slots)     — agendamento
               └── Doutor ao Vivo (api.v2.doutoraovivo.com.br)
 ```
@@ -167,6 +167,9 @@ curl -fsS http://127.0.0.1:8084/readyz
   (~1 s). Aceito no piloto; se incomodar, desligar no console do Neon.
 
 ## Checklist pré-go-live
+
+> Concluído integralmente no go-live de **2026-07-20** (SHA `fd6c7d9`). Mantido
+> como template para um eventual novo ambiente.
 
 - [ ] DNS `A app.renovisaude.com.br → 2.25.184.35`, **DNS only** (nuvem cinza)
 - [ ] 8 secrets do environment `production` preenchidos
