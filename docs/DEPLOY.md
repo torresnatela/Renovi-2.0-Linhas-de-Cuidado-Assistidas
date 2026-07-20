@@ -36,6 +36,15 @@ A VPS é **compartilhada** por três sistemas. Regras de convivência:
   **nunca** altera blocos dos outros sistemas. O arquivo é bind-mount de arquivo
   único (`ro,Z`): edite **in-place** (`tee -a`, `cp`) — `mv`/`sed -i` trocam o
   inode e o container continua lendo o arquivo velho.
+- **⚠️ Antes de qualquer edição na borda, confira se o bind não está órfão**
+  (aconteceu no go-live de 2026-07-20: um fluxo antigo trocou o arquivo com `mv`
+  e o container ficou preso ao inode velho — edições in-place e `caddy reload`
+  passavam a valer para um arquivo que o Caddy não lia):
+  `ls -i /opt/renovi/Caddyfile` vs `docker exec renovi-caddy-1 ls -i /etc/caddy/Caddyfile`.
+  **Inodes diferentes ⇒ recriar o container** (`docker compose -f
+  docker-compose.prod.yml up -d --force-recreate --no-deps caddy` em
+  `/opt/renovi`, ~5 s de borda fora; certificados sobrevivem no volume
+  `caddy_data`) e SÓ ENTÃO editar.
 - Portas localhost em uso na VM: 8081/8082 (gestao), 9000 (portainer),
   **8083 (care-web)** e **8084 (care-api)** — só para smoke test via SSH.
 - **Nunca escalar a API para >1 réplica**: o rate limiter é em memória por
@@ -77,7 +86,7 @@ re-executar só o job `deploy` de um run verde.
 | `RENOVI_CARE_MIGRATE_DATABASE_URL` | mesma base, autenticando como **owner** (usuário padrão do Neon) — só as migrations usam |
 | `RENOVI_DAV_BASE_URL` | `https://api.v2.doutoraovivo.com.br` |
 | `RENOVI_DAV_API_KEY` | chave de produção da Doutor ao Vivo |
-| `RENOVI_LEGACY_DATABASE_URL` | `user:pass@tcp(host:3306)/db` — **sem** `parseTime`/`loc` (o adapter os força) |
+| `RENOVI_LEGACY_DATABASE_URL` | `user:pass@tcp(host:3306)/db` — **sem** `parseTime`/`loc` (o adapter os força). ⚠️ Hoje usa o usuário `admin` (pleno); criar um usuário restrito a `SELECT` + `UPDATE(booked, updatedAt)` como no mock de dev (ADR-004) é pendência de hardening |
 
 Regras:
 - `RENOVI_ENV=production` e `RENOVI_LOG_LEVEL=info` são fixos no workflow, não
@@ -116,6 +125,8 @@ curl -fsS http://127.0.0.1:8084/readyz
 | `/readyz` 503 | corpo não diz a causa (de propósito — LGPD); ver logs da api: falha de ping no Postgres (Neon) ou no MySQL legado | Neon: status.neon.tech + testar `psql` da VM; legado: `nc -zv <host> 3306` da VM — se o firewall do legado bloqueou o IP da VPS, o **login continua ok e o agendamento fica fora** até liberar |
 | Migration falhou no deploy | o job falha ANTES do `up -d` (versão antiga segue no ar); `docker run --rm --env-file /opt/renovi-care/.env.api <img> /migrate version` mostra versão/dirty | corrigir a migration, novo commit/deploy; dirty: resolver manualmente antes |
 | Outro sistema da VM caiu após mexer na borda | `docker exec renovi-caddy-1 caddy validate --config /etc/caddy/Caddyfile` | restaurar o backup mais recente (ver Rollback) |
+| Mudança na borda "não pega" (site novo sem certificado, `SSL alert internal error`; config carregada não lista o domínio) | comparar inodes host×container (ver regra de convivência acima) — bind órfão por `mv` antigo | recriar o container caddy (`up -d --force-recreate --no-deps caddy`) e reconferir `docker exec renovi-caddy-1 grep app.renovisaude /etc/caddy/Caddyfile` |
+| Migration `dirty` no Neon | `cmd/migrate version` mostra `dirty=true`; causa típica: 0008 recusada pela política de senha do Neon | corrigir a causa, `psql "<owner>" -c "UPDATE schema_migrations SET version=<anterior>, dirty=false"` e rodar `migrate up` de novo |
 | VM sem recursos | `free -m`, `df -h`, `docker stats` — a VM tem 1 vCPU/4 GB compartilhados | limites: api 512m, web 128m; se sistêmico, avaliar upgrade do plano Hostinger |
 
 ## LGPD e logs
@@ -131,16 +142,25 @@ curl -fsS http://127.0.0.1:8084/readyz
 
 ## Banco (Neon)
 
-- Postgres 17 gerenciado, projeto `renovi_care`. TLS obrigatório
-  (`sslmode=require` na URL; o pgx respeita o DSN).
+- Postgres 17 gerenciado, região `sa-east-1`, database **`neondb`** (nome padrão
+  do projeto Neon; o "renovi_care" é o nome lógico do sistema, não do database).
+  TLS obrigatório (`sslmode=require`; remover `channel_binding` da URL do
+  console — o pgx não precisa). Host **sem `-pooler`** (o console oferece o
+  pooled por padrão; trocar).
 - **Dois roles** (ADR-024/ADR-027): a app conecta como `renovi_app` (restrito;
-  `journey_event` append-only por privilégio) e as migrations como o owner.
-- **Provisionamento inicial** (uma vez, antes do primeiro deploy): rodar as
-  migrations com a URL do owner (`RENOVI_CARE_MIGRATE_DATABASE_URL=... go -C
-  apps/api run ./cmd/migrate up`) — a migration 0008 cria `renovi_app` com senha
-  provisória — e em seguida trocar a senha:
-  `psql "<url do owner>" -c "ALTER ROLE renovi_app PASSWORD '<senha forte>'"`.
-  A URL da app (`RENOVI_CARE_DATABASE_URL`) usa `renovi_app` com essa senha.
+  `journey_event` append-only por privilégio) e as migrations como o owner
+  (`neondb_owner`).
+- **Provisionamento inicial** (uma vez, por ambiente novo — como foi feito em
+  2026-07-20): o Neon **recusa** o `CREATE ROLE ... PASSWORD 'renovi_app'` da
+  migration 0008 (política de senha do control plane). Ordem correta:
+  1. `psql "<owner>" -c "CREATE ROLE renovi_app LOGIN PASSWORD '<senha forte>'"`
+     (o `IF NOT EXISTS` da 0008 então só aplica os GRANTs);
+  2. `RENOVI_CARE_MIGRATE_DATABASE_URL=<owner> RENOVI_CARE_DATABASE_URL=<owner>
+     go -C apps/api run ./cmd/migrate up` → conferir `version` = 8, limpo;
+  3. `RENOVI_CARE_DATABASE_URL` da app = mesma URL trocando `neondb_owner:...`
+     por `renovi_app:<senha forte>`.
+  Se a 0008 rodar antes do passo 1, ela falha e deixa `dirty` — recuperação no
+  runbook acima.
 - **Backup/PITR**: conferir a retenção do plano contratado (default do plano
   gratuito ~1 dia; anotar aqui o valor real quando confirmado).
 - **Autosuspend**: se ligado, o primeiro request após ociosidade tem cold start
