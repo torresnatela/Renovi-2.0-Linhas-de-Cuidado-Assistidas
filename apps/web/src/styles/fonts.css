@@ -1,0 +1,25 @@
+/* Renovi 2.0 — Webfonts (Nunito)
+   Binários em ../assets/fonts (copiados do handoff do designer;
+   origem: renovi-mobile/src/assets/fonts).
+   Pesos usados no DS: 400 (regular), 600 (semibold), 700 (bold). */
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/Nunito-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/Nunito-SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/Nunito-Bold.ttf') format('truetype');
+}
