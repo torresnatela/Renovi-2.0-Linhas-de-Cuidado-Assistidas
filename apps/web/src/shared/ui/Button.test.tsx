@@ -40,4 +40,11 @@ describe('Button', () => {
     expect(btn.className).toContain('uppercase');
     expect(btn).toHaveTextContent('Agendar');
   });
+
+  it('mescla className do consumidor com as classes base, sem clobbar o DS', () => {
+    render(<Button className="mt-4">Agendar</Button>);
+    const btn = screen.getByRole('button', { name: /agendar/i });
+    expect(btn.className).toContain('mt-4');
+    expect(btn.className).toContain('uppercase');
+  });
 });

@@ -54,6 +54,7 @@ export function Button({
   loading = false,
   fullWidth = false,
   disabled = false,
+  className,
   children,
   ...rest
 }: ButtonProps) {
@@ -70,6 +71,7 @@ export function Button({
         SIZES[size],
         colorClasses(color, isDisabled),
         fullWidth && 'w-full',
+        className,
       )}
       {...rest}
     >
