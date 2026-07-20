@@ -84,6 +84,14 @@ func (s *ConsentStore) Grant(ctx context.Context, patientID uuid.UUID, finalidad
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := s.q.WithTx(tx)
 
+	// Lock transacional por (paciente, finalidade): serializa concessões concorrentes.
+	// Sem ele, duas concessões de versões diferentes ao mesmo tempo podem ambas revogar
+	// o ativo e ambas inserir — a segunda estouraria o índice ux_consent_ativo com uma
+	// unique-violation crua (500) em vez de resolver de forma idempotente.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, advisoryLockKey(patientID.String(), finalidade)); err != nil {
+		return Consent{}, fmt.Errorf("adquirir lock de consentimento: %w", err)
+	}
+
 	cur, err := q.GetActiveConsent(ctx, gen.GetActiveConsentParams{PatientID: patientID, Finalidade: finalidade})
 	switch {
 	case err == nil && cur.VersaoTermo == versaoTermo:
@@ -128,13 +136,26 @@ func (s *ConsentStore) Revoke(ctx context.Context, patientID uuid.UUID, finalida
 	if !knownFinalidade(finalidade) {
 		return ErrConsentInvalid
 	}
-	if _, err := s.q.RevokeActiveConsent(ctx, gen.RevokeActiveConsentParams{
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("abrir transação: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+
+	// Mesmo lock por (paciente, finalidade) de Grant e do check-in: serializa a
+	// revogação contra concessões e gravações consentidas concorrentes.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, advisoryLockKey(patientID.String(), finalidade)); err != nil {
+		return fmt.Errorf("adquirir lock de consentimento: %w", err)
+	}
+	if _, err := q.RevokeActiveConsent(ctx, gen.RevokeActiveConsentParams{
 		PatientID: patientID, Finalidade: finalidade,
 		RevogadoEm: pgtype.Timestamptz{Time: now, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("revogar consentimento: %w", err)
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func toConsent(row gen.Consent) Consent {

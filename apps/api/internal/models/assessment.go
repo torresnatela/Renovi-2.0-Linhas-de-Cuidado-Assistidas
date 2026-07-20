@@ -207,7 +207,10 @@ func (s *AssessmentStore) Submit(ctx context.Context, patientID uuid.UUID, codig
 		return AssessmentResult{}, fmt.Errorf("carregar instrumento: %w", err)
 	}
 
-	scored, err := s.score(ctx, codigo, inst.ID, items)
+	// score usa o MESMO q da tx: enquanto o advisory lock segura a conexão da
+	// transação, ler os cortes por s.q (pool) pediria uma 2ª conexão por Submit —
+	// sob concorrência, com o pool pequeno, isso arrisca pool-starvation.
+	scored, err := s.score(ctx, q, codigo, inst.ID, items)
 	if err != nil {
 		return AssessmentResult{}, err
 	}
@@ -299,11 +302,12 @@ func (s *AssessmentStore) Submit(ctx context.Context, patientID uuid.UUID, codig
 	return scored, nil
 }
 
-// score pontua os itens conforme o instrumento, com os cortes do banco.
-func (s *AssessmentStore) score(ctx context.Context, codigo string, instrumentID uuid.UUID, items []int) (AssessmentResult, error) {
+// score pontua os itens conforme o instrumento, com os cortes do banco. Recebe o
+// querier (q) para ler os cortes na MESMA conexão/tx do chamador (ver Submit).
+func (s *AssessmentStore) score(ctx context.Context, q *gen.Queries, codigo string, instrumentID uuid.UUID, items []int) (AssessmentResult, error) {
 	switch codigo {
 	case Who5Codigo:
-		cutoffs, err := s.who5Cutoffs(ctx, instrumentID)
+		cutoffs, err := s.who5Cutoffs(ctx, q, instrumentID)
 		if err != nil {
 			return AssessmentResult{}, err
 		}
@@ -317,7 +321,7 @@ func (s *AssessmentStore) score(ctx context.Context, codigo string, instrumentID
 			Faixa: r.Faixa, FlagEncaminhar: r.FlagEncaminhar,
 		}, nil
 	case Phq4Codigo:
-		cutoffs, err := s.phq4Cutoffs(ctx, instrumentID)
+		cutoffs, err := s.phq4Cutoffs(ctx, q, instrumentID)
 		if err != nil {
 			return AssessmentResult{}, err
 		}
@@ -338,8 +342,8 @@ func (s *AssessmentStore) score(ctx context.Context, codigo string, instrumentID
 }
 
 // phq4Cutoffs carrega os cortes do PHQ-4 do banco (validação BR versionada).
-func (s *AssessmentStore) phq4Cutoffs(ctx context.Context, instrumentID uuid.UUID) (scoring.PHQ4Cutoffs, error) {
-	rows, err := s.q.ListInstrumentCutoffs(ctx, instrumentID)
+func (s *AssessmentStore) phq4Cutoffs(ctx context.Context, q *gen.Queries, instrumentID uuid.UUID) (scoring.PHQ4Cutoffs, error) {
+	rows, err := q.ListInstrumentCutoffs(ctx, instrumentID)
 	if err != nil {
 		return scoring.PHQ4Cutoffs{}, fmt.Errorf("listar cortes: %w", err)
 	}
@@ -362,8 +366,8 @@ func (s *AssessmentStore) phq4Cutoffs(ctx context.Context, instrumentID uuid.UUI
 }
 
 // who5Cutoffs carrega os cortes do WHO-5 do banco (validação BR versionada).
-func (s *AssessmentStore) who5Cutoffs(ctx context.Context, instrumentID uuid.UUID) (scoring.WHO5Cutoffs, error) {
-	rows, err := s.q.ListInstrumentCutoffs(ctx, instrumentID)
+func (s *AssessmentStore) who5Cutoffs(ctx context.Context, q *gen.Queries, instrumentID uuid.UUID) (scoring.WHO5Cutoffs, error) {
+	rows, err := q.ListInstrumentCutoffs(ctx, instrumentID)
 	if err != nil {
 		return scoring.WHO5Cutoffs{}, fmt.Errorf("listar cortes: %w", err)
 	}

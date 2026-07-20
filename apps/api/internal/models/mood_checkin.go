@@ -116,8 +116,33 @@ func (s *MoodCheckinStore) Record(ctx context.Context, patientID uuid.UUID, in M
 	if in.Valencia < 0 || in.Valencia > 100 || in.Energia < 0 || in.Energia > 100 {
 		return MoodCheckin{}, ErrMoodCheckinInvalid
 	}
+	quadrante := scoring.Quadrant(in.Valencia, in.Energia)
+	diaRef := pgtype.Date{Time: localDay(now), Valid: true}
 
-	consent, err := s.q.GetActiveConsent(ctx, gen.GetActiveConsentParams{PatientID: patientID, Finalidade: ConsentCheckinHumor})
+	var tagsJSON []byte
+	if len(in.ContextTags) > 0 {
+		j, mErr := json.Marshal(in.ContextTags)
+		if mErr != nil {
+			return MoodCheckin{}, fmt.Errorf("serializar context_tags: %w", mErr)
+		}
+		tagsJSON = j
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return MoodCheckin{}, fmt.Errorf("abrir transação: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+
+	// Pré-condições lidas DENTRO da tx, sob o lock por (paciente, finalidade) — o
+	// MESMO de Grant/Revoke. Assim uma revogação de consentimento não se intromete
+	// entre a checagem e o commit (a gravação só ocorre com consentimento vivo).
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, advisoryLockKey(patientID.String(), ConsentCheckinHumor)); err != nil {
+		return MoodCheckin{}, fmt.Errorf("adquirir lock de check-in: %w", err)
+	}
+
+	consent, err := q.GetActiveConsent(ctx, gen.GetActiveConsentParams{PatientID: patientID, Finalidade: ConsentCheckinHumor})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return MoodCheckin{}, ErrNoActiveConsent
@@ -125,7 +150,7 @@ func (s *MoodCheckinStore) Record(ctx context.Context, patientID uuid.UUID, in M
 		return MoodCheckin{}, fmt.Errorf("consultar consentimento: %w", err)
 	}
 
-	act, err := s.q.FindActivityEnrollment(ctx, gen.FindActivityEnrollmentParams{
+	act, err := q.FindActivityEnrollment(ctx, gen.FindActivityEnrollmentParams{
 		PatientID: patientID, ValidFrom: now, Ref: CheckinHumorDiarioRef,
 	})
 	if err != nil {
@@ -135,28 +160,10 @@ func (s *MoodCheckinStore) Record(ctx context.Context, patientID uuid.UUID, in M
 		return MoodCheckin{}, fmt.Errorf("consultar matrícula: %w", err)
 	}
 
-	grid, err := s.q.GetActiveInstrument(ctx, instrumentGrid)
+	grid, err := q.GetActiveInstrument(ctx, instrumentGrid)
 	if err != nil {
 		return MoodCheckin{}, fmt.Errorf("carregar instrumento GRID: %w", err)
 	}
-
-	quadrante := scoring.Quadrant(in.Valencia, in.Energia)
-
-	var tagsJSON []byte
-	if len(in.ContextTags) > 0 {
-		tagsJSON, err = json.Marshal(in.ContextTags)
-		if err != nil {
-			return MoodCheckin{}, fmt.Errorf("serializar context_tags: %w", err)
-		}
-	}
-	diaRef := pgtype.Date{Time: localDay(now), Valid: true}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return MoodCheckin{}, fmt.Errorf("abrir transação: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	q := s.q.WithTx(tx)
 
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -248,14 +255,22 @@ type riskDay struct {
 // risco, a partir do check-in mais recente (rows vem ordenado por dia DESC). Uma
 // LACUNA de dia quebra a sequência: é "N dias consecutivos" (Anexo C.5.4), não N
 // check-ins avulsos — quem só registra nos dias ruins não acumula um streak falso.
-func riskStreak(rows []riskDay) int {
+//
+// A sequência precisa ser RECENTE: o check-in mais novo tem de ser hoje ou ontem
+// (o paciente pode ainda não ter registrado hoje). Um streak antigo e interrompido
+// não deve oferecer o WHO-5 para sempre — o Snapshot fala em dias "recentes".
+func riskStreak(rows []riskDay, today time.Time) int {
 	streak := 0
 	var prev time.Time
 	for i, r := range rows {
 		if !scoring.IsQuadranteRisco(r.quadrante) {
 			break
 		}
-		if i > 0 && !r.dia.Equal(prev.AddDate(0, 0, -1)) {
+		if i == 0 {
+			if r.dia.Before(today.AddDate(0, 0, -1)) {
+				break // mais recente é anterior a ontem: streak não é recente
+			}
+		} else if !r.dia.Equal(prev.AddDate(0, 0, -1)) {
 			break // lacuna de dia: a sequência terminou
 		}
 		streak++
@@ -275,7 +290,7 @@ func (s *MoodCheckinStore) computeOffer(ctx context.Context, patientID uuid.UUID
 	for _, r := range rows {
 		days = append(days, riskDay{dia: r.DiaRef.Time, quadrante: r.Quadrante})
 	}
-	snap := trigger.Snapshot{RiskStreak: riskStreak(days)}
+	snap := trigger.Snapshot{RiskStreak: riskStreak(days, localDay(now))}
 
 	who5, err := s.q.LatestAssessmentByInstrument(ctx, gen.LatestAssessmentByInstrumentParams{PatientID: patientID, Codigo: Who5Codigo})
 	switch {

@@ -152,10 +152,16 @@ func (c MoodController) GetHistory(w http.ResponseWriter, r *http.Request) {
 		WriteProblem(w, http.StatusUnauthorized, "Não autenticado", "sessão ausente ou inválida")
 		return
 	}
+	// Valida a entrada aqui (controller fino): só um limite POSITIVO substitui o
+	// default; capamos no teto do contrato (openapi: maximum 120). O model ainda
+	// clampa por robustez, mas não passamos valor fora de faixa adiante.
 	limit := 30
 	if q := r.URL.Query().Get("limit"); q != "" {
-		if n, err := strconv.Atoi(q); err == nil {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
 			limit = n
+			if limit > 120 {
+				limit = 120
+			}
 		}
 	}
 	checkins, err := c.Checkins.History(r.Context(), account.ID, limit)
