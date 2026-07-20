@@ -42,10 +42,19 @@ make down          # derruba tudo
 A API e o worker rodam **fora** do compose, via `go run` (`make migrate-up`, etc.),
 apontando para os bancos acima (ver `.env.example`).
 
-## Produção (VM Hostinger)
+## Produção (VPS Hostinger compartilhada)
 
-Alvo: `docker compose up -d` com os serviços `caddy` + `api` + `worker` (ver
-`Caddyfile`). O `renovi_care` de produção pode ser um container Postgres com
-volume ou um Postgres gerenciado; os bancos legado e Gestão são externos
-(acesso por rede — pendência §9.4). Este compose de produção entra na fase P1
-(observabilidade/robustez) e ainda não está versionado aqui.
+Guia completo (arquitetura, secrets, rollback, runbook): **`docs/DEPLOY.md`**.
+Arquivos de produção neste diretório:
+
+| Arquivo | Papel |
+|---|---|
+| `docker-compose.prod.yml` | Stack `renovi-care` na VPS (`/opt/renovi-care`): serviços `web` + `api` |
+| `deploy-remote.sh` | Script que o job `deploy` executa na VPS (pull → migrate → up → readyz) |
+| `Caddyfile` | Caddy **interno** do container `web` — só serve a SPA (`/srv/web`) |
+| `edge-snippet.Caddyfile` | Referência do bloco `app.renovisaude.com.br` aplicado no Caddy de **borda** da VPS (`/opt/renovi/Caddyfile`, projeto preexistente — mudanças sempre aditivas) |
+
+O banco de produção é o **Neon** (Postgres 17 gerenciado) — nada de Postgres
+próprio no compose de prod. O build da imagem `web` usa a raiz do repo como
+contexto e espera `apps/web/dist` pronto (no CI vem do artifact do job `web`;
+localmente rode `make web-build` antes).

@@ -215,6 +215,15 @@ e ADR-010 a ADR-013 em `docs/DECISOES.md`.
 - [x] CI **configurado** (lint → generate-check → test → build, para api e web) — workflow escrito; ainda não executado em runner (repo sem remoto/commits)
 - [x] Docs para Claude Code (este PROGRESSO, ARQUITETURA, DESENVOLVIMENTO, DECISOES, CLAUDE.md)
 
+## ✅ Deploy de produção (2026-07-19)
+
+- [x] Dockerfiles (`apps/api`, `apps/web`) + `deploy/docker-compose.prod.yml` (projeto `renovi-care` na VPS compartilhada)
+- [x] Job `deploy` no CI: GHCR + SSH + aprovação manual (environment `production`) — ADR-026
+- [x] Banco de produção: Neon Postgres 17, endpoint direto, `sslmode=require`, app como `renovi_app` e migrations como owner — ADR-027
+- [x] Borda: bloco `app.renovisaude.com.br` no Caddy existente da VPS (aditivo) — ADR-028; resolve a pendência de infra do ADR-019 (True-Client-IP/X-Real-IP)
+- [x] `docs/DEPLOY.md` (arquitetura, secrets, rollback, runbook)
+- [ ] Go-live validado (primeiro deploy aprovado + smoke: app no ar, vizinhos intactos) — checklist em `docs/DEPLOY.md`
+
 ## ⏳ Próximo passo
 
 **`cmd/worker`** — hoje stub, e a saga já produz as filas que ele deveria varrer
