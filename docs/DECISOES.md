@@ -809,6 +809,12 @@ foram aplicados:
   usava `time.Now()` e assumia `now` e `now+1h` no mesmo dia local — perto da
   meia-noite de Brasília caíam em dias diferentes (2 linhas). Ancorado a um `now`
   fixo ao meio-dia UTC.
+- **Bug de teste pré-existente (achado no CI Linux, E2E do Slice 1):**
+  `requireInstant` comparava instantes por igualdade EXATA; a coluna `timestamptz`
+  trunca a microssegundo, mas o payload de evento (RFC3339Nano) guarda nanossegundos
+  — no runner Linux (onde `time.Now()` tem resolução de nanossegundo) a comparação
+  falhava por uma diferença que o banco sequer distingue. Passa a truncar a
+  microssegundo (a tolerância zero correta para instantes ancorados no banco).
 
 **Não aplicado — `CHECK` sem `NOT VALID` nas migrations (o CodeRabbit marcou como
 Crítico):** trocar o `CHECK` de `journey_event` sem `NOT VALID` faz um scan sob
