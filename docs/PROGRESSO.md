@@ -222,7 +222,13 @@ e ADR-010 a ADR-013 em `docs/DECISOES.md`.
 - [x] Banco de produção: Neon Postgres 17, endpoint direto, `sslmode=require`, app como `renovi_app` e migrations como owner — ADR-027
 - [x] Borda: bloco `app.renovisaude.com.br` no Caddy existente da VPS (aditivo) — ADR-028; resolve a pendência de infra do ADR-019 (True-Client-IP/X-Real-IP)
 - [x] `docs/DEPLOY.md` (arquitetura, secrets, rollback, runbook)
-- [ ] Go-live validado (primeiro deploy aprovado + smoke: app no ar, vizinhos intactos) — checklist em `docs/DEPLOY.md`
+- [x] **Go-live validado (2026-07-20)**: deploy aprovado e aplicado (SHA `fd6c7d9`),
+  `https://app.renovisaude.com.br` no ar com Let's Encrypt, `/readyz` 200 externo
+  (Neon + MySQL legado conectados), headers de segurança ativos, SPA servindo,
+  vizinhos (saudeconectada/gestao) intactos vs. baseline. Percalços reais e
+  soluções documentados no runbook do `docs/DEPLOY.md` (inode do bind da borda,
+  política de senha do Neon). Pendências de hardening: usuário restrito no MySQL
+  legado; rotacionar credenciais compartilhadas durante o go-live.
 
 ## ⏳ Próximo passo
 
