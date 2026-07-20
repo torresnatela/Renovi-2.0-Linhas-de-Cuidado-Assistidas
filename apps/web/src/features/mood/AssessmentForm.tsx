@@ -128,6 +128,7 @@ export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onD
                       <button
                         key={v}
                         type="button"
+                        aria-pressed={on}
                         onClick={() => setAnswers((prev) => prev.map((a, k) => (k === i ? v : a)))}
                         className={
                           'rounded border px-2 py-1 text-xs ' +

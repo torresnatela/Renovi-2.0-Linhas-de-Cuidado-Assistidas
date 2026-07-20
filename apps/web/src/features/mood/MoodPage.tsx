@@ -269,6 +269,13 @@ function CheckinSection({ existente }: { existente: MoodCheckin | null }) {
           <div className="mt-1 text-center text-xs text-slate-400">Menos energia</div>
         </div>
 
+        {/* Anuncia o ponto escolhido a leitores de tela (a grade é visual). */}
+        {ponto && (
+          <p className="sr-only" aria-live="polite" data-testid="mood-value">
+            Selecionado: valência {ponto.valencia} de 100, energia {ponto.energia} de 100.
+          </p>
+        )}
+
         {instrument.data && instrument.data.context_tags.length > 0 && (
           <fieldset className="mt-6">
             <legend className="mb-2 text-sm text-slate-600">O que influenciou? (opcional)</legend>
@@ -279,6 +286,7 @@ function CheckinSection({ existente }: { existente: MoodCheckin | null }) {
                   <button
                     key={t.chave}
                     type="button"
+                    aria-pressed={on}
                     onClick={() =>
                       setTags((prev) =>
                         on ? prev.filter((c) => c !== t.chave) : [...prev, t.chave],

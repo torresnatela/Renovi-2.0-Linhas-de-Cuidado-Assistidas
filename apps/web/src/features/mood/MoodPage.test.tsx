@@ -124,6 +124,10 @@ describe('MoodPage', () => {
     fireEvent.keyDown(grade, { key: 'ArrowRight' });
     fireEvent.keyDown(grade, { key: 'ArrowUp' });
     expect(screen.getByTestId('mood-marker')).toBeInTheDocument();
+    // A grade é visual: o valor escolhido é anunciado a leitores de tela.
+    expect(screen.getByTestId('mood-value')).toHaveTextContent(
+      'valência 55 de 100, energia 55 de 100',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Registrar meu humor' }));
 
