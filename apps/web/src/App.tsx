@@ -7,6 +7,7 @@ import { HomePage } from './features/home/HomePage';
 import { CareAppointmentsPage } from './features/journey/CareAppointmentsPage';
 import { JourneyPage } from './features/journey/JourneyPage';
 import { ScheduleCarePage } from './features/journey/ScheduleCarePage';
+import { MoodPage } from './features/mood/MoodPage';
 import { AppointmentPage, AppointmentsPage } from './features/scheduling/AppointmentsPage';
 import { ProfessionalPickerPage, SpecialtyPickerPage } from './features/scheduling/SchedulingPages';
 import { SlotPickerPage } from './features/scheduling/SlotPickerPage';
@@ -61,6 +62,9 @@ export default function App() {
 
               <Route path="/consultas" element={<AppointmentsPage />} />
               <Route path="/consultas/:appointmentId" element={<AppointmentPage />} />
+
+              {/* Verificador Diário de Humor (Anexo C). */}
+              <Route path="/humor" element={<MoodPage />} />
 
               {/*
                 Minha jornada (SPEC §7): a linha de cuidado do paciente. O agendar

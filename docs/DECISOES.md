@@ -651,3 +651,261 @@ houver muitas instâncias, revisitar o pooler (aí migrations continuam no diret
 container de borda do projeto antigo (aceito: já era verdade para os demais).
 Se a borda um dia for extraída para um projeto próprio "edge", todos os blocos
 migram juntos (fora do escopo).
+
+---
+
+> **Nota de numeração — Verificador Diário de Humor (Anexo C).** A feature do
+> Anexo C foi desenvolvida no branch `feat/verificador-humor` (ramo do Slice 1).
+> O Slice 1 usou ADR-021..025; para não colidir, os ADRs do Verificador de Humor
+> começam em **ADR-030**.
+
+## ADR-030 — `care_line_item.kind` ganha ATIVIDADE (item não-consulta)
+
+**Contexto:** o Verificador Diário de Humor (Anexo C) é a primeira ATIVIDADE de
+uma linha de cuidado: uma execução DENTRO da plataforma (check-in de humor),
+sem especialidade do legado nem agendamento na DAV. A fundação do Slice 1 travava
+`care_line_item.kind` em `CHECK (kind IN ('CONSULTA'))` e exigia `specialty_code`
+NOT NULL — moldado só para consulta.
+
+**Decisão:**
+- Migration `0009_activity_item` estende o vocabulário: `kind IN ('CONSULTA',
+  'ATIVIDADE')` e torna `specialty_code` **condicional ao kind** via CHECK
+  `specialty_por_kind` (CONSULTA exige especialidade não vazia; ATIVIDADE tem
+  `NULL`). Invariante no banco, não em disciplina de código.
+- No domínio/motor, `SpecialtyCode` segue `string` (`""` = sem especialidade); a
+  conversão para `NULL`/`pgtype.Text` fica na fronteira `gen`, como já é feito com
+  `recurrence`. Assim o contrato de resposta admin não muda (atividade retorna
+  `specialty_code: ""`) e o ripple é mínimo.
+- `careline.ValidatePublish` **pula** a checagem de especialidade quando
+  `item.Kind == ATIVIDADE` — a tabela normativa T1–T19 permanece intacta.
+
+**Consequência:** o catálogo agora comporta atividades da linha; o Verificador de
+Humor entra como itens `ATIVIDADE` (`checkin-humor-diario`, `who5-semanal`,
+`phq4-gatilhado`). O único resíduo é `specialty_code: ""` na resposta admin de uma
+atividade (em vez de omitido) — aceitável no piloto, refinável depois.
+
+## ADR-031 — Consentimento LGPD: titular é o paciente, um ativo por finalidade
+
+**Contexto:** o Verificador de Humor (Anexo C) exige consentimento livre e
+informado (LGPD art. 11, dado sensível) como pré-condição de gravação. O Anexo C
+modela `consent` com `colaborador_id`/`empresa_id` pseudonimizados. No renovi_care,
+porém, o sujeito autenticado é o **paciente** (`patient_account`), e não há
+entidade de colaborador/empresa integrada (a Gestão 2.0 é somente leitura e ainda
+não conectada).
+
+**Decisão:**
+- `consent.patient_id` referencia `patient_account` (ON DELETE RESTRICT: a trilha
+  de consentimento sobrevive). `empresa_id` do Anexo vira `gestao_contract_id`
+  opcional (preenchido a partir da matrícula quando houver).
+- **Allowlist de finalidade:** só finalidades conhecidas (`checkin_humor`) são
+  aceitas no model — não se grava consentimento para propósito arbitrário.
+- **Um ativo por (paciente, finalidade):** índice único parcial
+  `ux_consent_ativo ... WHERE status='ativo'`. Reconceder é versionado: mesmo
+  `versao_termo` é idempotente (não recria); versão nova revoga o anterior e cria
+  um novo, numa transação. Revogação é idempotente.
+- `Active(patient, finalidade)` devolve `ErrNoActiveConsent` quando não há ativo —
+  é o gate que as capturas (Módulos 3–5) consultam antes de persistir; sem ele,
+  respondem 403.
+
+**Consequência:** o consentimento é rastreável e revogável, com histórico
+preservado (linhas revogadas não são apagadas). O front do check-in coleta o
+aceite do termo antes da primeira captura; sem consentimento ativo, nada é gravado.
+
+## ADR-032 — Pontuação pura com cortes versionados como reference data
+
+**Contexto:** o Verificador de Humor pontua grade (quadrante), WHO-5 e PHQ-4. O
+Anexo C exige pontuação DETERMINÍSTICA e cortes da validação BRASILEIRA mantidos
+como parâmetro configurável — nunca constante de código.
+
+**Decisão:**
+- Pacote **puro** `internal/models/mood/scoring` (sem I/O, sem `time.Now()`):
+  `Quadrant`/`IsQuadranteRisco` (circumplexo, corte determinístico em 50, >= é o
+  lado alto), `ScoreWHO5` (índice = bruto×4), `ScorePHQ4` (subescalas PHQ-2/GAD-2).
+  Os **cortes entram por parâmetro** (`WHO5Cutoffs`/`PHQ4Cutoffs`). A tabela de
+  testes é a especificação, como no motor `careline`.
+- Cortes, dimensões e polaridades vivem em **reference data VERSIONADA**
+  (`instrument`/`instrument_dimension`/`instrument_cutoff`), semeada na migration
+  `0011` com os valores BR (WHO-5 <50/<28 — de Souza & Hidalgo 2012; PHQ-4
+  subescala ≥3 — Santos 2013/Moreno 2016; total ≥6 — Kroenke 2009). Mudar um corte
+  = migration nova, não deploy de código.
+- Paleta e vocabulário (rótulos de emoção por quadrante) são **próprios da Renovi**
+  — a nomenclatura do Mood Meter é marca da Yale (Anexo C.4).
+
+**Consequência:** o algoritmo (pacote puro) e os parâmetros (banco) têm fontes da
+verdade separadas: o Módulo 4 carregará os cortes do banco e os passará ao scorer.
+Instrumentos são semeados em toda migração/ambiente (inclusive testcontainers),
+então o feature funciona sem passo de seed manual.
+
+## ADR-033 — O "1 por dia" do check-in é o dia LOCAL (America/Sao_Paulo)
+
+**Contexto:** o anel diário aceita uma resposta por dia (atualizável). "Dia" tem
+de ser o dia do colaborador no Brasil, não o dia UTC: um check-in às 22h de
+Brasília (01h UTC do dia seguinte) tem de contar como HOJE, não amanhã.
+
+**Decisão:**
+- `mood_checkin.dia_ref DATE` é calculado na APLICAÇÃO a partir de `respondido_em`
+  convertido para `America/Sao_Paulo` (`models.localDay`). A unicidade é
+  `ux_mood_checkin_dia (patient_id, dia_ref)`; o upsert é `ON CONFLICT
+  (patient_id, dia_ref)`. Não se usa `respondido_em::date` (que dependeria do fuso
+  da sessão do banco e quebraria na fronteira da meia-noite).
+- Pré-condição do check-in é DERIVADA sob demanda dos fatos imutáveis
+  (`FindActivityEnrollment`: matrícula ativa+vigente numa linha publicada que
+  contém o item `checkin-humor-diario`), não materializada. O anel diário NÃO usa
+  o motor de agendamento (não trava); só as pré-condições de matrícula + consentimento.
+- O comentário livre cifrado foi **adiado** (sem infra de cifra ainda): MVP grava
+  só dado estruturado (coordenadas, quadrante derivado, rótulo, context_tags) —
+  princípio de minimização (LGPD).
+
+**Consequência:** a série temporal é do dia vivido pelo colaborador. O front usa
+paleta e vocabulário PRÓPRIOS da Renovi na grade (não os do Mood Meter/Yale) e
+nunca recalcula o quadrante — exibe o que o servidor derivou. Rotas `/me/*` só
+sobem quando o Auth está montado (dependem de RequireSession), então a verificação
+no browser exige o stack de dev com credenciais DAV.
+
+## ADR-034 — WHO-5/PHQ-4 reusam o motor de cadência via fatos de atividade
+
+**Contexto:** os anéis periódicos (WHO-5 semanal, PHQ-4 gatilhado) têm cadência
+mínima (`MIN_INTERVAL`). Reimplementar a regra seria duplicar o que o motor puro
+`careline` já faz — e divergir dele. Mas o motor foi escrito para CONSULTAS
+(`JourneyAppointment`), e sua tabela T1–T19 é normativa.
+
+**Decisão:**
+- O `AssessmentStore` monta uma `careline.Journey` cujos `Appointments` são os
+  fatos de execução da ATIVIDADE (aplicações passadas do instrumento) mapeados
+  para o shape `JourneyAppointment{ItemRef, Status: "realizada", ScheduledAt:
+  respondido_em}`, e chama `careline.Evaluate(journey, item, rules, now, now)`.
+  Assim `MIN_INTERVAL` (e futuramente QUOTA) "simplesmente funcionam" — **sem
+  alterar o motor nem a tabela T1–T19**. As regras vêm de `care_line_rule` do item.
+- A vigência (VIGENCIA) é avaliada pelo mesmo motor, com `valid_from/valid_until`
+  da matrícula (`FindActivityEnrollmentDetail`). Se não há matrícula elegível, o
+  store devolve uma `Eligibility` não-permitida com um bloco VIGENCIA — a
+  elegibilidade continua **derivada sob demanda dos fatos imutáveis**.
+- **Alternativa preterida:** generalizar `JourneyAppointment`→`JourneyFact` no
+  motor. Exigiria reescrever a especificação normativa T1–T19; adiada até haver
+  ganho que justifique.
+- A pontuação (WHO-5) usa os cortes carregados de `instrument_cutoff` (ADR-032),
+  passados ao pacote puro `scoring`. `flag_encaminhar` (índice < 28) marca o
+  rastreio positivo que o Módulo 6 roteia à trilha clínica.
+
+**Consequência:** um só motor decide cadência para consultas e atividades. O anel
+diário (que não trava) fica de fora do motor de propósito; só os periódicos o usam.
+
+## ADR-035 — Gatilho de aprofundamento fora-de-banda e puro (não no motor)
+
+**Contexto:** a deterioração sustentada no anel diário deve OFERECER o WHO-5;
+WHO-5 sinalizando oferece o PHQ-4; PHQ-4 positivo escala à trilha clínica
+(Anexo C.5.4). Isso NÃO é elegibilidade de agendamento — é "oferecer aprofundar".
+Havia duas modelagens (C.9.1): novo `rule_type` no motor `careline` vs. avaliador
+fora-de-banda.
+
+**Decisão (recomendada e adotada):** avaliador **fora-de-banda**, em pacote PURO
+`internal/models/mood/trigger`, separado do motor `careline`:
+- `Evaluate(Snapshot, Params) State` — máquina de estados NORMAL / OFERECER_WHO5 /
+  OFERECER_PHQ4 / ESCALAR_CLINICO. Precedência: o anel mais PROFUNDO respondido
+  recentemente decide; sem resposta recente, `RiskStreak ≥ N` oferece o WHO-5.
+  Parâmetro `N` (dias consecutivos em risco) = **default 4**, versionável.
+- O `Snapshot` é DERIVADO sob demanda do histórico imutável (sequência de dias em
+  quadrante de risco no `mood_checkin` + últimas aplicações de WHO-5/PHQ-4 dentro
+  de uma janela de 14 dias). O `MoodCheckinStore.Today` monta o Snapshot e expõe
+  `offer`/`escalate` — nada materializado (sem `trigger_state`).
+- Justificativa: manter o motor de agendamento (e a tabela normativa T1–T19)
+  intocado; o gatilho tem semântica e ciclo próprios. Cortes entram via a `faixa`
+  já pontuada (ADR-032/034), não reimplementados.
+
+**Consequência:** `escalate=true` (PHQ-4 positivo) roteia à trilha CLÍNICA — nunca
+ao gestor (Módulo 6). A tabela de testes de `trigger` é a especificação; mudar a
+máquina de estados começa por ela.
+
+## ADR-036 — Roteamento de crise e escalonamento vão à trilha clínica, nunca ao gestor
+
+**Contexto:** o anel diário NÃO é detector de crise (sinaliza tendência). Mas o
+módulo precisa de (a) uma afordância permanente "preciso de ajuda agora" e (b)
+escalonamento de rastreio positivo — ambos SEMPRE ao canal clínico/urgência,
+jamais ao gestor (guardrails 6.1/6.2/6.5 do documento central; Anexo C.5.5).
+
+**Decisão:**
+- `POST /me/mood/help-now` registra `pedido_ajuda` na jornada (quando há matrícula)
+  e devolve um `HelpChannel` (`type: care_navigation`) — triagem, não tratamento.
+  Sem informação de contato falsa no MVP: o front roteia pelo `type`.
+- Rastreio positivo (`flag_encaminhar`: WHO-5 índice < 28 / PHQ-4 subescala ≥ corte)
+  emite `escalonamento_clinico` (`actor: sistema`) na MESMA transação do
+  `assessment_respondido`. A trilha clínica efetiva entra quando existir; hoje grava
+  o fato/flag (auditoria) e o `Today.escalate` expõe o sinal ao paciente.
+- **Muralha:** todo evento em `journey_event` é escopado ao paciente
+  (`patient_id NOT NULL`) e append-only (role sem UPDATE/DELETE, 0008). Não há
+  superfície agregada/gestor no schema — a camada agregada/anonimizada (índice
+  coletivo, k-anonimato) é documento próprio (C.8) e não recebe dado individual.
+
+**Consequência:** o dado individual do Anexo C nunca transita para o gestor por
+construção (não existe caminho). O escalonamento é um fato na trilha clínica do
+paciente; a integração de roteamento real é o próximo passo (ver PROGRESSO).
+
+## ADR-037 — Correções pós-review (PR #13) do Verificador de Humor
+
+**Contexto:** a revisão da PR #13 apontou três ajustes de correção/robustez sobre
+os ADRs 034/035, sem mudar o contrato nem o schema.
+
+**Decisão:**
+- **Streak = dias de CALENDÁRIO consecutivos (ADR-035).** O gatilho contava
+  *check-ins* em risco em sequência, ignorando lacunas de dia — quem só registrava
+  nos dias ruins acumulava um streak falso. `riskStreak` (helper puro em
+  `mood_checkin.go`, table-driven) agora quebra a sequência numa lacuna de dia,
+  fiel a "N dias consecutivos" (Anexo C.5.4).
+- **Guard de concorrência no `Submit` do assessment (ADR-034).** A cadência era
+  checada FORA da transação (janela TOCTOU: dois submits simultâneos podiam gravar
+  duas aplicações dentro do `MIN_INTERVAL`). Agora o `Submit` adquire um
+  `pg_advisory_xact_lock` por (paciente, instrumento) no início da transação e
+  **reavalia a cadência dentro dela** — o segundo submit vê a aplicação já
+  commitada e é barrado. Coberto por teste de integração determinístico.
+- **Nits:** `History` capa o limite em 120 (teto do contrato) em vez de zerar para
+  30; `getMoodHistory` (front) passa `limit`; grade de humor operável por teclado
+  (setas), com teste; comentário fixando a invariante dos cortes de subescala do
+  PHQ-4 (as duas linhas `subescala_positiva` devem compartilhar o corte).
+
+**Consequência:** o gatilho fica fiel ao spec, o anel semanal ganha um backstop de
+concorrência no servidor (além do botão desabilitado no front) e a captura diária
+fica acessível por teclado.
+
+### Segunda rodada — revisão do CodeRabbit (PR #13)
+
+O CodeRabbit revisou o push das correções acima e apontou 10 itens; os válidos
+foram aplicados:
+
+- **Cortes na conexão da tx (Major):** `AssessmentStore.score`/`who5Cutoffs`/
+  `phq4Cutoffs` liam por `s.q` (pool) enquanto o `Submit` segurava a tx + advisory
+  lock — pediria uma 2ª conexão por Submit (risco de pool-starvation sob
+  concorrência). Passam a receber o `q` da tx.
+- **Streak precisa ser RECENTE (Major):** `riskStreak` agora exige que o check-in
+  mais novo seja hoje ou ontem — um streak antigo e interrompido não oferece mais o
+  WHO-5 indefinidamente (o `Snapshot` fala em dias "recentes").
+- **Consentimento serializado (Major):** `Grant`, `Revoke` e o `Record` do check-in
+  passam a compartilhar um `pg_advisory_xact_lock` por (paciente, finalidade), e as
+  pré-condições do `Record` foram movidas para DENTRO da tx. Fecha a janela em que
+  uma revogação se intrometeria entre a checagem e a gravação, e evita a
+  unique-violation crua de duas concessões concorrentes.
+- **Acessibilidade (Major):** a grade anuncia o ponto escolhido por uma região
+  `aria-live` (leitor de tela); botões-toggle (Likert e tags de contexto) ganham
+  `aria-pressed`.
+- **Nits:** o controller valida/capa o `limit` do histórico (controller fino); a
+  resposta de `getMoodHistory` ganha `maxItems: 120` no contrato (sem drift de
+  código gerado — é validação, não muda o codegen).
+- **Bug de teste pré-existente (achado na verificação):** `TestMoodCheckinStore_Fluxo`
+  usava `time.Now()` e assumia `now` e `now+1h` no mesmo dia local — perto da
+  meia-noite de Brasília caíam em dias diferentes (2 linhas). Ancorado a um `now`
+  fixo ao meio-dia UTC.
+- **Bug de teste pré-existente (achado no CI Linux, E2E do Slice 1):**
+  `requireInstant` comparava instantes por igualdade EXATA; a coluna `timestamptz`
+  trunca a microssegundo, mas o payload de evento (RFC3339Nano) guarda nanossegundos
+  — no runner Linux (onde `time.Now()` tem resolução de nanossegundo) a comparação
+  falhava por uma diferença que o banco sequer distingue. Passa a truncar a
+  microssegundo (a tolerância zero correta para instantes ancorados no banco).
+
+**Não aplicado — `CHECK` sem `NOT VALID` nas migrations (o CodeRabbit marcou como
+Crítico):** trocar o `CHECK` de `journey_event` sem `NOT VALID` faz um scan sob
+`ACCESS EXCLUSIVE` (bloqueia escrita). Porém o `golang-migrate` (usado via
+`NewWithSourceInstance`) roda cada arquivo de migration como UMA transação
+implícita, então `ADD ... NOT VALID` + `VALIDATE` no mesmo arquivo mantêm o
+`ACCESS EXCLUSIVE` por toda a transação — **não** entregam zero-downtime. O fix real
+exigiria dividir cada extensão de `event_type` em duas migrations (add / validate),
+desproporcional para o piloto (tabela `journey_event` minúscula). Registrado como
+follow-up se/quando a tabela crescer.

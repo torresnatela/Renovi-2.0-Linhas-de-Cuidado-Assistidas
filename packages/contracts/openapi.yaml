@@ -154,6 +154,248 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
   # ---------------------------------------------------------------------------
+  # Verificador Diário de Humor (Anexo C) — lado do paciente.
+  #
+  # Consentimento livre e informado (LGPD art. 11, dado sensível) é PRÉ-CONDIÇÃO
+  # de gravação do check-in: sem consentimento ativo, nenhuma resposta é persistida.
+  # ---------------------------------------------------------------------------
+  /me/consent:
+    get:
+      operationId: getConsent
+      summary: Status do consentimento do paciente para uma finalidade.
+      parameters:
+        - name: finalidade
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Finalidade do consentimento. Default: checkin_humor."
+      responses:
+        "200":
+          description: Situação atual do consentimento.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsentStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: grantConsent
+      summary: Concede consentimento (versionado). Idempotente para o mesmo termo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantConsentRequest"
+      responses:
+        "200":
+          description: Consentimento ativo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsentStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/consent/revoke:
+    post:
+      operationId: revokeConsent
+      summary: Revoga o consentimento ativo da finalidade. Idempotente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeConsentRequest"
+      responses:
+        "200":
+          description: Consentimento revogado (ou já ausente).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsentStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/mood/instruments/{codigo}:
+    get:
+      operationId: getMoodInstrument
+      summary: Configuração de um instrumento (dimensões, rótulos, tags de contexto).
+      description: >
+        Config que o front usa para desenhar a captura. Para o GRID (anel diário),
+        traz as dimensões e os rótulos de emoção por quadrante + as tags de contexto.
+        Cortes e polaridades são parâmetros versionados (instrument_cutoff).
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "Código do instrumento: GRID, WHO5 ou PHQ4."
+      responses:
+        "200":
+          description: Configuração do instrumento ativo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstrumentConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /me/mood/checkin:
+    post:
+      operationId: recordMoodCheckin
+      summary: Registra (ou atualiza) o check-in de humor do dia.
+      description: >
+        Captura obrigatória de 1 toque (valência×energia). Deriva o quadrante de
+        forma determinística e emite o fato de execução na jornada. Uma resposta
+        por dia local — repetir no mesmo dia atualiza a do dia. Exige matrícula
+        ativa e vigente na linha que contém o item e consentimento ativo; sem eles,
+        403 com `reason` (`consent_required` | `not_enrolled`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordMoodCheckinRequest"
+      responses:
+        "200":
+          description: Check-in do dia registrado/atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoodCheckin"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Sem consentimento ativo ou sem matrícula elegível (ver `reason`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /me/mood/today:
+    get:
+      operationId: getMoodToday
+      summary: O check-in de hoje (se houver) e a elegibilidade do paciente.
+      responses:
+        "200":
+          description: Situação do dia.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoodToday"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/mood/history:
+    get:
+      operationId: getMoodHistory
+      summary: Série recente de check-ins do paciente.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 30
+            maximum: 120
+      responses:
+        "200":
+          description: Check-ins do mais recente ao mais antigo.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 120
+                items:
+                  $ref: "#/components/schemas/MoodCheckin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/mood/help-now:
+    post:
+      operationId: moodHelpNow
+      summary: Afordância "preciso de ajuda agora" — roteia ao canal de urgência.
+      description: >
+        Registra o pedido na jornada (trilha clínica/auditoria) e devolve o canal
+        de urgência/care navigation — triagem, não tratamento (guardrail 6.2).
+        NUNCA vai ao gestor.
+      responses:
+        "200":
+          description: Canal de urgência para onde encaminhar o paciente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HelpChannel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/assessments/{codigo}:
+    get:
+      operationId: getAssessmentAvailability
+      summary: Disponibilidade de um instrumento periódico (WHO-5, PHQ-4).
+      description: >
+        A cadência (MIN_INTERVAL) é avaliada pelo MOTOR de linhas de cuidado sobre
+        o histórico imutável de aplicações — o front NÃO recalcula, exibe o
+        `reason`/`available_from` do bloqueio.
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "Código do instrumento: WHO5 ou PHQ4."
+      responses:
+        "200":
+          description: Disponibilidade e descritor do instrumento.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentAvailability"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /me/assessments:
+    post:
+      operationId: submitAssessment
+      summary: Submete as respostas de um instrumento periódico e o pontua.
+      description: >
+        Pontuação determinística com cortes da validação BR. Respeita a cadência
+        (MIN_INTERVAL) via motor; reaplicação precoce é barrada com `blocks`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitAssessmentRequest"
+      responses:
+        "200":
+          description: Instrumento pontuado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Sem consentimento ativo ou sem matrícula elegível (ver `reason`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Reaplicação precoce — cadência não permite ainda (ver `blocks`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  # ---------------------------------------------------------------------------
   # Agendamento: especialidade -> profissional -> horário -> consulta -> entrar.
   #
   # SEM motor de elegibilidade nesta fase: quem decide "pode agendar?" ainda é só
@@ -1363,6 +1605,259 @@ components:
         email:
           type: string
           format: email
+    ConsentStatus:
+      description: >
+        Situação do consentimento do paciente para uma finalidade. `active`
+        resume: o front só grava check-in quando há consentimento ativo.
+      type: object
+      required: [finalidade, active]
+      properties:
+        finalidade:
+          type: string
+          example: checkin_humor
+        active:
+          type: boolean
+          description: true quando há consentimento ativo para a finalidade.
+        versao_termo:
+          type: string
+          nullable: true
+          description: Versão do termo aceito (presente quando ativo).
+        concedido_em:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando o consentimento ativo foi concedido.
+    GrantConsentRequest:
+      type: object
+      required: [finalidade, versao_termo]
+      properties:
+        finalidade:
+          type: string
+          example: checkin_humor
+        versao_termo:
+          type: string
+          example: v1
+    RevokeConsentRequest:
+      type: object
+      required: [finalidade]
+      properties:
+        finalidade:
+          type: string
+          example: checkin_humor
+    InstrumentConfig:
+      description: >
+        Config de um instrumento para o front desenhar a captura. Cortes e
+        polaridades são parâmetros versionados; o front não os recalcula.
+      type: object
+      required: [codigo, versao, anel, dimensions, emotion_labels, context_tags]
+      properties:
+        codigo:
+          type: string
+          example: GRID
+        versao:
+          type: string
+          example: "1"
+        anel:
+          type: string
+          enum: [diario, semanal, gatilhado]
+        dimensions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InstrumentDimension"
+        emotion_labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmotionLabel"
+        context_tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContextTag"
+    InstrumentDimension:
+      type: object
+      required: [dimensao, polaridade, min_score, max_score]
+      properties:
+        dimensao:
+          type: string
+          example: valencia
+        polaridade:
+          type: string
+          enum: [positiva, negativa]
+        min_score:
+          type: number
+        max_score:
+          type: number
+    EmotionLabel:
+      type: object
+      required: [quadrante, rotulo]
+      properties:
+        quadrante:
+          type: string
+          example: desagradavel_calmo
+        rotulo:
+          type: string
+          example: Desanimado
+    ContextTag:
+      type: object
+      required: [chave, rotulo]
+      properties:
+        chave:
+          type: string
+          example: sono
+        rotulo:
+          type: string
+          example: Sono
+    MoodCheckin:
+      description: O check-in de humor de um dia (execução do anel diário).
+      type: object
+      required: [valencia, energia, quadrante, respondido_em]
+      properties:
+        valencia:
+          type: integer
+          minimum: 0
+          maximum: 100
+        energia:
+          type: integer
+          minimum: 0
+          maximum: 100
+        quadrante:
+          type: string
+          description: Derivado determinístico (valência×energia).
+          example: desagradavel_calmo
+        emotion_label:
+          type: string
+          nullable: true
+        context_tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+        respondido_em:
+          type: string
+          format: date-time
+    RecordMoodCheckinRequest:
+      type: object
+      required: [valencia, energia]
+      properties:
+        valencia:
+          type: integer
+          minimum: 0
+          maximum: 100
+        energia:
+          type: integer
+          minimum: 0
+          maximum: 100
+        emotion_label:
+          type: string
+          description: Rótulo opcional do quadrante escolhido.
+        context_tags:
+          type: array
+          items:
+            type: string
+          description: "Contexto opcional (chaves de context_tag: trabalho, sono...)."
+    MoodToday:
+      description: O check-in de hoje (ou nulo) e a elegibilidade do paciente.
+      type: object
+      required: [dia, can_checkin]
+      properties:
+        dia:
+          type: string
+          format: date
+          description: Dia local (America/Sao_Paulo).
+        can_checkin:
+          type: boolean
+          description: true quando há consentimento ativo e matrícula elegível.
+        reason:
+          type: string
+          nullable: true
+          enum: [consent_required, not_enrolled]
+          description: Por que não pode registrar, quando `can_checkin` é false.
+        checkin:
+          $ref: "#/components/schemas/MoodCheckin"
+          nullable: true
+        offer:
+          type: string
+          nullable: true
+          enum: [WHO5, PHQ4]
+          description: >
+            Instrumento de aprofundamento OFERECIDO agora pelo gatilho (deterioração
+            sustentada no anel diário → WHO-5; WHO-5 sinalizando → PHQ-4). Nulo quando
+            não há oferta. Derivado sob demanda do histórico.
+        escalate:
+          type: boolean
+          description: >
+            true quando o gatilho indica escalonamento à trilha CLÍNICA (PHQ-4
+            positivo). Nunca vai ao gestor — só ao canal clínico/urgência.
+    HelpChannel:
+      description: >
+        Canal de urgência/care navigation (triagem, não tratamento). O front roteia
+        pelo `type`; sem informação de contato falsa no MVP.
+      type: object
+      required: [type, label, message]
+      properties:
+        type:
+          type: string
+          example: care_navigation
+        label:
+          type: string
+        message:
+          type: string
+    AssessmentAvailability:
+      description: Se o instrumento pode ser respondido agora, e seu descritor.
+      type: object
+      required: [codigo, eligibility, item_count, value_min, value_max]
+      properties:
+        codigo:
+          type: string
+          example: WHO5
+        eligibility:
+          $ref: "#/components/schemas/Eligibility"
+        item_count:
+          type: integer
+          description: Quantos itens o instrumento tem.
+        value_min:
+          type: integer
+        value_max:
+          type: integer
+    SubmitAssessmentRequest:
+      type: object
+      required: [codigo, items]
+      properties:
+        codigo:
+          type: string
+          enum: [WHO5, PHQ4]
+        items:
+          type: array
+          items:
+            type: integer
+          description: Respostas Likert na ordem do instrumento.
+    AssessmentResult:
+      description: O resultado pontuado de um instrumento periódico.
+      type: object
+      required: [codigo, faixa, flag_encaminhar, respondido_em]
+      properties:
+        codigo:
+          type: string
+        raw_score:
+          type: number
+        index_score:
+          type: number
+          nullable: true
+          description: WHO-5 (0–100); ausente no PHQ-4.
+        subscores:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: integer
+          description: 'PHQ-4: {"phq2": x, "gad2": y}.'
+        faixa:
+          type: string
+          description: Derivada dos cortes (normal | sinaliza | encaminha | moderado).
+        flag_encaminhar:
+          type: boolean
+          description: Rastreio positivo — encaminha à trilha clínica.
+        respondido_em:
+          type: string
+          format: date-time
     HealthStatus:
       type: object
       required: [status, service, version]
@@ -1751,9 +2246,10 @@ components:
           description: Parâmetros da regra, específicos de cada `rule_type`.
     CareLineItem:
       description: >
-        Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade.
-        `ref` é o código estável do item DENTRO da linha (o que as regras de
-        pré-requisito referenciam), distinto do `id` (UUID).
+        Um passo da linha — uma CONSULTA de uma especialidade ou uma ATIVIDADE
+        executada na plataforma (ex.: check-in de humor do Anexo C). `ref` é o
+        código estável do item DENTRO da linha (o que as regras de pré-requisito
+        referenciam), distinto do `id` (UUID).
       type: object
       required: [id, ref, kind, specialty_code, label, sort_order, rules]
       properties:
@@ -1768,11 +2264,15 @@ components:
           example: aval-inicial
         kind:
           type: string
-          enum: [CONSULTA]
-          description: Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+          enum: [CONSULTA, ATIVIDADE]
+          description: >
+            CONSULTA (aponta para uma especialidade do legado) ou ATIVIDADE
+            (executada na plataforma, sem especialidade).
         specialty_code:
           type: string
-          description: A especialidade da consulta (código do catálogo do legado).
+          description: >
+            A especialidade da consulta (código do catálogo do legado). Vazio
+            para itens ATIVIDADE, que não têm especialidade.
         label:
           type: string
           description: 'Rótulo em PT-BR exibido ao paciente. Ex.: "Avaliação inicial".'
@@ -2077,16 +2577,19 @@ components:
           type: string
     CreateCareLineItemRequest:
       type: object
-      required: [ref, kind, specialty_code, label]
+      required: [ref, kind, label]
       properties:
         ref:
           type: string
           example: aval-inicial
         kind:
           type: string
-          enum: [CONSULTA]
+          enum: [CONSULTA, ATIVIDADE]
         specialty_code:
           type: string
+          description: >
+            Obrigatório para CONSULTA; omitido (ou vazio) para ATIVIDADE, que não
+            tem especialidade.
         label:
           type: string
         recurrence:

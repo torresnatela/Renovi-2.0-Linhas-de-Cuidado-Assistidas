@@ -421,11 +421,17 @@ func requireBlock(t *testing.T, blocks []api.EligibilityBlock, ruleType string) 
 	return *b
 }
 
-// requireInstant compara instantes com tolerância ZERO — o esperado deriva de
-// slot semeado, cujo instante o teste conhece exatamente.
+// requireInstant compara instantes na resolução do banco (microssegundo). O
+// timestamptz do Postgres NÃO representa sub-microssegundo, então um instante que
+// passou pela coluna vem truncado a micros, enquanto o mesmo instante num payload
+// de evento (RFC3339Nano) pode trazer nanossegundos. No Linux o time.Now() tem
+// resolução de nanossegundo, e comparar por igualdade exata falharia por uma
+// diferença que o próprio banco não distingue. Truncar a micros é a tolerância
+// ZERO correta para instantes ancorados no banco.
 func requireInstant(t *testing.T, want, got time.Time, msg string) {
 	t.Helper()
-	require.Truef(t, want.Equal(got), "%s: esperava %s, veio %s", msg, want, got)
+	require.Truef(t, want.Truncate(time.Microsecond).Equal(got.Truncate(time.Microsecond)),
+		"%s: esperava %s, veio %s", msg, want, got)
 }
 
 func idemKey(t *testing.T) string {

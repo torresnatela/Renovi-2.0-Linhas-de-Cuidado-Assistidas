@@ -6,6 +6,7 @@ package gen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -62,6 +63,13 @@ type Querier interface {
 	// Queries de autenticação e vínculo com a DAV (ver migration 0002_auth).
 	// O CPF é a chave de identidade: mora em patient_identity (LGPD, ver CLAUDE.md).
 	FindAccountByCPF(ctx context.Context, cpf string) (PatientAccount, error)
+	// A matrícula ATIVA e VIGENTE do paciente numa linha publicada que contém o item
+	// de atividade pedido. É a elegibilidade do check-in, derivada sob demanda dos
+	// fatos imutáveis (matrícula + item do template). Sem linha => não elegível.
+	FindActivityEnrollment(ctx context.Context, arg FindActivityEnrollmentParams) (FindActivityEnrollmentRow, error)
+	// Como FindActivityEnrollment, mas traz a vigência da matrícula — o motor puro
+	// precisa dela para a regra VIGENCIA ao avaliar a cadência do instrumento.
+	FindActivityEnrollmentDetail(ctx context.Context, arg FindActivityEnrollmentDetailParams) (FindActivityEnrollmentDetailRow, error)
 	// "Viva" = não revogada, não expirada E com a conta ainda ACTIVE. O join com o
 	// status é o que faz bloquear uma conta derrubar as sessões dela na hora — o
 	// ganho concreto de sessão opaca sobre JWT (ADR-010).
@@ -78,6 +86,8 @@ type Querier interface {
 	// valida conta ACTIVE — mas o agendamento não deve depender disso para não criar
 	// consulta na DAV sem paciente.
 	GetAccountDavPersonID(ctx context.Context, id uuid.UUID) (pgtype.Text, error)
+	GetActiveConsent(ctx context.Context, arg GetActiveConsentParams) (Consent, error)
+	GetActiveInstrument(ctx context.Context, codigo string) (Instrument, error)
 	// Sempre por (id, dono). Nunca só por id: um SELECT por id sozinho é um convite a
 	// alguém esquecer o WHERE do dono na próxima rota e devolver a consulta de
 	// terceiro — e aqui a consulta carrega o link da sala.
@@ -109,8 +119,10 @@ type Querier interface {
 	GetExampleWidget(ctx context.Context, id uuid.UUID) (ExampleWidget, error)
 	// A versão publicada mais recente de um code: é a que rege uma nova matrícula.
 	GetLatestPublishedCareLine(ctx context.Context, code string) (CareLine, error)
+	GetMoodCheckinByDay(ctx context.Context, arg GetMoodCheckinByDayParams) (MoodCheckin, error)
 	// Nasce PENDING_DAV: a conta só ativa quando a DAV confirmar o vínculo.
 	InsertAccount(ctx context.Context, arg InsertAccountParams) (PatientAccount, error)
+	InsertAssessmentItemResponse(ctx context.Context, arg InsertAssessmentItemResponseParams) error
 	// Consultas da jornada realizada (tabela care_appointment — migration 0007).
 	//
 	// É a projeção clínica do agendamento (appointment, 0003), amarrada à matrícula.
@@ -121,6 +133,7 @@ type Querier interface {
 	InsertCareAppointment(ctx context.Context, arg InsertCareAppointmentParams) (CareAppointment, error)
 	InsertCareLineItem(ctx context.Context, arg InsertCareLineItemParams) (CareLineItem, error)
 	InsertCareLineRule(ctx context.Context, arg InsertCareLineRuleParams) (CareLineRule, error)
+	InsertConsent(ctx context.Context, arg InsertConsentParams) (Consent, error)
 	// Trilha de todo vínculo. É o que permitirá revisar retroativamente quem anexou
 	// prontuário de quem, quando o fator de posse (WhatsApp/e-mail) existir.
 	InsertDavLinkAudit(ctx context.Context, arg InsertDavLinkAuditParams) error
@@ -142,6 +155,10 @@ type Querier interface {
 	InsertJourneyEvent(ctx context.Context, arg InsertJourneyEventParams) (JourneyEvent, error)
 	// token_hash é o SHA-256 do token opaco. O token em si nunca toca o banco.
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
+	InsertWellbeingAssessment(ctx context.Context, arg InsertWellbeingAssessmentParams) (WellbeingAssessment, error)
+	// A aplicação mais recente de um instrumento (por código) para o paciente — o
+	// gatilho usa a faixa/flag e o instante para decidir o estado.
+	LatestAssessmentByInstrument(ctx context.Context, arg LatestAssessmentByInstrumentParams) (LatestAssessmentByInstrumentRow, error)
 	// Ativa a conta. O CHECK active_exige_vinculo_dav (migration 0002) recusa esta
 	// linha se dav_person_id vier nulo — a regra está no banco, não só aqui.
 	//
@@ -153,6 +170,9 @@ type Querier interface {
 	// aconteceu não é informação para o paciente. DAV_UNKNOWN aparece — ele pode ter
 	// uma consulta de verdade marcada.
 	ListAppointmentsByAccount(ctx context.Context, accountID uuid.UUID) ([]Appointment, error)
+	// Os instantes das aplicações passadas do paciente para um item — o histórico
+	// imutável que o motor lê para MIN_INTERVAL (cadência derivada sob demanda).
+	ListAssessmentTimes(ctx context.Context, arg ListAssessmentTimesParams) ([]time.Time, error)
 	ListCareAppointmentsByEnrollment(ctx context.Context, enrollmentID uuid.UUID) ([]CareAppointment, error)
 	// "Minhas consultas da jornada", com filtro OPCIONAL por status: quando
 	// sqlc.narg('status') é nulo, o predicado some e a lista vem inteira.
@@ -161,9 +181,14 @@ type Querier interface {
 	ListCareLines(ctx context.Context) ([]CareLine, error)
 	// Todas as versões de um code, da mais nova para a mais antiga.
 	ListCareLinesByCode(ctx context.Context, code string) ([]CareLine, error)
+	ListContextTags(ctx context.Context) ([]ContextTag, error)
+	ListEmotionLabels(ctx context.Context) ([]EmotionLabel, error)
 	ListEnrollmentPeriods(ctx context.Context, enrollmentID uuid.UUID) ([]EnrollmentPeriod, error)
 	ListEnrollmentsByPatient(ctx context.Context, patientID uuid.UUID) ([]Enrollment, error)
 	ListExampleWidgets(ctx context.Context) ([]ExampleWidget, error)
+	ListInstrumentCutoffs(ctx context.Context, instrumentID uuid.UUID) ([]InstrumentCutoff, error)
+	ListInstrumentDimensions(ctx context.Context, instrumentID uuid.UUID) ([]InstrumentDimension, error)
+	ListItemRules(ctx context.Context, careLineItemID uuid.UUID) ([]ListItemRulesRow, error)
 	ListItemsByCareLine(ctx context.Context, careLineID uuid.UUID) ([]CareLineItem, error)
 	// A tela de jornada, paginada por KEYSET (não OFFSET): a página seguinte pede tudo
 	// ANTERIOR ao último (occurred_at, id) que já viu. O índice
@@ -175,10 +200,14 @@ type Querier interface {
 	// idêntica em semântica, mas o sqlc infere o tipo de cada parâmetro corretamente
 	// (o row-value constructor faz o sqlc tipar o id como timestamptz).
 	ListJourneyEventsByPatient(ctx context.Context, arg ListJourneyEventsByPatientParams) ([]JourneyEvent, error)
+	ListMoodCheckins(ctx context.Context, arg ListMoodCheckinsParams) ([]MoodCheckin, error)
 	// A fila de compensação do worker: falhou, o horário é nosso e ainda não voltou.
 	// É uma consulta ao banco, e não um estado em memória, para sobreviver a um
 	// restart no meio.
 	ListPendingSlotRelease(ctx context.Context, limit int32) ([]Appointment, error)
+	// Quadrantes dos check-ins recentes (mais novo primeiro) — o gatilho conta a
+	// sequência de dias em risco a partir daqui.
+	ListRecentCheckinQuadrants(ctx context.Context, arg ListRecentCheckinQuadrantsParams) ([]ListRecentCheckinQuadrantsRow, error)
 	// Os eventos mais recentes de UMA matrícula (ex.: para montar o resumo da linha).
 	ListRecentJourneyEventsByEnrollment(ctx context.Context, arg ListRecentJourneyEventsByEnrollmentParams) ([]JourneyEvent, error)
 	// As regras de todos os itens de uma linha, com o ref do item junto (o motor puro
@@ -227,8 +256,12 @@ type Querier interface {
 	// expirada (o caso comum do piloto é renovar o que venceu); concluída/encerrada
 	// são terminais e não voltam por aqui.
 	RenewEnrollment(ctx context.Context, arg RenewEnrollmentParams) (int64, error)
+	RevokeActiveConsent(ctx context.Context, arg RevokeActiveConsentParams) (int64, error)
 	RevokeSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	UpsertAddress(ctx context.Context, arg UpsertAddressParams) error
+	// Uma resposta por dia local (dia_ref): nova resposta no mesmo dia ATUALIZA a do
+	// dia. O id da linha original é preservado no update.
+	UpsertMoodCheckin(ctx context.Context, arg UpsertMoodCheckinParams) (MoodCheckin, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -77,6 +77,17 @@ func TestValidatePublish(t *testing.T) {
 		assert.True(t, hasErrContaining(errs, "ACUPUNTURA"), "errs: %v", errs)
 	})
 
+	t.Run("atividade_nao_exige_especialidade", func(t *testing.T) {
+		// Uma ATIVIDADE (ex.: check-in de humor do Anexo C) não aponta para
+		// especialidade do legado; a validação de especialidade deve pulá-la.
+		checkin := careline.Item{Ref: "checkin-humor-diario", Kind: careline.KindAtividade, Label: "Check-in de humor"}
+		rules := map[string][]careline.Rule{
+			"checkin-humor-diario": {minInterval(1)},
+		}
+		errs := careline.ValidatePublish([]careline.Item{checkin}, rules, legado)
+		assert.Empty(t, errs, "atividade sem especialidade deveria publicar; errs: %v", errs)
+	})
+
 	t.Run("caso_feliz_com_normalizacao_de_acentos", func(t *testing.T) {
 		rules := map[string][]careline.Rule{
 			"psicologia": {quotaMonthly(4), minInterval(7),

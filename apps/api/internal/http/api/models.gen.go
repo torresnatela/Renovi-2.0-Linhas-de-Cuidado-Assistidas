@@ -88,12 +88,15 @@ func (e CareLineStatus) Valid() bool {
 
 // Defines values for CareLineItemKind.
 const (
-	CareLineItemKindCONSULTA CareLineItemKind = "CONSULTA"
+	CareLineItemKindATIVIDADE CareLineItemKind = "ATIVIDADE"
+	CareLineItemKindCONSULTA  CareLineItemKind = "CONSULTA"
 )
 
 // Valid indicates whether the value is a known member of the CareLineItemKind enum.
 func (e CareLineItemKind) Valid() bool {
 	switch e {
+	case CareLineItemKindATIVIDADE:
+		return true
 	case CareLineItemKindCONSULTA:
 		return true
 	default:
@@ -127,12 +130,15 @@ func (e CareLineRuleRuleType) Valid() bool {
 
 // Defines values for CreateCareLineItemRequestKind.
 const (
-	CreateCareLineItemRequestKindCONSULTA CreateCareLineItemRequestKind = "CONSULTA"
+	CreateCareLineItemRequestKindATIVIDADE CreateCareLineItemRequestKind = "ATIVIDADE"
+	CreateCareLineItemRequestKindCONSULTA  CreateCareLineItemRequestKind = "CONSULTA"
 )
 
 // Valid indicates whether the value is a known member of the CreateCareLineItemRequestKind enum.
 func (e CreateCareLineItemRequestKind) Valid() bool {
 	switch e {
+	case CreateCareLineItemRequestKindATIVIDADE:
+		return true
 	case CreateCareLineItemRequestKindCONSULTA:
 		return true
 	default:
@@ -308,6 +314,45 @@ func (e HealthStatusStatus) Valid() bool {
 	}
 }
 
+// Defines values for InstrumentConfigAnel.
+const (
+	Diario    InstrumentConfigAnel = "diario"
+	Gatilhado InstrumentConfigAnel = "gatilhado"
+	Semanal   InstrumentConfigAnel = "semanal"
+)
+
+// Valid indicates whether the value is a known member of the InstrumentConfigAnel enum.
+func (e InstrumentConfigAnel) Valid() bool {
+	switch e {
+	case Diario:
+		return true
+	case Gatilhado:
+		return true
+	case Semanal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InstrumentDimensionPolaridade.
+const (
+	Negativa InstrumentDimensionPolaridade = "negativa"
+	Positiva InstrumentDimensionPolaridade = "positiva"
+)
+
+// Valid indicates whether the value is a known member of the InstrumentDimensionPolaridade enum.
+func (e InstrumentDimensionPolaridade) Valid() bool {
+	switch e {
+	case Negativa:
+		return true
+	case Positiva:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for JoinWindowStatus.
 const (
 	OPEN        JoinWindowStatus = "OPEN"
@@ -386,6 +431,42 @@ func (e JourneyEventEventType) Valid() bool {
 	}
 }
 
+// Defines values for MoodTodayOffer.
+const (
+	MoodTodayOfferPHQ4 MoodTodayOffer = "PHQ4"
+	MoodTodayOfferWHO5 MoodTodayOffer = "WHO5"
+)
+
+// Valid indicates whether the value is a known member of the MoodTodayOffer enum.
+func (e MoodTodayOffer) Valid() bool {
+	switch e {
+	case MoodTodayOfferPHQ4:
+		return true
+	case MoodTodayOfferWHO5:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MoodTodayReason.
+const (
+	ConsentRequired MoodTodayReason = "consent_required"
+	NotEnrolled     MoodTodayReason = "not_enrolled"
+)
+
+// Valid indicates whether the value is a known member of the MoodTodayReason enum.
+func (e MoodTodayReason) Valid() bool {
+	switch e {
+	case ConsentRequired:
+		return true
+	case NotEnrolled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RenewEnrollmentRequestMonths.
 const (
 	RenewEnrollmentRequestMonthsN1 RenewEnrollmentRequestMonths = 1
@@ -401,6 +482,24 @@ func (e RenewEnrollmentRequestMonths) Valid() bool {
 	case RenewEnrollmentRequestMonthsN2:
 		return true
 	case RenewEnrollmentRequestMonthsN3:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SubmitAssessmentRequestCodigo.
+const (
+	SubmitAssessmentRequestCodigoPHQ4 SubmitAssessmentRequestCodigo = "PHQ4"
+	SubmitAssessmentRequestCodigoWHO5 SubmitAssessmentRequestCodigo = "WHO5"
+)
+
+// Valid indicates whether the value is a known member of the SubmitAssessmentRequestCodigo enum.
+func (e SubmitAssessmentRequestCodigo) Valid() bool {
+	switch e {
+	case SubmitAssessmentRequestCodigoPHQ4:
+		return true
+	case SubmitAssessmentRequestCodigoWHO5:
 		return true
 	default:
 		return false
@@ -541,6 +640,38 @@ type AppointmentProfessional struct {
 	Id       string `json:"id"`
 }
 
+// AssessmentAvailability Se o instrumento pode ser respondido agora, e seu descritor.
+type AssessmentAvailability struct {
+	Codigo string `json:"codigo"`
+
+	// Eligibility O veredito do motor para UM item, no instante avaliado. `allowed` resume (`blocks` vazio); `blocks` diz por que não, quando não. O front usa isto para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o porquê.
+	Eligibility Eligibility `json:"eligibility"`
+
+	// ItemCount Quantos itens o instrumento tem.
+	ItemCount int `json:"item_count"`
+	ValueMax  int `json:"value_max"`
+	ValueMin  int `json:"value_min"`
+}
+
+// AssessmentResult O resultado pontuado de um instrumento periódico.
+type AssessmentResult struct {
+	Codigo string `json:"codigo"`
+
+	// Faixa Derivada dos cortes (normal | sinaliza | encaminha | moderado).
+	Faixa string `json:"faixa"`
+
+	// FlagEncaminhar Rastreio positivo — encaminha à trilha clínica.
+	FlagEncaminhar bool `json:"flag_encaminhar"`
+
+	// IndexScore WHO-5 (0–100); ausente no PHQ-4.
+	IndexScore   *float32  `json:"index_score,omitempty"`
+	RawScore     *float32  `json:"raw_score,omitempty"`
+	RespondidoEm time.Time `json:"respondido_em"`
+
+	// Subscores PHQ-4: {"phq2": x, "gad2": y}.
+	Subscores *map[string]int `json:"subscores,omitempty"`
+}
+
 // AuditPage Uma página do event log. `next_cursor` é OPACO — o cliente o devolve como veio, sem interpretar; ausente significa fim.
 type AuditPage struct {
 	Items []JourneyEvent `json:"items"`
@@ -604,11 +735,11 @@ type CareLine struct {
 // CareLineStatus defines model for CareLine.Status.
 type CareLineStatus string
 
-// CareLineItem Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade. `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
+// CareLineItem Um passo da linha — uma CONSULTA de uma especialidade ou uma ATIVIDADE executada na plataforma (ex.: check-in de humor do Anexo C). `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
 type CareLineItem struct {
 	Id openapi_types.UUID `json:"id"`
 
-	// Kind Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+	// Kind CONSULTA (aponta para uma especialidade do legado) ou ATIVIDADE (executada na plataforma, sem especialidade).
 	Kind CareLineItemKind `json:"kind"`
 
 	// Label Rótulo em PT-BR exibido ao paciente. Ex.: "Avaliação inicial".
@@ -624,11 +755,11 @@ type CareLineItem struct {
 	// SortOrder Ordem de exibição do item na linha.
 	SortOrder int `json:"sort_order"`
 
-	// SpecialtyCode A especialidade da consulta (código do catálogo do legado).
+	// SpecialtyCode A especialidade da consulta (código do catálogo do legado). Vazio para itens ATIVIDADE, que não têm especialidade.
 	SpecialtyCode string `json:"specialty_code"`
 }
 
-// CareLineItemKind Só CONSULTA no Slice 1; o enum reserva espaço para exames etc.
+// CareLineItemKind CONSULTA (aponta para uma especialidade do legado) ou ATIVIDADE (executada na plataforma, sem especialidade).
 type CareLineItemKind string
 
 // CareLineList defines model for CareLineList.
@@ -647,6 +778,25 @@ type CareLineRule struct {
 
 // CareLineRuleRuleType As quatro regras ARMAZENÁVEIS. VIGENCIA não entra: é da matrícula, avaliada sempre, não uma regra que o admin liga por item.
 type CareLineRuleRuleType string
+
+// ConsentStatus Situação do consentimento do paciente para uma finalidade. `active` resume: o front só grava check-in quando há consentimento ativo.
+type ConsentStatus struct {
+	// Active true quando há consentimento ativo para a finalidade.
+	Active bool `json:"active"`
+
+	// ConcedidoEm Quando o consentimento ativo foi concedido.
+	ConcedidoEm *time.Time `json:"concedido_em,omitempty"`
+	Finalidade  string     `json:"finalidade"`
+
+	// VersaoTermo Versão do termo aceito (presente quando ativo).
+	VersaoTermo *string `json:"versao_termo,omitempty"`
+}
+
+// ContextTag defines model for ContextTag.
+type ContextTag struct {
+	Chave  string `json:"chave"`
+	Rotulo string `json:"rotulo"`
+}
 
 // CreateAppointmentRequest defines model for CreateAppointmentRequest.
 type CreateAppointmentRequest struct {
@@ -678,8 +828,10 @@ type CreateCareLineItemRequest struct {
 	Ref        string  `json:"ref"`
 
 	// SortOrder Ordem na linha. Default a cargo do servidor quando ausente.
-	SortOrder     *int   `json:"sort_order,omitempty"`
-	SpecialtyCode string `json:"specialty_code"`
+	SortOrder *int `json:"sort_order,omitempty"`
+
+	// SpecialtyCode Obrigatório para CONSULTA; omitido (ou vazio) para ATIVIDADE, que não tem especialidade.
+	SpecialtyCode *string `json:"specialty_code,omitempty"`
 }
 
 // CreateCareLineItemRequestKind defines model for CreateCareLineItemRequest.Kind.
@@ -738,6 +890,12 @@ type EligibilityBlock struct {
 // EligibilityBlockRuleType Qual regra barrou. VIGENCIA é da MATRÍCULA (fora do período de validade) e por isso não é uma regra armazenada como as outras quatro.
 type EligibilityBlockRuleType string
 
+// EmotionLabel defines model for EmotionLabel.
+type EmotionLabel struct {
+	Quadrante string `json:"quadrante"`
+	Rotulo    string `json:"rotulo"`
+}
+
 // EndEnrollmentRequest defines model for EndEnrollmentRequest.
 type EndEnrollmentRequest struct {
 	// Reason Justificativa registrada no event log (auditoria).
@@ -789,6 +947,12 @@ type ForceStatusRequest struct {
 // ForceStatusRequestStatus O status a forçar na consulta (rota interna de teste).
 type ForceStatusRequestStatus string
 
+// GrantConsentRequest defines model for GrantConsentRequest.
+type GrantConsentRequest struct {
+	Finalidade  string `json:"finalidade"`
+	VersaoTermo string `json:"versao_termo"`
+}
+
 // HealthStatus defines model for HealthStatus.
 type HealthStatus struct {
 	Service string             `json:"service"`
@@ -799,6 +963,37 @@ type HealthStatus struct {
 
 // HealthStatusStatus defines model for HealthStatus.Status.
 type HealthStatusStatus string
+
+// HelpChannel Canal de urgência/care navigation (triagem, não tratamento). O front roteia pelo `type`; sem informação de contato falsa no MVP.
+type HelpChannel struct {
+	Label   string `json:"label"`
+	Message string `json:"message"`
+	Type    string `json:"type"`
+}
+
+// InstrumentConfig Config de um instrumento para o front desenhar a captura. Cortes e polaridades são parâmetros versionados; o front não os recalcula.
+type InstrumentConfig struct {
+	Anel          InstrumentConfigAnel  `json:"anel"`
+	Codigo        string                `json:"codigo"`
+	ContextTags   []ContextTag          `json:"context_tags"`
+	Dimensions    []InstrumentDimension `json:"dimensions"`
+	EmotionLabels []EmotionLabel        `json:"emotion_labels"`
+	Versao        string                `json:"versao"`
+}
+
+// InstrumentConfigAnel defines model for InstrumentConfig.Anel.
+type InstrumentConfigAnel string
+
+// InstrumentDimension defines model for InstrumentDimension.
+type InstrumentDimension struct {
+	Dimensao   string                        `json:"dimensao"`
+	MaxScore   float32                       `json:"max_score"`
+	MinScore   float32                       `json:"min_score"`
+	Polaridade InstrumentDimensionPolaridade `json:"polaridade"`
+}
+
+// InstrumentDimensionPolaridade defines model for InstrumentDimension.Polaridade.
+type InstrumentDimensionPolaridade string
 
 // JoinTicket O link de acesso do paciente à sala da DAV. É uma CAPACIDADE, não um dado: não guarde em cache, não coloque em log, não mande por e-mail.
 type JoinTicket struct {
@@ -857,7 +1052,7 @@ type JourneyItem struct {
 	// Eligibility O veredito do motor para UM item, no instante avaliado. `allowed` resume (`blocks` vazio); `blocks` diz por que não, quando não. O front usa isto para obedecer à regra de ouro de UX do apps/web/CLAUDE.md: nunca um botão só desabilitado, sempre o porquê.
 	Eligibility Eligibility `json:"eligibility"`
 
-	// Item Um passo da linha — no Slice 1, sempre uma CONSULTA de uma especialidade. `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
+	// Item Um passo da linha — uma CONSULTA de uma especialidade ou uma ATIVIDADE executada na plataforma (ex.: check-in de humor do Anexo C). `ref` é o código estável do item DENTRO da linha (o que as regras de pré-requisito referenciam), distinto do `id` (UUID).
 	Item CareLineItem `json:"item"`
 }
 
@@ -867,6 +1062,45 @@ type LoginRequest struct {
 	Cpf      string `json:"cpf"`
 	Password string `json:"password"`
 }
+
+// MoodCheckin O check-in de humor de um dia (execução do anel diário).
+type MoodCheckin struct {
+	ContextTags  *[]string `json:"context_tags,omitempty"`
+	EmotionLabel *string   `json:"emotion_label,omitempty"`
+	Energia      int       `json:"energia"`
+
+	// Quadrante Derivado determinístico (valência×energia).
+	Quadrante    string    `json:"quadrante"`
+	RespondidoEm time.Time `json:"respondido_em"`
+	Valencia     int       `json:"valencia"`
+}
+
+// MoodToday O check-in de hoje (ou nulo) e a elegibilidade do paciente.
+type MoodToday struct {
+	// CanCheckin true quando há consentimento ativo e matrícula elegível.
+	CanCheckin bool `json:"can_checkin"`
+
+	// Checkin O check-in de humor de um dia (execução do anel diário).
+	Checkin *MoodCheckin `json:"checkin,omitempty"`
+
+	// Dia Dia local (America/Sao_Paulo).
+	Dia openapi_types.Date `json:"dia"`
+
+	// Escalate true quando o gatilho indica escalonamento à trilha CLÍNICA (PHQ-4 positivo). Nunca vai ao gestor — só ao canal clínico/urgência.
+	Escalate *bool `json:"escalate,omitempty"`
+
+	// Offer Instrumento de aprofundamento OFERECIDO agora pelo gatilho (deterioração sustentada no anel diário → WHO-5; WHO-5 sinalizando → PHQ-4). Nulo quando não há oferta. Derivado sob demanda do histórico.
+	Offer *MoodTodayOffer `json:"offer,omitempty"`
+
+	// Reason Por que não pode registrar, quando `can_checkin` é false.
+	Reason *MoodTodayReason `json:"reason,omitempty"`
+}
+
+// MoodTodayOffer Instrumento de aprofundamento OFERECIDO agora pelo gatilho (deterioração sustentada no anel diário → WHO-5; WHO-5 sinalizando → PHQ-4). Nulo quando não há oferta. Derivado sob demanda do histórico.
+type MoodTodayOffer string
+
+// MoodTodayReason Por que não pode registrar, quando `can_checkin` é false.
+type MoodTodayReason string
 
 // Problem Erro no formato RFC 7807 (problem+json).
 type Problem struct {
@@ -923,6 +1157,17 @@ type Reason struct {
 	Detail *string `json:"detail,omitempty"`
 }
 
+// RecordMoodCheckinRequest defines model for RecordMoodCheckinRequest.
+type RecordMoodCheckinRequest struct {
+	// ContextTags Contexto opcional (chaves de context_tag: trabalho, sono...).
+	ContextTags *[]string `json:"context_tags,omitempty"`
+
+	// EmotionLabel Rótulo opcional do quadrante escolhido.
+	EmotionLabel *string `json:"emotion_label,omitempty"`
+	Energia      int     `json:"energia"`
+	Valencia     int     `json:"valencia"`
+}
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	Address   Address            `json:"address"`
@@ -948,6 +1193,11 @@ type RenewEnrollmentRequest struct {
 
 // RenewEnrollmentRequestMonths Meses acrescentados à vigência (novo período, não edita o atual).
 type RenewEnrollmentRequestMonths int
+
+// RevokeConsentRequest defines model for RevokeConsentRequest.
+type RevokeConsentRequest struct {
+	Finalidade string `json:"finalidade"`
+}
 
 // Slot Um horário livre. Autossuficiente de propósito: qualquer Slot, sozinho, tem tudo para ser renderizado certo, sem depender do contexto de onde veio.
 type Slot struct {
@@ -988,6 +1238,17 @@ type Specialty struct {
 type SpecialtyList struct {
 	Items []Specialty `json:"items"`
 }
+
+// SubmitAssessmentRequest defines model for SubmitAssessmentRequest.
+type SubmitAssessmentRequest struct {
+	Codigo SubmitAssessmentRequestCodigo `json:"codigo"`
+
+	// Items Respostas Likert na ordem do instrumento.
+	Items []int `json:"items"`
+}
+
+// SubmitAssessmentRequestCodigo defines model for SubmitAssessmentRequest.Codigo.
+type SubmitAssessmentRequestCodigo string
 
 // AppointmentId defines model for AppointmentId.
 type AppointmentId = openapi_types.UUID
@@ -1085,6 +1346,12 @@ type GetMyAvailabilityParams struct {
 	To *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
 }
 
+// GetConsentParams defines parameters for GetConsent.
+type GetConsentParams struct {
+	// Finalidade Finalidade do consentimento. Default: checkin_humor.
+	Finalidade *string `form:"finalidade,omitempty" json:"finalidade,omitempty"`
+}
+
 // GetMyEligibilityParams defines parameters for GetMyEligibility.
 type GetMyEligibilityParams struct {
 	// ItemId Id do item da linha (UUID).
@@ -1092,6 +1359,11 @@ type GetMyEligibilityParams struct {
 
 	// Date Instante da avaliação (RFC 3339). Default: agora.
 	Date *time.Time `form:"date,omitempty" json:"date,omitempty"`
+}
+
+// GetMoodHistoryParams defines parameters for GetMoodHistory.
+type GetMoodHistoryParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListProfessionalSlotsParams defines parameters for ListProfessionalSlots.
@@ -1135,3 +1407,15 @@ type ForceCareAppointmentStatusJSONRequestBody = ForceStatusRequest
 
 // CreateMyCareAppointmentJSONRequestBody defines body for CreateMyCareAppointment for application/json ContentType.
 type CreateMyCareAppointmentJSONRequestBody = CreateCareAppointmentRequest
+
+// SubmitAssessmentJSONRequestBody defines body for SubmitAssessment for application/json ContentType.
+type SubmitAssessmentJSONRequestBody = SubmitAssessmentRequest
+
+// GrantConsentJSONRequestBody defines body for GrantConsent for application/json ContentType.
+type GrantConsentJSONRequestBody = GrantConsentRequest
+
+// RevokeConsentJSONRequestBody defines body for RevokeConsent for application/json ContentType.
+type RevokeConsentJSONRequestBody = RevokeConsentRequest
+
+// RecordMoodCheckinJSONRequestBody defines body for RecordMoodCheckin for application/json ContentType.
+type RecordMoodCheckinJSONRequestBody = RecordMoodCheckinRequest

@@ -81,6 +81,15 @@ func run() error {
 
 	careAdmin := newCareAdminController(cfg, pool, agendaClient, logger)
 
+	// Verificador de Humor (Anexo C): consentimento e instrumentos só precisam do
+	// Postgres próprio. As rotas /me/* só sobem junto com o Auth (ver router).
+	consent := &controllers.ConsentController{Consents: models.NewConsentStore(pool)}
+	mood := &controllers.MoodController{
+		Instruments: models.NewInstrumentStore(pool),
+		Checkins:    models.NewMoodCheckinStore(pool),
+	}
+	assessments := &controllers.AssessmentController{Assessments: models.NewAssessmentStore(pool)}
+
 	// A jornada agenda PELO booking: reusa o MESMO BookingStore do scheduling.
 	// Sem booking montado, não há jornada (nem endpoint interno de teste).
 	journey, internal := newJourneyControllers(cfg, pool, bookingStore, logger)
@@ -100,12 +109,15 @@ func run() error {
 			}
 			return nil
 		},
-		Auth:       auth,
-		Scheduling: scheduling,
-		CareAdmin:  careAdmin,
-		Journey:    journey,
-		Internal:   internal,
-		AdminToken: cfg.AdminToken,
+		Auth:        auth,
+		Scheduling:  scheduling,
+		Consent:     consent,
+		Mood:        mood,
+		Assessments: assessments,
+		CareAdmin:   careAdmin,
+		Journey:     journey,
+		Internal:    internal,
+		AdminToken:  cfg.AdminToken,
 		// O cadastro precisa de um teto maior que o de uma rota normal: ele
 		// espera a DAV de forma síncrona. Derivar do orçamento evita que os dois
 		// números divirjam e a última tentativa seja sempre cortada.

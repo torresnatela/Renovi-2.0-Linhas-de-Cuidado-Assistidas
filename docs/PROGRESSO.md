@@ -3,12 +3,67 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-19 — **Correções pós-review do Slice 1** (renovação de
-matrícula vencida, PREREQUISITE com limite superior, `available_from` de QUOTA
-super-lotada, `Idempotency-Key` por item, detach do ctx pós-`Book`, front sem POST
-concorrente) + cenário C do E2E. `make ci` e integração completa (E2E A/B/C) verdes.
-Antes: 2026-07-18 — Slice 1 CONCLUÍDO (motor, catálogo/matrícula, jornada `/me/*`,
-E2E, percurso ao vivo na DAV HML; ADR-022 a ADR-025)._
+_Última atualização: 2026-07-20 — **Revisão do CodeRabbit na PR #13** endereçada (ADR-037, 2ª rodada): cortes na conexão da tx, streak recente, locks de consentimento (Grant/Revoke/Record), a11y (aria-live + aria-pressed), clamp de limit, `maxItems: 120` no contrato, e fix de teste flaky (meia-noite BR). Não aplicado: `NOT VALID` nas migrations (golang-migrate roda em tx única; desproporcional no piloto). `make ci` + integração completa (incl. e2e) + front verdes.
+Antes: 2026-07-19 — **Correções pós-review (PR #13)** do Verificador de Humor: streak = dias consecutivos de calendário (gatilho), guard de concorrência (advisory lock + rechecagem na tx) no Submit do assessment, e nits (teto do History em 120, `limit` no `getMoodHistory`, grade operável por teclado). `make ci` + integração verdes. Ver ADR-037.
+Antes: 2026-07-19 — **Verificador Diário de Humor (Anexo C): completo (Módulos 0–6 + telas de WHO-5/PHQ-4)**, pronto para merge na main, sobre o Slice 1 concluído._
+
+## 🌡️ Verificador Diário de Humor — Anexo C (em andamento, branch `feat/verificador-humor`)
+
+Check-in emocional contínuo como **atividade** da linha de cuidado (3 anéis:
+diário → WHO-5 semanal → PHQ-4 gatilhado). Só Degrau 2 (exige matrícula ativa).
+Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
+
+- [x] **Módulo 0 — item ATIVIDADE na fundação** (ADR-030): migration
+  `0009_activity_item` (kind `IN ('CONSULTA','ATIVIDADE')`, `specialty_code`
+  condicional ao kind), `careline_catalog.AddItem` aceita ATIVIDADE,
+  `ValidatePublish` pula especialidade para atividade. Unit + integração verdes
+  (fluxo de consulta sem regressão).
+- [x] **Módulo 1 — Consentimento** (ADR-031): migration `0010_consent`
+  (índice parcial `ux_consent_ativo` = um ativo por paciente+finalidade), model
+  `ConsentStore` (Grant idempotente por termo, reconcessão versionada, Revoke,
+  `Active`), controller + rotas `/me/consent` (GET/POST/revoke) sob `RequireSession`.
+  Testes de controller (fakes) + integração verdes.
+- [x] **Módulo 2 — Instrumentos + pontuação pura** (ADR-032): pacote PURO
+  `models/mood/scoring` (`Quadrant`/`IsQuadranteRisco`, `ScoreWHO5`, `ScorePHQ4`,
+  cortes por parâmetro) table-driven; migration `0011_instrument`
+  (instrument/dimension/cutoff + lookups) com seed dos 3 instrumentos e cortes BR;
+  `InstrumentStore.Config` + `GET /me/mood/instruments/{codigo}`. Unit + controller
+  + integração verdes.
+- [x] **Módulo 3 — Anel diário (grade) ponta a ponta** (ADR-033): migration
+  `0012_mood_checkin` (dia_ref local, sem comentario), `MoodCheckinStore`
+  (pré-condições derivadas, upsert do dia, fato na jornada), rotas
+  `POST /me/mood/checkin`, `GET /me/mood/today`, `/history`. Front
+  `apps/web/src/features/mood/` (grade valência×energia + fluxo de consentimento,
+  paleta própria da Renovi). Verificado: scoring/model (integração), controllers
+  (fakes), front (Vitest) + typecheck + build. **Browser: pendente** — precisa do
+  stack de dev com credenciais DAV (rotas /me só montam com Auth).
+- [x] **Módulo 4 — Anel semanal WHO-5 via MIN_INTERVAL** (ADR-034):
+  `0013_wellbeing_assessment` + `assessment_item_response`. `AssessmentStore`
+  **reusa `careline.Evaluate`** montando a `Journey` com os fatos de atividade
+  (Status=realizada, ScheduledAt=respondido_em) — cadência derivada sob demanda,
+  sem tocar T1–T19. Pontuação WHO-5 com cortes do banco. `GET /me/assessments/{codigo}`,
+  `POST /me/assessments`. Integração (cadência 7d) + controller (409 blocks, 403) verdes.
+- [x] **Módulo 5 — Anel gatilhado PHQ-4 + gatilho puro** (ADR-035): pacote PURO
+  `models/mood/trigger` (máquina de estados C.5.4, `N=4` default) table-driven;
+  PHQ-4 no `AssessmentStore.score` (subescalas PHQ-2/GAD-2, cortes do banco);
+  wiring do gatilho no `MoodCheckinStore.Today` (oferta `offer` + `escalate`
+  derivados do histórico). Integração do caminho completo NORMAL→WHO5→PHQ4→ESCALAR verde.
+- [x] **Módulo 6 — Crise/escalonamento + fechamento** (ADR-036): `0014_crisis_routing`
+  (event_types `pedido_ajuda`, `escalonamento_clinico`). `POST /me/mood/help-now`
+  (canal de urgência + registro na jornada); rastreio positivo emite
+  `escalonamento_clinico` (actor=sistema) → trilha CLÍNICA, nunca gestor. Integração
+  (help-now + escalonamento + muralha) verde.
+
+**Próximos passos do Verificador de Humor** (fora do backend entregue):
+- **Verificação no browser** do fluxo (precisa do stack de dev com credenciais DAV;
+  rotas `/me/*` só montam com Auth).
+- [x] **Front dos anéis periódicos** (WHO-5/PHQ-4) + oferta do gatilho, escalonamento
+  e "preciso de ajuda agora" na `/humor` (`AssessmentForm` + `MoodPage`).
+- **Comentário livre cifrado** (adiado — exige pacote de cifra em repouso).
+- **Degrau 1** (termômetro populacional fora de linha de cuidado) — fork adiado.
+- **Integração real da trilha clínica** e **worker de retenção** (hoje o escalonamento
+  grava o fato/flag; o roteamento efetivo entra quando a trilha existir).
+- **Camada agregada/gestor** (índice coletivo, k-anonimato) — documento próprio (C.8).
 
 ## ✅ Slice 1 — Linhas de Cuidado Assistidas (CONCLUÍDO)
 

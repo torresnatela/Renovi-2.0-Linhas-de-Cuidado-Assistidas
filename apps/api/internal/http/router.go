@@ -27,6 +27,14 @@ type Deps struct {
 	// Scheduling monta o agendamento. Nil desliga (ex.: sem DSN do legado no
 	// ambiente local). Depende de Auth: tudo aqui exige sessão.
 	Scheduling *controllers.SchedulingController
+	// Consent monta /me/consent (Verificador de Humor, Anexo C). Nil desliga.
+	// Depende de Auth: exige sessão do paciente.
+	Consent *controllers.ConsentController
+	// Mood monta /me/mood/* (Verificador de Humor, Anexo C). Nil desliga.
+	// Depende de Auth: exige sessão do paciente.
+	Mood *controllers.MoodController
+	// Assessments monta /me/assessments (WHO-5/PHQ-4). Nil desliga. Depende de Auth.
+	Assessments *controllers.AssessmentController
 	// CareAdmin monta as rotas /admin/* (catálogo + matrícula). Nil desliga (sem
 	// RENOVI_ADMIN_TOKEN ou sem agenda para validar o publish). NÃO depende de Auth:
 	// autentica pelo token de admin, nunca pela sessão do paciente.
@@ -104,6 +112,18 @@ func NewRouter(d Deps) *chi.Mux {
 				mountScheduling(r, *d.Scheduling, *d.Auth, d.BookTimeout)
 			}
 
+			// Verificador de Humor (Anexo C): consentimento é a primeira rota do
+			// paciente; também exige sessão.
+			if d.Consent != nil {
+				mountConsent(r, *d.Consent, *d.Auth)
+			}
+			if d.Mood != nil {
+				mountMood(r, *d.Mood, *d.Auth)
+			}
+			if d.Assessments != nil {
+				mountAssessments(r, *d.Assessments, *d.Auth)
+			}
+
 			// A jornada (/me/*) também é toda atrás de sessão.
 			if d.Journey != nil {
 				mountJourney(r, *d.Journey, *d.Auth, d.BookTimeout)
@@ -162,6 +182,41 @@ func mountScheduling(r chi.Router, s controllers.SchedulingController, auth cont
 			r.Use(middleware.Timeout(bookTimeout))
 			r.Post("/appointments", s.Create)
 		})
+	})
+}
+
+// mountConsent monta /me/consent (Anexo C), atrás de sessão. Timeout normal: são
+// operações rápidas contra o Postgres próprio.
+func mountConsent(r chi.Router, c controllers.ConsentController, auth controllers.AuthController) {
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+		r.Use(controllers.RequireSession(auth.Sessions))
+		r.Get("/me/consent", c.GetConsent)
+		r.Post("/me/consent", c.GrantConsent)
+		r.Post("/me/consent/revoke", c.RevokeConsent)
+	})
+}
+
+// mountMood monta /me/mood/* (Anexo C), atrás de sessão. Timeout normal.
+func mountMood(r chi.Router, c controllers.MoodController, auth controllers.AuthController) {
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+		r.Use(controllers.RequireSession(auth.Sessions))
+		r.Get("/me/mood/instruments/{codigo}", c.GetInstrument)
+		r.Post("/me/mood/checkin", c.RecordCheckin)
+		r.Get("/me/mood/today", c.GetToday)
+		r.Get("/me/mood/history", c.GetHistory)
+		r.Post("/me/mood/help-now", c.HelpNow)
+	})
+}
+
+// mountAssessments monta /me/assessments (Anexo C), atrás de sessão.
+func mountAssessments(r chi.Router, c controllers.AssessmentController, auth controllers.AuthController) {
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+		r.Use(controllers.RequireSession(auth.Sessions))
+		r.Get("/me/assessments/{codigo}", c.GetAvailability)
+		r.Post("/me/assessments", c.Submit)
 	})
 }
 
