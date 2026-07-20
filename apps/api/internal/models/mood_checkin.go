@@ -237,6 +237,33 @@ func (s *MoodCheckinStore) Today(ctx context.Context, patientID uuid.UUID, now t
 	return out, nil
 }
 
+// riskDay é um par (dia local, quadrante) de um check-in — a entrada do cálculo
+// da sequência de dias em risco do gatilho.
+type riskDay struct {
+	dia       time.Time // dia_ref (meia-noite civil do dia local)
+	quadrante string
+}
+
+// riskStreak conta a sequência de dias de CALENDÁRIO consecutivos em quadrante de
+// risco, a partir do check-in mais recente (rows vem ordenado por dia DESC). Uma
+// LACUNA de dia quebra a sequência: é "N dias consecutivos" (Anexo C.5.4), não N
+// check-ins avulsos — quem só registra nos dias ruins não acumula um streak falso.
+func riskStreak(rows []riskDay) int {
+	streak := 0
+	var prev time.Time
+	for i, r := range rows {
+		if !scoring.IsQuadranteRisco(r.quadrante) {
+			break
+		}
+		if i > 0 && !r.dia.Equal(prev.AddDate(0, 0, -1)) {
+			break // lacuna de dia: a sequência terminou
+		}
+		streak++
+		prev = r.dia
+	}
+	return streak
+}
+
 // computeOffer deriva a oferta do gatilho (Anexo C.5.4) do histórico imutável:
 // a sequência de dias em risco no anel diário e as últimas aplicações de WHO-5/PHQ-4.
 func (s *MoodCheckinStore) computeOffer(ctx context.Context, patientID uuid.UUID, now time.Time) (string, bool, error) {
@@ -244,14 +271,11 @@ func (s *MoodCheckinStore) computeOffer(ctx context.Context, patientID uuid.UUID
 	if err != nil {
 		return "", false, fmt.Errorf("listar quadrantes recentes: %w", err)
 	}
-	streak := 0
+	days := make([]riskDay, 0, len(rows))
 	for _, r := range rows {
-		if !scoring.IsQuadranteRisco(r.Quadrante) {
-			break
-		}
-		streak++
+		days = append(days, riskDay{dia: r.DiaRef.Time, quadrante: r.Quadrante})
 	}
-	snap := trigger.Snapshot{RiskStreak: streak}
+	snap := trigger.Snapshot{RiskStreak: riskStreak(days)}
 
 	who5, err := s.q.LatestAssessmentByInstrument(ctx, gen.LatestAssessmentByInstrumentParams{PatientID: patientID, Codigo: Who5Codigo})
 	switch {
@@ -281,8 +305,11 @@ func (s *MoodCheckinStore) computeOffer(ctx context.Context, patientID uuid.UUID
 
 // History devolve os check-ins recentes do paciente (mais novo primeiro).
 func (s *MoodCheckinStore) History(ctx context.Context, patientID uuid.UUID, limit int) ([]MoodCheckin, error) {
-	if limit <= 0 || limit > 120 {
+	if limit <= 0 {
 		limit = 30
+	}
+	if limit > 120 {
+		limit = 120 // teto do contrato (openapi: maximum 120)
 	}
 	rows, err := s.q.ListMoodCheckins(ctx, gen.ListMoodCheckinsParams{PatientID: patientID, Limit: int32(limit)})
 	if err != nil {
