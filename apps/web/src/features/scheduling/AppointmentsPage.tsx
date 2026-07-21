@@ -1,8 +1,17 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-import { ApiError, type Appointment } from '../../shared/api';
+import { ApiError, type Appointment, type AppointmentStatus } from '../../shared/api';
 import { formatDateLong, formatDateTimeShort, formatTime } from '../../shared/datetime';
 import { openExternal } from '../../shared/navigate';
+import { Badge } from '../../shared/ui/Badge';
+import { Button } from '../../shared/ui/Button';
+import { Card } from '../../shared/ui/Card';
+import { DateBadge } from '../../shared/ui/DateBadge';
+import { ErrorNotice, Loading } from '../../shared/ui/feedback';
+import { IconBack } from '../../shared/ui/icons';
+import { AssessmentForm } from '../mood/AssessmentForm';
+import { useMoodToday } from '../mood/useMood';
 import { reasonText } from './reasons';
 import { useAppointment, useAppointments, useJoinAppointment } from './useScheduling';
 import { Carregando, Erro, Vazio } from './ui';
@@ -65,35 +74,37 @@ export function AppointmentPage() {
   const { data, isLoading, error } = useAppointment(appointmentId);
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <p className="mb-6 text-sm">
-        <Link to="/consultas" className="text-emerald-700 underline">
-          ← Minhas consultas
-        </Link>
-      </p>
+    <div className="mx-auto flex max-w-2xl flex-col gap-6">
+      <Link
+        to="/consultas"
+        className="inline-flex w-fit items-center gap-1 text-sm font-bold text-primary-300"
+      >
+        <IconBack size={18} />
+        Minhas consultas
+      </Link>
 
-      {isLoading && <Carregando>Carregando a consulta…</Carregando>}
-      {error && <Erro error={error} />}
+      {isLoading && <Loading label="Carregando a consulta…" />}
+      {error && <ErrorNotice error={error} />}
 
       {data && (
-        <section className="rounded-lg border border-slate-200 bg-white p-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-medium">{data.specialty.name}</h2>
-              <p className="text-sm text-slate-600">com {data.professional.full_name}</p>
+        <Card as="section" padding="lg" className="flex flex-col gap-6">
+          <div className="flex items-start gap-4">
+            <DateBadge iso={data.starts_at} timeZone={data.time_zone} />
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <h1 className="text-lg font-bold text-primary-300">{data.specialty.name}</h1>
+              <p className="text-sm text-muted">com {data.professional.full_name}</p>
+              <p className="mt-1 text-sm text-ink first-letter:uppercase">
+                {formatDateLong(data.starts_at, data.time_zone)} às{' '}
+                {formatTime(data.starts_at, data.time_zone)}
+              </p>
             </div>
             <Selo consulta={data} />
           </div>
 
-          <p className="mb-6 text-sm text-slate-700 first-letter:uppercase">
-            {formatDateLong(data.starts_at, data.time_zone)} às{' '}
-            {formatTime(data.starts_at, data.time_zone)}
-          </p>
-
           <PainelDeEntrada consulta={data} />
-        </section>
+        </Card>
       )}
-    </main>
+    </div>
   );
 }
 
@@ -105,9 +116,11 @@ export function AppointmentPage() {
  * servidor mandou em `join.opens_at`. Mudar a antecedência é uma variável de
  * ambiente no servidor, sem tocar aqui — e um relógio adiantado no cliente não
  * abre a sala mais cedo, porque quem decide é o `join.status`.
+ *
+ * Fora de OPEN, nem monta o `JoinGate` — logo, nem consulta o humor de hoje: o
+ * gate de pré-consulta só existe quando a sala pode de fato abrir.
  */
 function PainelDeEntrada({ consulta }: { consulta: Appointment }) {
-  const entrar = useJoinAppointment(consulta.id);
   const { status, opens_at, reason } = consulta.join;
 
   if (status !== 'OPEN') {
@@ -120,28 +133,81 @@ function PainelDeEntrada({ consulta }: { consulta: Appointment }) {
         : reasonText(reason, 'Esta consulta não está disponível para acesso.');
 
     return (
-      <p role="status" className="rounded bg-slate-100 p-3 text-sm text-slate-700">
+      <p role="status" className="rounded-md bg-primary-100 p-4 text-sm text-primary-300">
         {texto}
       </p>
     );
   }
 
+  return <JoinGate consulta={consulta} />;
+}
+
+/**
+ * A entrada na sala, COM o gate de pré-consulta (decisão de produto, 2026-07-20).
+ *
+ * Quando a janela está aberta e há um instrumento ofertado pelo gatilho de humor
+ * (`today.offer` = WHO-5|PHQ-4), o clique em "Entrar" primeiro mostra o
+ * `AssessmentForm` inline; só depois de respondê-lo (ou fechá-lo) a sala abre.
+ *
+ * Três invariantes tornam isso SEGURO — o gate nunca prende o paciente:
+ *  - avaliado SÓ no clique: se `today` ainda não resolveu (ou falhou), `offer` é
+ *    undefined e seguimos direto ao join (o loading do humor não atrasa a página);
+ *  - `gateFeito` trava depois da primeira vez: uma falha no instrumento não
+ *    re-oferece nem entra em loop — libera a entrada;
+ *  - qualquer erro do instrumento é do próprio `AssessmentForm` (aviso discreto),
+ *    e o "Concluir"/"Fechar" dele chama `onDone` → a sala abre.
+ */
+function JoinGate({ consulta }: { consulta: Appointment }) {
+  const entrar = useJoinAppointment(consulta.id);
+  const today = useMoodToday();
+  const [mostrarForm, setMostrarForm] = useState(false);
+  const [gateFeito, setGateFeito] = useState(false);
+
+  function irParaSala() {
+    // Guarda contra o duplo-clique no mesmo tick: cada clique é um POST que
+    // registra acesso no servidor, e dois abririam a sala duas vezes.
+    if (entrar.isPending) return;
+    entrar.mutate(undefined, { onSuccess: (t) => openExternal(t.url) });
+  }
+
+  function aoClicarEntrar() {
+    const offer = today.data?.offer;
+    if (offer && !gateFeito) {
+      setMostrarForm(true);
+      return;
+    }
+    irParaSala();
+  }
+
+  function concluirGate() {
+    setGateFeito(true);
+    setMostrarForm(false);
+    irParaSala();
+  }
+
+  const offer = today.data?.offer;
+  if (mostrarForm && offer) {
+    return (
+      <Card padding="lg" className="flex flex-col gap-3 border-primary-200">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-bold text-primary-300">
+            Antes da consulta, responda estas perguntas rápidas
+          </h2>
+          <p className="text-[13px] text-muted">
+            São dois minutos e ajudam sua equipe de cuidado. Suas respostas vão apenas para a sua
+            trilha clínica — nunca para gestores ou RH.
+          </p>
+        </div>
+        <AssessmentForm codigo={offer} onDone={concluirGate} />
+      </Card>
+    );
+  }
+
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => {
-          // Guarda contra o duplo-clique no mesmo tick, antes de isPending virar:
-          // cada clique é um POST que registra acesso no servidor, e dois abririam
-          // a sala duas vezes.
-          if (entrar.isPending) return;
-          entrar.mutate(undefined, { onSuccess: (t) => openExternal(t.url) });
-        }}
-        disabled={entrar.isPending}
-        className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-      >
+    <div className="flex flex-col gap-3">
+      <Button color="primary" loading={entrar.isPending} onClick={aoClicarEntrar}>
         {entrar.isPending ? 'Abrindo sua sala…' : 'Entrar na consulta'}
-      </button>
+      </Button>
 
       {/*
         O 409 aqui é a rede de proteção da corrida (relógio adiantado, cache
@@ -149,14 +215,14 @@ function PainelDeEntrada({ consulta }: { consulta: Appointment }) {
         manda é o servidor no momento do clique.
       */}
       {entrar.isError && (
-        <p role="alert" className="mt-3 rounded bg-red-50 p-3 text-sm text-red-700">
+        <p role="alert" className="rounded-md bg-[rgba(205,25,25,0.08)] p-4 text-sm text-error">
           {reasonText(
             entrar.error instanceof ApiError ? entrar.error.reason : undefined,
             entrar.error.message,
           )}
         </p>
       )}
-    </>
+    </div>
   );
 }
 
@@ -168,29 +234,31 @@ function PainelDeEntrada({ consulta }: { consulta: Appointment }) {
  * pior que a incerteza — o paciente pode ter uma consulta de verdade marcada.
  */
 function Selo({ consulta }: { consulta: Appointment }) {
-  const estilos: Record<Appointment['status'], string> = {
-    CONFIRMED: 'bg-emerald-100 text-emerald-800',
-    PROCESSING: 'bg-slate-100 text-slate-700',
-    UNCONFIRMED: 'bg-amber-100 text-amber-900',
-    CANCELLED: 'bg-slate-100 text-slate-500',
+  const mapa: Record<
+    AppointmentStatus,
+    { tone: 'success' | 'neutral' | 'accent' | 'alert'; label: string }
+  > = {
+    CONFIRMED: { tone: 'success', label: 'Confirmada' },
+    PROCESSING: { tone: 'neutral', label: 'Confirmando…' },
+    UNCONFIRMED: { tone: 'alert', label: 'Verificando' },
+    CANCELLED: { tone: 'neutral', label: 'Cancelada' },
   };
-  const textos: Record<Appointment['status'], string> = {
-    CONFIRMED: 'Confirmada',
-    PROCESSING: 'Confirmando…',
-    UNCONFIRMED: 'Verificando',
-    CANCELLED: 'Cancelada',
-  };
+  const { tone, label } = mapa[consulta.status];
+
+  if (consulta.status === 'UNCONFIRMED') {
+    return (
+      <span
+        className="shrink-0"
+        title="A Doutor ao Vivo não confirmou a tempo. Nossa equipe está verificando se a consulta foi marcada."
+      >
+        <Badge tone={tone}>{label}</Badge>
+      </span>
+    );
+  }
 
   return (
-    <span
-      className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${estilos[consulta.status]}`}
-      title={
-        consulta.status === 'UNCONFIRMED'
-          ? 'A Doutor ao Vivo não confirmou a tempo. Nossa equipe está verificando se a consulta foi marcada.'
-          : undefined
-      }
-    >
-      {textos[consulta.status]}
+    <span className="shrink-0">
+      <Badge tone={tone}>{label}</Badge>
     </span>
   );
 }

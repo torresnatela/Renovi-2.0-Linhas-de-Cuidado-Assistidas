@@ -4,12 +4,22 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, type Appointment } from '../../shared/api';
+import { ApiError, type Appointment, type MoodToday } from '../../shared/api';
+import { moodKeys } from '../mood/useMood';
 import { AppointmentPage } from './AppointmentsPage';
 
 vi.mock('../../shared/api', async () => {
   const actual = await vi.importActual<typeof import('../../shared/api')>('../../shared/api');
-  return { ...actual, getAppointment: vi.fn(), joinAppointment: vi.fn() };
+  return {
+    ...actual,
+    getAppointment: vi.fn(),
+    joinAppointment: vi.fn(),
+    // O gate de pré-consulta consulta o humor de hoje e (se houver oferta) o
+    // instrumento periódico. Mockados para não bater na rede nos testes de join.
+    getMoodToday: vi.fn(),
+    getAssessmentAvailability: vi.fn(),
+    submitAssessment: vi.fn(),
+  };
 });
 // O jsdom não deixa espionar window.location — por isso a navegação externa é um
 // módulo, e não uma linha solta dentro do componente.
@@ -19,6 +29,10 @@ const api = await import('../../shared/api');
 const nav = await import('../../shared/navigate');
 
 const LINK = 'https://renovisaude.atendimento.hom.dav.med.br/a/sopr8brbkz';
+
+function today(over: Partial<MoodToday> = {}): MoodToday {
+  return { dia: '2026-07-20', can_checkin: false, offer: null, ...over };
+}
 
 function consulta(over: Partial<Appointment> = {}): Appointment {
   return {
@@ -38,8 +52,12 @@ function consulta(over: Partial<Appointment> = {}): Appointment {
   };
 }
 
-function renderPage() {
+function renderPage(opts: { today?: MoodToday } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Semeia o humor de hoje ANTES do render: garante que `today.data` já esteja
+  // presente no clique (o gate é avaliado no clique, e sem semear haveria corrida
+  // entre o resolve da query e o userEvent).
+  if (opts.today) client.setQueryData(moodKeys.today(), opts.today);
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/consultas/appt-1']}>
@@ -55,6 +73,9 @@ describe('AppointmentPage', () => {
   beforeEach(() => {
     vi.mocked(api.joinAppointment).mockReset();
     vi.mocked(nav.openExternal).mockReset();
+    // Padrão sem oferta: o gate fica inerte e o join corre direto — é o que os
+    // testes de janela/join abaixo assumem.
+    vi.mocked(api.getMoodToday).mockResolvedValue(today({ offer: null }));
   });
 
   /**
@@ -173,5 +194,120 @@ describe('AppointmentPage', () => {
     renderPage();
     // Em UTC isto sairia 12:00 — o runner de CI pegaria a implementação ingênua.
     expect(await screen.findByText(/segunda-feira, 20 de julho às 09:00/i)).toBeInTheDocument();
+  });
+
+  // --- Gate de pré-consulta (decisão de produto, 2026-07-20) ---
+
+  /**
+   * Com uma oferta ativa (WHO-5), o clique em "Entrar" mostra o instrumento
+   * PRIMEIRO — a sala não abre ainda. Só depois de responder e concluir é que o
+   * join corre. O gate coleta antes da consulta, mas nunca no lugar dela.
+   */
+  it('com oferta, mostra o instrumento antes e só entra após concluir', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getAppointment).mockResolvedValue(consulta());
+    vi.mocked(api.getMoodToday).mockResolvedValue(today({ offer: 'WHO5' }));
+    vi.mocked(api.getAssessmentAvailability).mockResolvedValue({
+      codigo: 'WHO5',
+      eligibility: { allowed: true, blocks: [] },
+      item_count: 5,
+      value_min: 0,
+      value_max: 5,
+    });
+    vi.mocked(api.submitAssessment).mockResolvedValue({
+      codigo: 'WHO5',
+      index_score: 80,
+      faixa: 'normal',
+      flag_encaminhar: false,
+      respondido_em: '2026-07-20T08:40:00-03:00',
+    });
+    vi.mocked(api.joinAppointment).mockResolvedValue({ url: LINK });
+    renderPage({ today: today({ offer: 'WHO5' }) });
+
+    await user.click(await screen.findByRole('button', { name: /Entrar na consulta/i }));
+
+    // O instrumento aparece; a sala NÃO abre ainda.
+    expect(await screen.findByText(/Antes da consulta/i)).toBeInTheDocument();
+    expect(api.joinAppointment).not.toHaveBeenCalled();
+
+    // Responde os 5 itens do WHO-5 (o primeiro rótulo de cada) e envia.
+    for (const botao of screen.getAllByRole('button', { name: /Em nenhum momento/i })) {
+      await user.click(botao);
+    }
+    await user.click(screen.getByRole('button', { name: /Enviar respostas/i }));
+
+    // Concluído o instrumento, a sala abre.
+    await user.click(await screen.findByRole('button', { name: /Concluir/i }));
+    await waitFor(() => expect(nav.openExternal).toHaveBeenCalledWith(LINK));
+  });
+
+  it('sem oferta, entra direto sem instrumento', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getAppointment).mockResolvedValue(consulta());
+    vi.mocked(api.joinAppointment).mockResolvedValue({ url: LINK });
+    renderPage({ today: today({ offer: null }) });
+
+    await user.click(await screen.findByRole('button', { name: /Entrar na consulta/i }));
+
+    await waitFor(() => expect(nav.openExternal).toHaveBeenCalledWith(LINK));
+    expect(screen.queryByText(/Antes da consulta/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * Falha ao determinar a oferta (o `today` erra) NÃO pode prender o paciente: o
+   * gate é opcional, a consulta não. Sem `offer`, o clique entra direto.
+   */
+  it('se o instrumento falha, não bloqueia a entrada', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getAppointment).mockResolvedValue(consulta());
+    vi.mocked(api.getMoodToday).mockRejectedValue(new Error('humor indisponível'));
+    vi.mocked(api.joinAppointment).mockResolvedValue({ url: LINK });
+    renderPage(); // sem semear today → a query erra e `offer` fica indefinido
+
+    await user.click(await screen.findByRole('button', { name: /Entrar na consulta/i }));
+
+    await waitFor(() => expect(nav.openExternal).toHaveBeenCalledWith(LINK));
+    expect(screen.queryByText(/Antes da consulta/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * Regra de produto: falha no SUBMIT do instrumento (já respondido, rede, etc.)
+   * também não pode prender o paciente. O AssessmentForm mostra o erro inline —
+   * sem trocar de tela — e o "Fechar" (não há "Concluir" nesse estado, pois não
+   * houve `resultado`) chama `onDone` → `concluirGate` → a sala abre normal.
+   */
+  it('se o submit do instrumento falha, "Fechar" ainda abre a sala', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getAppointment).mockResolvedValue(consulta());
+    vi.mocked(api.getMoodToday).mockResolvedValue(today({ offer: 'WHO5' }));
+    vi.mocked(api.getAssessmentAvailability).mockResolvedValue({
+      codigo: 'WHO5',
+      eligibility: { allowed: true, blocks: [] },
+      item_count: 5,
+      value_min: 0,
+      value_max: 5,
+    });
+    vi.mocked(api.submitAssessment).mockRejectedValue(
+      new ApiError(409, 'Conflito', 'Você já respondeu esse instrumento hoje.'),
+    );
+    vi.mocked(api.joinAppointment).mockResolvedValue({ url: LINK });
+    renderPage({ today: today({ offer: 'WHO5' }) });
+
+    await user.click(await screen.findByRole('button', { name: /Entrar na consulta/i }));
+    expect(await screen.findByText(/Antes da consulta/i)).toBeInTheDocument();
+
+    // Responde os 5 itens do WHO-5 e envia — o submit vai rejeitar com 409.
+    for (const botao of screen.getAllByRole('button', { name: /Em nenhum momento/i })) {
+      await user.click(botao);
+    }
+    await user.click(screen.getByRole('button', { name: /Enviar respostas/i }));
+
+    // O erro aparece inline; a sala ainda NÃO abriu.
+    expect(await screen.findByText(/Você já respondeu esse instrumento hoje/i)).toBeInTheDocument();
+    expect(api.joinAppointment).not.toHaveBeenCalled();
+
+    // "Fechar" ainda dispara onDone → concluirGate → join, mesmo com o instrumento em erro.
+    await user.click(screen.getByRole('button', { name: /Fechar/i }));
+    await waitFor(() => expect(nav.openExternal).toHaveBeenCalledWith(LINK));
   });
 });
