@@ -124,6 +124,55 @@ describe('MoodCheckinCard', () => {
     expect(screen.queryByRole('button', { name: /refazer/i })).not.toBeInTheDocument();
   });
 
+  it('após Refazer + registrar com sucesso, o card colapsa de volta ao estado feito', async () => {
+    // Regressão: "Refazer" setava um estado local que nunca era resetado, então
+    // mesmo depois de um novo registro bem-sucedido o card ficava preso na grade.
+    vi.mocked(api.getMoodToday).mockResolvedValue({
+      dia: '2026-07-20',
+      can_checkin: true,
+      checkin: {
+        valencia: 80,
+        energia: 20,
+        quadrante: 'agradavel_calmo',
+        emotion_label: 'Tranquilo(a)',
+        respondido_em: '2026-07-20T09:00:00-03:00',
+      },
+    });
+    const novoSalvo: MoodCheckin = {
+      valencia: 55,
+      energia: 55,
+      quadrante: 'x',
+      emotion_label: 'Bem',
+      respondido_em: '2026-07-20T10:00:00-03:00',
+    };
+    vi.mocked(api.recordMoodCheckin).mockResolvedValue(novoSalvo);
+
+    const user = userEvent.setup();
+    renderCard();
+
+    expect(
+      await screen.findByText(/Check-in de hoje feito: Tranquilo\(a\)/),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /refazer/i }));
+
+    // Refazendo: a grade reaparece.
+    const grade = await screen.findByRole('button', {
+      name: 'Grade de humor: valência por energia',
+    });
+    grade.focus();
+    fireEvent.keyDown(grade, { key: 'ArrowRight' });
+    fireEvent.keyDown(grade, { key: 'ArrowUp' });
+
+    await user.click(screen.getByRole('button', { name: 'Registrar' }));
+    await waitFor(() => expect(api.recordMoodCheckin).toHaveBeenCalled());
+
+    // O card COLAPSA de volta ao estado feito com o novo rótulo — não fica
+    // preso na grade parecendo que o registro falhou.
+    expect(await screen.findByText(/Check-in de hoje feito: Bem/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Registrar' })).not.toBeInTheDocument();
+  });
+
   it('oferece o aprofundamento com link para /avaliacoes/WHO5', async () => {
     vi.mocked(api.getMoodToday).mockResolvedValue({
       dia: '2026-07-20',

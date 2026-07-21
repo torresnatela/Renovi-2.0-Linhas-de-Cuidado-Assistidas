@@ -21,7 +21,14 @@ export function MostImportantNow({
   enrollment: JourneyEnrollment;
   appointments: CareAppointment[];
 }) {
-  const proxima = proximaConsulta(appointments);
+  // A busca de "próxima consulta" é genérica (várias linhas podem repartir a mesma
+  // lista de CareAppointments) — por isso filtramos AQUI pelos refs dos itens da
+  // linha ATIVA antes de escolher. Sem isto, o card podia carimbar `care_line_name`
+  // da linha ativa numa consulta que pertence a outra linha (nome errado) e não
+  // reagia à troca de chip.
+  const refsDaLinha = new Set(enrollment.items.map((it) => it.item.ref));
+  const consultasDaLinha = appointments.filter((a) => refsDaLinha.has(a.item_ref));
+  const proxima = proximaConsulta(consultasDaLinha);
   const liberado = enrollment.items.find((it) => it.eligibility.allowed);
 
   let card: ReactNode;

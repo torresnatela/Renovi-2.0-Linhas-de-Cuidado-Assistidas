@@ -124,11 +124,17 @@ function EnrolledCard({ today }: { today: MoodToday }) {
           pending={record.isPending}
           erro={record.isError}
           onRegistrar={() =>
-            record.mutate({
-              valencia: ponto.valencia,
-              energia: ponto.energia,
-              emotion_label: regiao(ponto).rotulo,
-            })
+            record.mutate(
+              {
+                valencia: ponto.valencia,
+                energia: ponto.energia,
+                emotion_label: regiao(ponto).rotulo,
+              },
+              // Fecha o "Refazer": sem isto, `feito` (calculado com `refazendo`)
+              // nunca voltava a true e o card ficava preso na grade mesmo após
+              // um novo registro bem-sucedido — parecia que tinha falhado.
+              { onSuccess: () => setRefazendo(false) },
+            )
           }
         />
       )}

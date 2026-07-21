@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -141,5 +142,109 @@ describe('JourneyPage', () => {
   it('lista os eventos recentes da jornada', async () => {
     renderPage();
     expect(await screen.findByText(/Matrícula criada/)).toBeInTheDocument();
+  });
+
+  /**
+   * Regressão: com 2+ matrículas, "o mais importante agora" escolhia a próxima
+   * consulta GLOBALMENTE entre todas as linhas, mas carimbava o nome da linha
+   * ATIVA — mostrando a consulta errada com o nome errado, e sem reagir à troca
+   * de chip. O card deve pertencer sempre à linha ativa.
+   */
+  it('MostImportantNow respeita a linha ativa quando a consulta futura é de outra linha', async () => {
+    const duasLinhas: Journey = {
+      enrollments: [
+        {
+          enrollment: {
+            id: 'enr-a',
+            care_line_code: 'saude-mental',
+            care_line_version: 1,
+            status: 'ativa',
+            valid_from: '2026-07-01T00:00:00-03:00',
+            valid_until: '2026-09-01T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Saúde Mental',
+          items: [
+            {
+              item: {
+                id: 'item-a1',
+                ref: 'aval-inicial',
+                kind: 'CONSULTA',
+                specialty_code: 'PSI',
+                label: 'Avaliação inicial (Saúde Mental)',
+                sort_order: 1,
+              },
+              eligibility: { allowed: true, blocks: [] },
+            },
+          ],
+          recent_events: [],
+        },
+        {
+          enrollment: {
+            id: 'enr-b',
+            care_line_code: 'ortopedia',
+            care_line_version: 1,
+            status: 'ativa',
+            valid_from: '2026-07-01T00:00:00-03:00',
+            valid_until: '2026-09-01T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Ortopedia',
+          items: [
+            {
+              item: {
+                id: 'item-b1',
+                ref: 'consulta-orto',
+                kind: 'CONSULTA',
+                specialty_code: 'ORTO',
+                label: 'Consulta de retorno (Ortopedia)',
+                sort_order: 1,
+              },
+              eligibility: {
+                allowed: false,
+                blocks: [{ rule_type: 'MIN_INTERVAL', reason: 'Aguarde o intervalo mínimo.' }],
+              },
+            },
+          ],
+          recent_events: [],
+        },
+      ],
+    };
+
+    vi.mocked(api.getJourney).mockResolvedValue(duasLinhas);
+    vi.mocked(api.listCareAppointments).mockResolvedValue([
+      {
+        id: 'apt-1',
+        item_ref: 'consulta-orto',
+        label: 'Consulta Ortopedia — Dr. Fulano',
+        status: 'agendada',
+        scheduled_at: '2026-08-05T10:00:00-03:00',
+        time_zone: 'America/Sao_Paulo',
+        booking_id: 'bk-1',
+      },
+    ]);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    const secao1 = (await screen.findByText('O mais importante agora')).closest('section');
+    expect(secao1).not.toBeNull();
+
+    // Linha A (Saúde Mental) ativa por padrão: a única consulta futura é da linha B
+    // (Ortopedia) — não deve aparecer aqui; cai para o item liberado da própria linha.
+    expect(within(secao1!).queryByText(/Consulta Ortopedia/)).not.toBeInTheDocument();
+    expect(
+      within(secao1!).getByText('Avaliação inicial (Saúde Mental)'),
+    ).toBeInTheDocument();
+
+    // Troca para a linha Ortopedia pelo chip: agora a consulta pertence à linha ativa.
+    await user.click(screen.getByRole('tab', { name: 'Ortopedia' }));
+
+    const secao2 = (await screen.findByText('O mais importante agora')).closest('section');
+    expect(secao2).not.toBeNull();
+    expect(
+      within(secao2!).getByText('Consulta Ortopedia — Dr. Fulano'),
+    ).toBeInTheDocument();
+    expect(within(secao2!).getByText('Ortopedia')).toBeInTheDocument();
   });
 });
