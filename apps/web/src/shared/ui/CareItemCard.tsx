@@ -26,10 +26,11 @@ interface CareItemCardProps {
   compact?: boolean;
 }
 
-// `kind` é hoje só 'CONSULTA' (Slice 1); o map deixa explícito o rótulo humano
-// e evita mostrar o enum cru caso a linha não traga recorrência.
+// O map deixa explícito o rótulo humano de cada `kind` e evita mostrar o enum
+// cru caso a linha não traga recorrência.
 const KIND_LABEL: Record<CareLineItemInfo['kind'], string> = {
   CONSULTA: 'Consulta',
+  ATIVIDADE: 'Atividade',
 };
 
 export function CareItemCard({

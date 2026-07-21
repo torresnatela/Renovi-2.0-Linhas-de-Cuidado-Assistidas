@@ -302,6 +302,29 @@ describe('ConsultationsPage', () => {
     expect(screen.getByText('Você já agendou sua consulta deste mês.')).toBeInTheDocument();
   });
 
+  // Atividades (check-in de humor, WHO-5, PHQ-4) não têm especialidade nem
+  // slots no legado — não são agendáveis. O aside "Para agendar" existe para
+  // o funil de CONSULTA; atividade vive na Jornada, não aqui.
+  it('no aside, lista só itens agendáveis (CONSULTA) e omite ATIVIDADE', async () => {
+    vi.mocked(api.listCareAppointments).mockResolvedValue([consulta()]);
+    vi.mocked(api.getJourney).mockResolvedValue(
+      journeyWith([
+        journeyItem({ id: 'i1', label: 'Psicologia' }, true),
+        journeyItem(
+          { id: 'i2', kind: 'ATIVIDADE', label: 'Check-in de humor', specialty_code: '' },
+          true,
+        ),
+      ]),
+    );
+    renderPage();
+
+    expect(await screen.findByRole('link', { name: 'Agendar' })).toHaveAttribute(
+      'href',
+      '/jornada/agendar/i1',
+    );
+    expect(screen.queryByText('Check-in de humor')).not.toBeInTheDocument();
+  });
+
   it('aba Próximas vazia mostra CTA para agendar na jornada', async () => {
     vi.mocked(api.listCareAppointments).mockResolvedValue([]);
     renderPage();

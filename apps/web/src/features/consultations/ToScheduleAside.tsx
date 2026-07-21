@@ -12,7 +12,12 @@ import { LinkButton, SectionLabel } from './parts';
  * e A PARTIR DE QUANDO em tom neutro, nunca vermelho.
  */
 export function ToScheduleAside({ journey }: { journey: Journey | undefined }) {
-  const itens = journey?.enrollments.flatMap((e) => e.items) ?? [];
+  // Só CONSULTA é agendável (tem especialidade + slots no legado). ATIVIDADE
+  // (check-in de humor, WHO-5, PHQ-4) vive na Jornada — aqui o clique em
+  // "Agendar" levaria a uma agenda vazia, então o item nem aparece no funil.
+  const itens = (journey?.enrollments.flatMap((e) => e.items) ?? []).filter(
+    ({ item }) => item.kind === 'CONSULTA',
+  );
   if (itens.length === 0) return null;
 
   return (
