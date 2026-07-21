@@ -5,8 +5,14 @@ import { Card } from '../../shared/ui/Card';
 import { CareItemCard } from '../../shared/ui/CareItemCard';
 import { IconCheck } from '../../shared/ui/icons';
 import { PlanValidityBanner } from '../../shared/ui/PlanValidityBanner';
+import { useIsDesktop } from '../../shared/viewport';
 import { CtaLink } from './CtaLink';
-import { ehAtividade, estadoAtividade, type EstadoAtividade } from './derivations';
+import {
+  ehAtividade,
+  estadoAtividade,
+  itensComCheckinSintetico,
+  type EstadoAtividade,
+} from './derivations';
 import { SectionLabel } from './JourneyHero';
 
 const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(' ');
@@ -33,7 +39,12 @@ export function JourneyTimeline({
   appointments: CareAppointment[];
   mood?: MoodToday;
 }) {
-  const items = [...enrollment.items].sort((a, b) => a.item.sort_order - b.item.sort_order);
+  // Um nó de check-in de humor pode ser SINTETIZADO aqui (linha aberta de saúde
+  // mental) — flui pelo caminho de ATIVIDADE como qualquer outro passo, nos dois
+  // viewports (mesma DOM). A reordenação por sort_order o leva ao topo.
+  const items = [...itensComCheckinSintetico(enrollment, mood)].sort(
+    (a, b) => a.item.sort_order - b.item.sort_order,
+  );
 
   // "feito" é AÇÚCAR DE EXIBIÇÃO: existe uma consulta 'realizada' cujo item_ref bate
   // com o ref do passo. Não é regra de negócio — o motor decide elegibilidade; isto
@@ -112,6 +123,9 @@ function AtividadeCard({ item, estado }: { item: CareLineItemInfo; estado: Estad
 }
 
 function AtividadeCorpo({ estado }: { estado: EstadoAtividade }) {
+  // O check-in de humor vive no aside (desktop) ou no topo da coluna (mobile) —
+  // o texto do pendente aponta para o lugar certo em cada viewport.
+  const isDesktop = useIsDesktop();
   switch (estado.tipo) {
     case 'feito_hoje':
       return (
@@ -123,7 +137,8 @@ function AtividadeCorpo({ estado }: { estado: EstadoAtividade }) {
     case 'checkin_pendente':
       return (
         <BlocoNeutro>
-          Ainda não feito hoje — <strong>registre no painel ao lado.</strong>
+          Ainda não feito hoje —{' '}
+          <strong>{isDesktop ? 'registre no painel ao lado.' : 'registre no topo da tela.'}</strong>
         </BlocoNeutro>
       );
     case 'responder_agora':

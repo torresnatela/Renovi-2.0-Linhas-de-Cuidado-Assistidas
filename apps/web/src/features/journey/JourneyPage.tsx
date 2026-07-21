@@ -8,7 +8,9 @@ import { Empty, ErrorNotice, Loading } from '../../shared/ui/feedback';
 import { IconCalendar, IconCaretRight } from '../../shared/ui/icons';
 import { ListRow } from '../../shared/ui/ListRow';
 import { PlanValidityBanner } from '../../shared/ui/PlanValidityBanner';
+import { useIsDesktop } from '../../shared/viewport';
 import { useSession } from '../auth/useSession';
+import { HelpNowMenu } from '../mood/HelpNowMenu';
 import { MoodCheckinCard } from '../mood/MoodCheckinCard';
 import { ehAtividade, proximaConsulta, resumoDoDia, vigenciaPertoDoFim } from './derivations';
 import { JourneyHero, SectionLabel } from './JourneyHero';
@@ -38,6 +40,7 @@ export function JourneyPage() {
   const appointmentsQuery = useCareAppointments();
   const session = useSession();
   const mood = useMoodToday();
+  const isDesktop = useIsDesktop();
   // Guarda o enrollment.id selecionado nos chips — NUNCA o care_line_code (ver
   // filtro abaixo: duas matrículas podem compartilhar o mesmo code).
   const [matriculaAtivaId, setMatriculaAtivaId] = useState<string | null>(null);
@@ -86,35 +89,71 @@ export function JourneyPage() {
   );
   const resumo = resumoDoDia(temItemLiberado, checkinPendente);
 
+  // Filhos como CONSTS ÚNICAS: a derivação é uma só; só o ARRANJO muda por viewport
+  // (ADR-041). Assim desktop e mobile compartilham exatamente os mesmos elementos.
+  const mostImportant = <MostImportantNow enrollment={active} appointments={appointments} />;
+  const timeline = (
+    <JourneyTimeline enrollment={active} appointments={appointments} mood={mood.data} />
+  );
+  const moodCard = <MoodCheckinCard />;
+  const nearExpiryBanner = vigenciaPertoDoFim(active.enrollment.valid_until) ? (
+    <PlanValidityBanner
+      enrollment={active.enrollment}
+      careLineName={active.care_line_name}
+      nearExpiry
+    />
+  ) : null;
+  const proximaConsultaCard = <ProximaConsulta appointments={appointments} />;
+  const eventosRecentes =
+    active.recent_events.length > 0 ? <EventosRecentes eventos={active.recent_events} /> : null;
+
+  const hero = (
+    <JourneyHero
+      fullName={session.data?.full_name}
+      resumo={resumo}
+      lines={lines}
+      activeCode={active.enrollment.id}
+      onSelect={setMatriculaAtivaId}
+      // No mobile a ajuda vive no hero (o chrome mobile não a mostra); no desktop
+      // ela está no AppShell, então o hero não a repete.
+      help={isDesktop ? undefined : <HelpNowMenu />}
+    />
+  );
+
+  if (!isDesktop) {
+    // Ordem DOM = ordem visual do mock (tab order correta) — NUNCA CSS `order`.
+    return (
+      <div>
+        {hero}
+        <div className="flex flex-col gap-5">
+          {mostImportant}
+          {moodCard}
+          {nearExpiryBanner}
+          {timeline}
+          {proximaConsultaCard}
+          {eventosRecentes}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <JourneyHero
-        fullName={session.data?.full_name}
-        resumo={resumo}
-        lines={lines}
-        activeCode={active.enrollment.id}
-        onSelect={setMatriculaAtivaId}
-      />
+      {hero}
 
       <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_388px]">
         {/* Coluna principal */}
         <div className="flex min-w-0 flex-col gap-8">
-          <MostImportantNow enrollment={active} appointments={appointments} />
-          <JourneyTimeline enrollment={active} appointments={appointments} mood={mood.data} />
-          {active.recent_events.length > 0 && <EventosRecentes eventos={active.recent_events} />}
+          {mostImportant}
+          {timeline}
+          {eventosRecentes}
         </div>
 
         {/* Aside sticky sob o header de 70px (top 102 = 70 + respiro). */}
         <aside className="flex flex-col gap-5 self-start lg:sticky lg:top-[102px]">
-          <MoodCheckinCard />
-          {vigenciaPertoDoFim(active.enrollment.valid_until) && (
-            <PlanValidityBanner
-              enrollment={active.enrollment}
-              careLineName={active.care_line_name}
-              nearExpiry
-            />
-          )}
-          <ProximaConsulta appointments={appointments} />
+          {moodCard}
+          {nearExpiryBanner}
+          {proximaConsultaCard}
         </aside>
       </div>
     </div>

@@ -2,9 +2,10 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Account, Journey } from '../../shared/api';
+import { mockViewport } from '../../shared/viewport.testkit';
 import { JourneyPage } from './JourneyPage';
 
 // A página agora orquestra várias fontes: a jornada, as consultas (para "o mais
@@ -488,5 +489,204 @@ describe('JourneyPage', () => {
     renderPage();
     const links = await screen.findAllByRole('link', { name: /agendar/i });
     expect(links.some((l) => l.getAttribute('href') === '/jornada/agendar/item-1')).toBe(true);
+  });
+});
+
+/**
+ * Etapa 2 — Jornada mobile. Só o CHROME e o ARRANJO mudam por viewport (ADR-041);
+ * a derivação é uma só. Estes casos forçam o mobile via `mockViewport` — o suite
+ * sem mock continua exercitando o desktop (default do hook em jsdom).
+ */
+describe('JourneyPage — mobile (Etapa 2)', () => {
+  let vp: ReturnType<typeof mockViewport> | null = null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getJourney).mockResolvedValue(jornada);
+    vi.mocked(api.getMe).mockResolvedValue(conta);
+    vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+    vi.mocked(api.getMoodToday).mockResolvedValue({
+      dia: '2026-07-20',
+      can_checkin: false,
+      reason: 'not_enrolled',
+    });
+  });
+
+  afterEach(() => {
+    vp?.restore();
+    vp = null;
+  });
+
+  // Linha universal de saúde mental (a que sintetiza o check-in) + um item liberado.
+  const jornadaMental: Journey = {
+    enrollments: [
+      {
+        enrollment: {
+          id: 'enr-m',
+          care_line_code: 'saude-mental-aberta',
+          care_line_version: 1,
+          status: 'ativa',
+          valid_from: '2026-07-01T00:00:00-03:00',
+          valid_until: '2026-12-01T00:00:00-03:00',
+          periods: [],
+        },
+        care_line_name: 'Saúde Mental',
+        items: [
+          {
+            item: {
+              id: 'item-psi',
+              ref: 'psicologia',
+              kind: 'CONSULTA',
+              specialty_code: 'PSI',
+              label: 'Psicologia',
+              sort_order: 1,
+            },
+            eligibility: { allowed: true, blocks: [] },
+          },
+        ],
+        recent_events: [],
+      },
+    ],
+  };
+
+  const moodEnrolledPendente = { dia: '2026-07-21', can_checkin: true, checkin: null } as const;
+
+  it('mobile: o hero traz o "Pedir ajuda" (HelpNowMenu)', async () => {
+    vp = mockViewport('mobile');
+    renderPage();
+    expect(await screen.findByRole('button', { name: /pedir ajuda/i })).toBeInTheDocument();
+  });
+
+  it('desktop: o hero NÃO traz o "Pedir ajuda" (vive no chrome do AppShell)', async () => {
+    renderPage(); // default jsdom = desktop
+    await screen.findByText('O mais importante agora');
+    expect(screen.queryByRole('button', { name: /pedir ajuda/i })).not.toBeInTheDocument();
+  });
+
+  it('mobile: blocos na ordem do mock (MIN → check-in → timeline → próxima)', async () => {
+    vp = mockViewport('mobile');
+    vi.mocked(api.getJourney).mockResolvedValue(jornadaMental);
+    vi.mocked(api.getMoodToday).mockResolvedValue(moodEnrolledPendente);
+    vi.mocked(api.listCareAppointments).mockResolvedValue([
+      {
+        id: 'apt-1',
+        item_ref: 'psicologia',
+        label: 'Psicologia — Dra. Marina',
+        status: 'agendada',
+        scheduled_at: '2026-08-05T10:00:00-03:00',
+        time_zone: 'America/Sao_Paulo',
+        booking_id: 'bk-1',
+      },
+    ]);
+
+    renderPage();
+
+    const min = await screen.findByText('O mais importante agora');
+    const checkin = screen.getByText('Como você está agora?'); // MoodCheckinCard (aside no desktop)
+    const timeline = screen.getByText('Sua jornada nesta linha');
+    const proxima = screen.getByText('Próxima consulta');
+
+    const ordenados = [min, checkin, timeline, proxima];
+    for (let i = 0; i < ordenados.length - 1; i++) {
+      // DOM order == ordem visual (sem CSS order): cada bloco segue o anterior.
+      expect(
+        ordenados[i].compareDocumentPosition(ordenados[i + 1]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it('mobile: sintetiza o nó de check-in na linha mental (sem item real) e usa a copy mobile', async () => {
+    vp = mockViewport('mobile');
+    vi.mocked(api.getJourney).mockResolvedValue(jornadaMental);
+    vi.mocked(api.getMoodToday).mockResolvedValue(moodEnrolledPendente);
+
+    renderPage();
+
+    const timeline = (await screen.findByText('Sua jornada nesta linha')).closest('section');
+    expect(timeline).not.toBeNull();
+    // O pseudo-item flui pelo caminho de ATIVIDADE: aparece como passo "Check-in de humor".
+    const checkinNode = within(timeline!).getByText('Check-in de humor').closest('li');
+    expect(checkinNode).not.toBeNull();
+    // Pendente no mobile: "registre no topo da tela" (não "no painel ao lado").
+    expect(within(checkinNode!).getByText(/registre no topo da tela/i)).toBeInTheDocument();
+    expect(within(checkinNode!).queryByText(/registre no painel ao lado/i)).not.toBeInTheDocument();
+    // O nó de ATIVIDADE nunca vira botão/link de agendar (o item CONSULTA da linha
+    // segue com o seu link — por isso a asserção é escopada ao card do check-in).
+    expect(
+      within(checkinNode!).queryByRole('link', { name: /agendar/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('mobile: NÃO duplica o nó quando a linha já traz o item de check-in', async () => {
+    vp = mockViewport('mobile');
+    const comItemReal: Journey = {
+      enrollments: [
+        {
+          ...jornadaMental.enrollments[0],
+          items: [
+            {
+              item: {
+                id: 'item-checkin-real',
+                ref: 'checkin-humor-diario',
+                kind: 'ATIVIDADE',
+                specialty_code: '',
+                label: 'Check-in de humor',
+                sort_order: 1,
+              },
+              eligibility: { allowed: true, blocks: [] },
+            },
+            ...jornadaMental.enrollments[0].items,
+          ],
+        },
+      ],
+    };
+    vi.mocked(api.getJourney).mockResolvedValue(comItemReal);
+    vi.mocked(api.getMoodToday).mockResolvedValue(moodEnrolledPendente);
+
+    renderPage();
+
+    const timeline = (await screen.findByText('Sua jornada nesta linha')).closest('section');
+    expect(within(timeline!).getAllByText('Check-in de humor')).toHaveLength(1);
+  });
+
+  it('mobile: "o mais importante agora" traz o card de agendar do mock (pill "Consulta" + CTA fullWidth com o label)', async () => {
+    vp = mockViewport('mobile');
+    // Linha com um item liberado que TEM recorrência — assim "Consulta" fica só no
+    // badge (a legenda usa a recorrência), sem próxima consulta (cai no card de agendar).
+    const jornadaLiberada: Journey = {
+      enrollments: [
+        {
+          ...jornadaMental.enrollments[0],
+          care_line_name: 'Saúde Mental',
+          items: [
+            {
+              item: {
+                id: 'item-psi',
+                ref: 'psicologia',
+                kind: 'CONSULTA',
+                specialty_code: 'PSI',
+                label: 'Psicologia',
+                recurrence: '4x por mês',
+                sort_order: 1,
+              },
+              eligibility: { allowed: true, blocks: [] },
+            },
+          ],
+        },
+      ],
+    };
+    vi.mocked(api.getJourney).mockResolvedValue(jornadaLiberada);
+
+    renderPage();
+
+    const secao = (await screen.findByText('O mais importante agora')).closest('section');
+    expect(secao).not.toBeNull();
+    // Badge pill navy uppercase "Consulta" (único, agora que a legenda é a recorrência).
+    expect(within(secao!).getByText('Consulta')).toBeInTheDocument();
+    // CTA fullWidth "Agendar {label}" → agendar POR ITEM.
+    const cta = within(secao!).getByRole('link', { name: /agendar psicologia/i });
+    expect(cta.getAttribute('href')).toBe('/jornada/agendar/item-psi');
+    expect(cta.className).toContain('w-full');
   });
 });
