@@ -145,7 +145,12 @@ export function CalendarGrid({ dias, selecionado, onEscolher }: CalendarGridProp
               )}
             >
               <span
-                className={cx('text-[10px] font-bold uppercase', sel ? 'text-white/75' : 'text-muted')}
+                className={cx(
+                  'text-[10px] font-bold uppercase',
+                  // `opacity-75` (não `/alpha`): o DS proíbe o modificador de alpha
+                  // sobre tokens. Mesmo resultado do mock (rgba(255,255,255,0.75)).
+                  sel ? 'text-white opacity-75' : 'text-muted',
+                )}
               >
                 {dow}
               </span>

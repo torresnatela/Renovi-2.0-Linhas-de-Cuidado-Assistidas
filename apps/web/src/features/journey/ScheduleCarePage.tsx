@@ -401,6 +401,9 @@ function MobileSuccess({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-center gap-3 px-3 pb-2 pt-6 text-center">
+        {/* Tinte suave por rgba literal do DS (NÃO `/alpha` sobre token) — mesmo
+            padrão já mergeado em consultations/HistorySection.tsx e documentado em
+            DESIGN-SYSTEM.md §7 (Badge: "fundos rgba literais do DS"). */}
         <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(41,176,29,0.12)] text-success">
           <IconCheck size={26} />
         </span>

@@ -39,12 +39,17 @@ describe('CalendarGrid', () => {
   });
 
   /**
-   * A regra de ouro deste componente: um slot às 23:30 no fuso −03:00 é 02:30 do
-   * dia SEGUINTE em UTC. O runner (que pode estar em UTC) não pode empurrar o dia
-   * para frente — o dayKey já vem calculado no fuso da agenda e a grade só faz
-   * aritmética de string. Sem isso, o dia 20 viraria 21 (off-by-one).
+   * O CalendarGrid consome SÓ a string `dayKey` já derivada (`dias[].key`) — ele
+   * nunca reparte o instante `starts_at`. Este teste fixa que a grade renderiza o
+   * dia EXATO do dayKey (20/07) e mantém o seguinte (21/07) inerte, sem que o
+   * `inicio` às 23:30 −03:00 no `dias` desloque nada: a grade não olha para ele.
+   *
+   * O caminho de risco de verdade — server-time (23:30 −03:00) → `dayKey` no fuso
+   * da agenda, que num runner UTC poderia virar 21/07 — é a `derivarDias` da
+   * página, coberto de ponta a ponta em `ScheduleCarePage.mobile.test.tsx`
+   * ("não sofre off-by-one: slot −03:00 perto da meia-noite fica no dia certo").
    */
-  it('não sofre off-by-one com slot −03:00 perto da meia-noite', () => {
+  it('rende o dia exato do dayKey, ignorando o horário do `inicio`', () => {
     render(
       <CalendarGrid
         dias={[dia('2026-07-20', '2026-07-20T23:30:00-03:00')]}
