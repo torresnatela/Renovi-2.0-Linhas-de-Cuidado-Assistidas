@@ -561,7 +561,7 @@ func TestE2E_A_SaudeMentalBasica(t *testing.T) {
 		status, raw := doReq(t, patient, "GET", "/me/audit?limit=50", nil, nil)
 		require.Equal(t, http.StatusOK, status, "corpo: %s", raw)
 		full := decodeAs[api.AuditPage](t, raw)
-		require.Nil(t, full.NextCursor, "13 eventos cabem numa página de 50")
+		require.Nil(t, full.NextCursor, "14 eventos cabem numa página de 50")
 
 		// A história inteira, em ordem DESC (occurred_at, id).
 		want := []string{
@@ -578,6 +578,7 @@ func TestE2E_A_SaudeMentalBasica(t *testing.T) {
 			"consulta_agendada",       // A08 psico +9
 			"consulta_agendada",       // A08 psico +2
 			"matricula_criada",        // A05
+			"matricula_criada",        // auto-matrícula na linha universal (actor=sistema, ADR-040) — evento mais antigo
 		}
 		require.Len(t, full.Items, len(want), "total de eventos da jornada")
 		for i, ev := range full.Items {
@@ -657,7 +658,7 @@ func TestE2E_A_SaudeMentalBasica(t *testing.T) {
 			require.Len(t, page.Items, 5, "página cheia sempre traz next_cursor")
 			cursor = *page.NextCursor
 		}
-		require.Equal(t, 3, pages, "13 eventos com limit=5 = páginas 5+5+3")
+		require.Equal(t, 3, pages, "14 eventos com limit=5 = páginas 5+5+4")
 		require.Len(t, collected, len(full.Items))
 		seen := map[string]bool{}
 		for i, ev := range collected {
