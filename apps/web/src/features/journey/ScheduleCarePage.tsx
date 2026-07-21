@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { ApiError, type AnnotatedSlot, type CareAppointment } from '../../shared/api';
-import { dayKey, formatDateLong, formatTime } from '../../shared/datetime';
+import { FUSO_PADRAO, dayKey, formatDateLong, formatTime } from '../../shared/datetime';
 import { Card } from '../../shared/ui/Card';
 import { EligibilityNotice } from '../../shared/ui/EligibilityNotice';
 import { Empty, ErrorNotice, Loading } from '../../shared/ui/feedback';
@@ -15,8 +15,15 @@ import { Stepper, type PassoEstado, type PassoInfo } from './schedule/Stepper';
 import { TimeStep } from './schedule/TimeStep';
 import { useAvailability, useJourney, useScheduleCare } from './useJourney';
 
-/** A intenção viva: o horário que o paciente escolheu e a key que o identifica. */
-type Intencao = { slotId: string; key: string };
+/**
+ * A intenção viva: o horário que o paciente escolheu, a key que o identifica, e
+ * o fuso do slot NO MOMENTO da escolha. O fuso viaja com a intenção (e não só
+ * via `slotEscolhido`) porque o `onSettled` do agendamento refaz a
+ * disponibilidade mesmo no ERRO — e num 409 SLOT_TAKEN o refetch legitimamente
+ * remove o horário da lista. Sem essa cópia, o feedback de erro perderia o fuso
+ * para formatar a data de desbloqueio junto com o slot que sumiu.
+ */
+type Intencao = { slotId: string; key: string; timeZone: string };
 type Passo = 1 | 2 | 3;
 
 /**
@@ -70,7 +77,7 @@ export function ScheduleCarePage() {
     // Re-clicar o MESMO horário não é uma nova intenção: preserva a key (o retry
     // reusa exatamente ela). Um horário diferente é outra intenção → key nova.
     if (intencao?.slotId === slot.id) return;
-    setIntencao({ slotId: slot.id, key: crypto.randomUUID() });
+    setIntencao({ slotId: slot.id, key: crypto.randomUUID(), timeZone: slot.time_zone });
     agendar.reset();
   }
 
@@ -164,8 +171,11 @@ export function ScheduleCarePage() {
                 {agendar.isSuccess && agendar.data ? (
                   <SucessoCard consulta={agendar.data} />
                 ) : (
-                  slotEscolhido && (
-                    <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-3">
+                    {/* O ConfirmCard precisa dos dados completos do slot (data,
+                        horário) e por isso segue dependendo dele estar na
+                        disponibilidade — sem o que confirmar, não há card. */}
+                    {slotEscolhido && (
                       <ConfirmCard
                         label={label}
                         slot={slotEscolhido}
@@ -173,12 +183,20 @@ export function ScheduleCarePage() {
                         loading={agendar.isPending}
                         onConfirmar={confirmar}
                       />
-                      {agendar.isPending && <AvisoEspera />}
-                      {agendar.isError && (
-                        <FeedbackErro error={agendar.error} timeZone={slotEscolhido.time_zone} />
-                      )}
-                    </div>
-                  )
+                    )}
+                    {agendar.isPending && <AvisoEspera />}
+                    {/* FORA do gate de slotEscolhido: o `onSettled` refaz a
+                        disponibilidade mesmo no erro, e num 409 SLOT_TAKEN o
+                        refetch legitimamente remove o horário da lista — o
+                        paciente não pode perder a explicação por isso. O fuso
+                        vem da intenção (sobrevive ao slot sumir da lista). */}
+                    {agendar.isError && (
+                      <FeedbackErro
+                        error={agendar.error}
+                        timeZone={intencao?.timeZone ?? FUSO_PADRAO}
+                      />
+                    )}
+                  </div>
                 )}
               </div>
             )}

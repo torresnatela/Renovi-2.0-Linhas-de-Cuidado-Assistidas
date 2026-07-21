@@ -192,6 +192,46 @@ describe('ScheduleCarePage', () => {
   });
 
   /**
+   * Regressão: no 409 SLOT_TAKEN, o `onSettled` refaz a disponibilidade — e o
+   * refetch LEGITIMAMENTE remove o horário reservado por outra pessoa da lista.
+   * Isso não pode apagar a mensagem de erro (ela vivia dentro do gate de
+   * `slotEscolhido`, derivado da própria lista): o paciente precisa continuar
+   * vendo o porquê mesmo depois do horário sumir da grade.
+   */
+  it('mantém o erro visível quando o refetch remove o horário escolhido da lista', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.createCareAppointment).mockRejectedValue(
+      new ApiError(409, 'Ocupado', 'texto', { code: 'SLOT_TAKEN' }),
+    );
+    // 1ª chamada: os dois horários. Depois do 409, o refetch (onSettled) não
+    // devolve mais o das 09:00 — outra pessoa acabou de ocupá-lo.
+    vi.mocked(api.getAvailability).mockResolvedValueOnce(pagina).mockResolvedValue({
+      ...pagina,
+      items: [
+        slot({
+          id: 'slot-2',
+          starts_at: '2026-07-20T10:00:00-03:00',
+          ends_at: '2026-07-20T10:25:00-03:00',
+        }),
+      ],
+    });
+    renderPage();
+
+    await escolherProfissional(user);
+    await escolherDia(user);
+    await escolherHorario(user, /Horário das 09:00/i);
+    await confirmar(user);
+
+    expect(await screen.findByText(/acabou de ser reservado por outra pessoa/i)).toBeInTheDocument();
+
+    // O refetch aconteceu e removeu o horário escolhido da lista.
+    await waitFor(() => expect(api.getAvailability).toHaveBeenCalledTimes(2));
+
+    // A mensagem de erro CONTINUA visível — não pode sumir com o slot.
+    expect(screen.getByText(/acabou de ser reservado por outra pessoa/i)).toBeInTheDocument();
+  });
+
+  /**
    * Enquanto um agendamento está em voo (a DAV leva ~29s), TODOS os horários
    * travam: clicar outro dispararia um segundo POST concorrente — o banner do
    * primeiro sumiria e a corrida de cota do servidor se alargaria.
