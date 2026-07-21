@@ -142,6 +142,53 @@ describe('ProfilePage', () => {
     ).toBeInTheDocument();
   });
 
+  /**
+   * Regressão (bug ao vivo): `GET /me/journey` devolve TODA matrícula, inclusive
+   * encerrada/expirada — a seção "Plano e cobertura" mostrava um bloco completo
+   * (banner + "Sua linha inclui") por matrícula, ativa ou não. Mesma regra já
+   * aplicada nos chips da Jornada (commit 4449cb2): histórico de planos não é
+   * papel do Perfil v1 — só a(s) matrícula(s) `ativa` aparecem aqui.
+   */
+  it('mostra só a matrícula ativa; a encerrada não aparece', async () => {
+    const duasMatriculas: Journey = {
+      enrollments: [
+        ...journey.enrollments,
+        {
+          enrollment: {
+            id: 'e2-encerrada',
+            care_line_code: 'ORTOPEDIA',
+            care_line_version: 1,
+            status: 'encerrada',
+            valid_from: '2025-01-01T00:00:00-03:00',
+            valid_until: '2025-06-30T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Ortopedia (encerrada)',
+          items: [
+            {
+              item: {
+                id: 'i3',
+                ref: 'orto',
+                kind: 'CONSULTA',
+                specialty_code: 'ORTOPEDIA',
+                label: 'Ortopedia',
+                sort_order: 1,
+              },
+              eligibility: { allowed: true, blocks: [] },
+            },
+          ],
+          recent_events: [],
+        },
+      ],
+    };
+    vi.mocked(api.getJourney).mockResolvedValue(duasMatriculas);
+
+    renderPage();
+
+    expect(await screen.findAllByText('Saúde Mental')).not.toHaveLength(0);
+    expect(screen.queryByText('Ortopedia (encerrada)')).not.toBeInTheDocument();
+  });
+
   it('revoga o consentimento quando o usuário confirma', async () => {
     // Após revogar, o status relido volta inativo (invalidação → refetch).
     vi.mocked(api.getConsent)

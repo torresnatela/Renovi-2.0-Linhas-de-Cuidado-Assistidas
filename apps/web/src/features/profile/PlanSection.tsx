@@ -12,9 +12,17 @@ import { useJourney } from '../journey/useJourney';
  * (PlanValidityBanner) e, abaixo, o que a linha inclui — um mini-card por item
  * com o estado do motor: liberado (Badge) ou bloqueado (EligibilityNotice, que
  * já traz o motivo pronto do servidor). Quem decide é o servidor; aqui só exibe.
+ *
+ * `GET /me/journey` devolve TODO o histórico de matrículas (inclusive
+ * encerrada/expirada/concluída). O Perfil, como a Jornada (ver `JourneyPage`,
+ * commit 4449cb2), só mostra o PRESENTE: filtramos para `status === 'ativa'`.
+ * Histórico de planos não é papel do Perfil v1 — sem isso, matrículas mortas
+ * apareciam com banner completo e itens marcados "encerrada", um ruído sem
+ * utilidade para o paciente.
  */
 export function PlanSection() {
   const journey = useJourney();
+  const ativas = journey.data?.enrollments.filter((e) => e.enrollment.status === 'ativa') ?? [];
 
   return (
     <section id="plano" className="scroll-mt-24">
@@ -26,15 +34,15 @@ export function PlanSection() {
           {journey.isError && (
             <ErrorNotice error={journey.error} retry={() => journey.refetch()} />
           )}
-          {journey.data && journey.data.enrollments.length === 0 && (
+          {journey.data && ativas.length === 0 && (
             <Empty
-              title="Você ainda não tem uma linha de cuidado"
-              hint="Assim que uma linha for atribuída à sua conta, ela aparece aqui."
+              title="Nenhum plano ativo no momento."
+              hint="Assim que uma linha de cuidado for atribuída à sua conta, ela aparece aqui."
             />
           )}
-          {journey.data && journey.data.enrollments.length > 0 && (
+          {journey.data && ativas.length > 0 && (
             <div className="flex flex-col gap-6">
-              {journey.data.enrollments.map((e) => (
+              {ativas.map((e) => (
                 <EnrollmentBlock key={e.enrollment.id} enrollment={e} />
               ))}
             </div>
