@@ -70,3 +70,38 @@ export function useSubmitAssessment() {
 export function useHelpNow() {
   return useMutation({ mutationFn: api.moodHelpNow });
 }
+
+// ---------------------------------------------------------------------------
+// Consentimento (LGPD) — leitura e revogação (Etapa 7 · Perfil)
+// ---------------------------------------------------------------------------
+
+/**
+ * Chave do status de consentimento, por finalidade, sob a raiz de mood. Fica
+ * local (e não em moodKeys) de propósito: mantém a adição da Etapa 7 puramente
+ * aditiva, sem tocar o objeto de chaves que outras telas compartilham.
+ */
+const consentKey = (finalidade: string) => [...moodKeys.all, 'consent', finalidade] as const;
+
+/** Lê o status do consentimento de uma finalidade (default: check-in de humor). */
+export function useConsent(finalidade: string = api.CHECKIN_FINALIDADE) {
+  return useQuery({
+    queryKey: consentKey(finalidade),
+    queryFn: () => api.getConsent(finalidade),
+  });
+}
+
+/**
+ * Revoga o consentimento e revalida o que dele depende: o `today` (que volta a
+ * exigir novo aceite para o check-in) e o próprio status de consentimento — para
+ * a tela refletir a revogação na hora, sem F5.
+ */
+export function useRevokeConsent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (finalidade: string = api.CHECKIN_FINALIDADE) => api.revokeConsent(finalidade),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: moodKeys.today() });
+      qc.invalidateQueries({ queryKey: [...moodKeys.all, 'consent'] });
+    },
+  });
+}

@@ -1,39 +1,35 @@
-import { useNavigate } from 'react-router-dom';
-
-import { Avatar } from '../../shared/ui/Avatar';
-import { Button } from '../../shared/ui/Button';
-import { Card } from '../../shared/ui/Card';
-import { useLogout, useSession } from '../auth/useSession';
+import { PersonalDataSection } from './PersonalDataSection';
+import { PlanSection } from './PlanSection';
+import { PrivacySection } from './PrivacySection';
+import { ProfileSummary } from './ProfileSummary';
 
 /**
- * Stub honesto do Perfil: identidade (avatar + nome + e-mail) e a saída. A Etapa 7
- * expande (dados do plano, notificações, LGPD). O logout limpa TODO o cache
- * derivado da conta (ver `useLogout`) e leva ao /entrar.
+ * Perfil (/perfil) na versão reduzida-honesta: mostra SÓ o que a API expõe —
+ * identidade (nome/e-mail do /me), o plano REAL da jornada e o único controle de
+ * privacidade que existe (revogar o consentimento do check-in). Sem edição de
+ * perfil, sem troca de senha, sem notificações, sem "baixar/excluir dados" — não
+ * há endpoint para nada disso, e um botão que não faz nada engana.
+ *
+ * Renderiza DENTRO do AppShell (não traz `<main>` nem header próprios). Layout de
+ * duas colunas: o resumo sticky à esquerda e as seções à direita (com âncoras
+ * que o resumo navega).
  */
 export function ProfilePage() {
-  const session = useSession();
-  const logout = useLogout();
-  const navigate = useNavigate();
-  const conta = session.data;
-
   return (
-    <Card as="section" padding="lg" className="mx-auto max-w-xl">
-      <div className="flex items-center gap-5">
-        <Avatar name={conta?.full_name ?? ''} size="lg" />
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-bold text-primary-300">{conta?.full_name}</h1>
-          <p className="truncate text-sm text-muted">{conta?.email}</p>
-        </div>
+    <div className="flex flex-col gap-7">
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Sua conta</span>
+        <h1 className="text-[32px] font-bold leading-tight text-primary-300">Perfil</h1>
       </div>
 
-      <Button
-        color="ghost"
-        className="mt-8"
-        loading={logout.isPending}
-        onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/entrar') })}
-      >
-        Sair
-      </Button>
-    </Card>
+      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[340px_minmax(0,1fr)]">
+        <ProfileSummary />
+        <div className="flex min-w-0 flex-col gap-6">
+          <PersonalDataSection />
+          <PlanSection />
+          <PrivacySection />
+        </div>
+      </div>
+    </div>
   );
 }

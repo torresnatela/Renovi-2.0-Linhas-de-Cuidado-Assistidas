@@ -373,6 +373,12 @@ export const grantConsent = (versaoTermo: string, finalidade = CHECKIN_FINALIDAD
     body: JSON.stringify({ finalidade, versao_termo: versaoTermo }),
   });
 
+export const revokeConsent = (finalidade = CHECKIN_FINALIDADE) =>
+  request<ConsentStatus>('/me/consent/revoke', {
+    method: 'POST',
+    body: JSON.stringify({ finalidade }),
+  });
+
 export const getMoodInstrument = (codigo: string) =>
   request<InstrumentConfig>(`/me/mood/instruments/${encodeURIComponent(codigo)}`);
 
