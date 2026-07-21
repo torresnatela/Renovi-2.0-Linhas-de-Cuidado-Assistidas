@@ -373,6 +373,12 @@ export const grantConsent = (versaoTermo: string, finalidade = CHECKIN_FINALIDAD
     body: JSON.stringify({ finalidade, versao_termo: versaoTermo }),
   });
 
+export const revokeConsent = (finalidade = CHECKIN_FINALIDADE) =>
+  request<ConsentStatus>('/me/consent/revoke', {
+    method: 'POST',
+    body: JSON.stringify({ finalidade }),
+  });
+
 export const getMoodInstrument = (codigo: string) =>
   request<InstrumentConfig>(`/me/mood/instruments/${encodeURIComponent(codigo)}`);
 
@@ -391,13 +397,15 @@ export const getMoodHistory = (limit?: number) =>
   );
 
 /**
- * Um passo da linha (no Slice 1, sempre uma CONSULTA). `ref` é o código estável
+ * Um passo da linha: uma CONSULTA de uma especialidade ou uma ATIVIDADE
+ * executada na plataforma (ex.: check-in de humor, WHO-5, PHQ-4 — sem
+ * especialidade nem slots, portanto não agendável). `ref` é o código estável
  * dentro da linha (o que os pré-requisitos referenciam), distinto do `id` (UUID).
  */
 export interface CareLineItemInfo {
   id: string;
   ref: string;
-  kind: 'CONSULTA';
+  kind: 'CONSULTA' | 'ATIVIDADE';
   specialty_code: string;
   label: string;
   /** Cadência em texto livre, só informativa. As regras que valem vêm no motor. */

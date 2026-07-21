@@ -1,0 +1,76 @@
+/* Renovi 2.0 — Design tokens (fonte de verdade do design system)
+   Portado do handoff do designer:
+     design_system/tokens/colors.css  (cores + aliases semânticos)
+     design_system/tokens/spacing.css (radii, bordas, sombras, opacidade, transição)
+   Origem original: renovi-mobile/src/global/styles/theme.ts
+
+   Estas CSS custom properties são a fonte de verdade. O tailwind.config.js
+   estende o theme referenciando estas vars via var(--…). Ao receber novos
+   pacotes do designer, este arquivo é o ponto de diff. Não hardcode hex nas
+   telas — use os tokens (direto ou via classes Tailwind). */
+:root {
+  /* ---- Primary (deep navy / indigo) ---- */
+  --color-primary-300: #0E1955; /* navy da marca — ações primárias, títulos */
+  --color-primary-200: #C0CDDE; /* azul-cinza — bordas, disabled */
+  --color-primary-100: #E9EDF1; /* tint claro — bordas de card, fills leves, bloco de bloqueio */
+
+  /* ---- Accent (warm orange) ---- */
+  --color-accent-300: #FA8F1B; /* laranja da marca — ênfase, CTAs */
+  --color-accent-200: #FFC88E; /* laranja suave — accent disabled */
+  --color-accent-100: #FEDDBC; /* laranja pálido — fills de destaque */
+
+  /* ---- Neutros ---- */
+  --color-text: #37474F;   /* texto de corpo padrão (blue-gray) */
+  --color-black: #121212;
+  --color-gray-500: #3A3C3D;
+  --color-gray-400: #4E4E4E;
+  --color-gray-300: #838383; /* labels, captions, placeholder */
+  --color-gray-200: #B8B8B8;
+  --color-gray-100: #EBEBEB; /* divisores, fills disabled */
+  --color-gray-50:  #FBFBFB; /* fundo de página / superfície */
+  --color-white:    #FFFFFF;
+
+  /* ---- Semânticos / status ---- */
+  --color-success: #29B01D;
+  --color-error:   #CD1919; /* reservado a erros REAIS — nunca a bloqueios de regra */
+  --color-alert:   #FBC70F;
+
+  /* ---- Aliases semânticos (prefira estes nos componentes) ---- */
+  --text-strong:    var(--color-primary-300);
+  --text-body:      var(--color-text);
+  --text-muted:     var(--color-gray-300);
+  --text-on-brand:  var(--color-white);
+
+  --surface-page:   var(--color-gray-50);
+  --surface-card:   var(--color-white);
+  --surface-brand:  var(--color-primary-300);
+  --surface-accent: var(--color-accent-300);
+  --surface-subtle: var(--color-primary-100);
+
+  --border-default: var(--color-primary-100);
+  --border-input:   var(--color-primary-200);
+  --border-strong:  var(--color-primary-300);
+
+  --focus-ring:     var(--color-accent-300);
+
+  /* ---- Raios de canto ---- */
+  --radius-small:  8px;
+  --radius-medium: 16px;
+  --radius-large:  24px;
+  --radius-xlarge: 40px;
+  --radius-pill:   999px;
+
+  /* ---- Larguras de borda ---- */
+  --border-width-thin:  1px;
+  --border-width-thick: 2px;
+
+  /* ---- Elevação — sombra única navy ---- */
+  --shadow-card:   0 4px 24px rgba(14, 25, 85, 0.08);
+  --shadow-raised: 0 8px 32px rgba(14, 25, 85, 0.12);
+  --shadow-button: 0 4px 12px rgba(250, 143, 27, 0.24);
+
+  /* ---- Interação ---- */
+  --opacity-pressed:  0.7; /* estado pressionado (press) */
+  --opacity-disabled: 0.5; /* estado desabilitado */
+  --transition-base:  150ms ease;
+}

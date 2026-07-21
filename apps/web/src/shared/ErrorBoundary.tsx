@@ -36,11 +36,14 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.erro) {
       return (
         <main className="mx-auto max-w-3xl px-6 py-10">
-          <h2 className="mb-2 text-lg font-medium">Algo deu errado nesta tela</h2>
-          <p className="mb-4 text-sm text-slate-600">
+          <h2 className="mb-2 text-lg font-bold text-primary-300">Algo deu errado nesta tela</h2>
+          <p className="mb-4 text-sm text-muted">
             Tente recarregar a página. Se continuar, fale com o suporte.
           </p>
-          <a href="/" className="text-emerald-700 underline">
+          <a
+            href="/"
+            className="text-sm font-bold text-primary-300 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300"
+          >
             Voltar ao início
           </a>
         </main>

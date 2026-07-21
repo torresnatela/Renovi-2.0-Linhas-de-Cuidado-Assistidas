@@ -1,16 +1,28 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Journey } from '../../shared/api';
+import type { Account, Journey } from '../../shared/api';
 import { JourneyPage } from './JourneyPage';
 
+// A página agora orquestra várias fontes: a jornada, as consultas (para "o mais
+// importante agora" e a timeline), a sessão (saudação) e o dia de humor (card do
+// aside). Todas passam pelo mesmo shared/api mockado.
 vi.mock('../../shared/api', async () => {
   const actual = await vi.importActual<typeof import('../../shared/api')>('../../shared/api');
-  return { ...actual, getJourney: vi.fn() };
+  return {
+    ...actual,
+    getJourney: vi.fn(),
+    listCareAppointments: vi.fn(),
+    getMe: vi.fn(),
+    getMoodToday: vi.fn(),
+  };
 });
 const api = await import('../../shared/api');
+
+const conta: Account = { id: 'acc-1', full_name: 'Ana Paula', email: 'ana@example.com' };
 
 const jornada: Journey = {
   enrollments: [
@@ -86,24 +98,30 @@ describe('JourneyPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getJourney).mockResolvedValue(jornada);
+    vi.mocked(api.getMe).mockResolvedValue(conta);
+    vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+    // not_enrolled mantém o card do aside num estado neutro (sem grade a operar).
+    vi.mocked(api.getMoodToday).mockResolvedValue({
+      dia: '2026-07-20',
+      can_checkin: false,
+      reason: 'not_enrolled',
+    });
   });
 
   it('mostra a matrícula com sua vigência e o status', async () => {
     renderPage();
-    expect(await screen.findByText('Saúde Mental')).toBeInTheDocument();
-    expect(screen.getByText('Ativa')).toBeInTheDocument();
-    expect(screen.getByText(/Vigência:/)).toBeInTheDocument();
+    // Status via faixa de vigência (estado do plano, não texto cru).
+    expect(await screen.findByText('Plano ativo')).toBeInTheDocument();
+    expect(screen.getByText(/Vigente até/)).toBeInTheDocument();
+    // O nome da linha aparece ao menos uma vez (faixa de vigência).
+    expect(screen.getAllByText('Saúde Mental').length).toBeGreaterThan(0);
   });
 
-  it('no item liberado, oferece o link de agendar', async () => {
+  it('no item liberado, oferece o link de agendar por item', async () => {
     renderPage();
-    expect(await screen.findByText('Avaliação inicial')).toBeInTheDocument();
-    expect(screen.getByText('Disponível')).toBeInTheDocument();
-    // O link leva ao agendar POR ITEM (não ao wizard de booking).
-    expect(screen.getByRole('link', { name: 'Agendar' })).toHaveAttribute(
-      'href',
-      '/jornada/agendar/item-1',
-    );
+    // Há pelo menos um link "Agendar" que leva ao agendar POR ITEM (não ao booking).
+    const links = await screen.findAllByRole('link', { name: /agendar/i });
+    expect(links.some((l) => l.getAttribute('href') === '/jornada/agendar/item-1')).toBe(true);
   });
 
   /**
@@ -117,11 +135,358 @@ describe('JourneyPage', () => {
     // available_from formatado no fuso da agenda — em UTC cairia noutro dia.
     expect(screen.getByText(/01\/08/)).toBeInTheDocument();
     // E NÃO oferece agendar este item.
-    expect(screen.queryByRole('link', { name: /item-2/ })).not.toBeInTheDocument();
+    const links = screen.getAllByRole('link', { name: /agendar/i });
+    expect(links.some((l) => l.getAttribute('href') === '/jornada/agendar/item-2')).toBe(false);
   });
 
   it('lista os eventos recentes da jornada', async () => {
     renderPage();
     expect(await screen.findByText(/Matrícula criada/)).toBeInTheDocument();
+  });
+
+  /**
+   * Regressão: com 2+ matrículas, "o mais importante agora" escolhia a próxima
+   * consulta GLOBALMENTE entre todas as linhas, mas carimbava o nome da linha
+   * ATIVA — mostrando a consulta errada com o nome errado, e sem reagir à troca
+   * de chip. O card deve pertencer sempre à linha ativa.
+   */
+  it('MostImportantNow respeita a linha ativa quando a consulta futura é de outra linha', async () => {
+    const duasLinhas: Journey = {
+      enrollments: [
+        {
+          enrollment: {
+            id: 'enr-a',
+            care_line_code: 'saude-mental',
+            care_line_version: 1,
+            status: 'ativa',
+            valid_from: '2026-07-01T00:00:00-03:00',
+            valid_until: '2026-09-01T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Saúde Mental',
+          items: [
+            {
+              item: {
+                id: 'item-a1',
+                ref: 'aval-inicial',
+                kind: 'CONSULTA',
+                specialty_code: 'PSI',
+                label: 'Avaliação inicial (Saúde Mental)',
+                sort_order: 1,
+              },
+              eligibility: { allowed: true, blocks: [] },
+            },
+          ],
+          recent_events: [],
+        },
+        {
+          enrollment: {
+            id: 'enr-b',
+            care_line_code: 'ortopedia',
+            care_line_version: 1,
+            status: 'ativa',
+            valid_from: '2026-07-01T00:00:00-03:00',
+            valid_until: '2026-09-01T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Ortopedia',
+          items: [
+            {
+              item: {
+                id: 'item-b1',
+                ref: 'consulta-orto',
+                kind: 'CONSULTA',
+                specialty_code: 'ORTO',
+                label: 'Consulta de retorno (Ortopedia)',
+                sort_order: 1,
+              },
+              eligibility: {
+                allowed: false,
+                blocks: [{ rule_type: 'MIN_INTERVAL', reason: 'Aguarde o intervalo mínimo.' }],
+              },
+            },
+          ],
+          recent_events: [],
+        },
+      ],
+    };
+
+    vi.mocked(api.getJourney).mockResolvedValue(duasLinhas);
+    vi.mocked(api.listCareAppointments).mockResolvedValue([
+      {
+        id: 'apt-1',
+        item_ref: 'consulta-orto',
+        label: 'Consulta Ortopedia — Dr. Fulano',
+        status: 'agendada',
+        scheduled_at: '2026-08-05T10:00:00-03:00',
+        time_zone: 'America/Sao_Paulo',
+        booking_id: 'bk-1',
+      },
+    ]);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    const secao1 = (await screen.findByText('O mais importante agora')).closest('section');
+    expect(secao1).not.toBeNull();
+
+    // Linha A (Saúde Mental) ativa por padrão: a única consulta futura é da linha B
+    // (Ortopedia) — não deve aparecer aqui; cai para o item liberado da própria linha.
+    expect(within(secao1!).queryByText(/Consulta Ortopedia/)).not.toBeInTheDocument();
+    expect(
+      within(secao1!).getByText('Avaliação inicial (Saúde Mental)'),
+    ).toBeInTheDocument();
+
+    // Troca para a linha Ortopedia pelo chip: agora a consulta pertence à linha ativa.
+    await user.click(screen.getByRole('tab', { name: 'Ortopedia' }));
+
+    const secao2 = (await screen.findByText('O mais importante agora')).closest('section');
+    expect(secao2).not.toBeNull();
+    expect(
+      within(secao2!).getByText('Consulta Ortopedia — Dr. Fulano'),
+    ).toBeInTheDocument();
+    expect(within(secao2!).getByText('Ortopedia')).toBeInTheDocument();
+  });
+
+  /**
+   * Regressão (bug ao vivo): `GET /me/journey` devolve TODA matrícula, inclusive
+   * encerrada/expirada/concluída — e versões antigas da MESMA linha compartilham o
+   * `care_line_code`. Sem filtrar por status e sem chave por `enrollment.id`, os
+   * chips mostravam matrículas encerradas, duas linhas com o MESMO nome (key
+   * duplicada no React) e a timeline podia cair na versão ERRADA (a primeira do
+   * array, não a ativa).
+   */
+  it('chips mostram só matrículas ativas, keyed por enrollment.id (não por care_line_code)', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const tresMatriculas: Journey = {
+      enrollments: [
+        {
+          // v1 da linha X: ENCERRADA, mesmo care_line_code da v2 abaixo. Vem
+          // primeiro no array — é o cenário que expôs o bug do find().
+          enrollment: {
+            id: 'enr-v1-encerrada',
+            care_line_code: 'saude-mental',
+            care_line_version: 1,
+            status: 'encerrada',
+            valid_from: '2026-01-01T00:00:00-03:00',
+            valid_until: '2026-06-01T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Linha A',
+          items: [
+            {
+              item: {
+                id: 'item-v1',
+                ref: 'passo-v1',
+                kind: 'CONSULTA',
+                specialty_code: 'PSI',
+                label: 'Passo da V1 (encerrada)',
+                sort_order: 1,
+              },
+              eligibility: { allowed: true, blocks: [] },
+            },
+          ],
+          recent_events: [],
+        },
+        {
+          // v2 da MESMA linha (mesmo code X): ATIVA — é esta que deve aparecer.
+          enrollment: {
+            id: 'enr-v2-ativa',
+            care_line_code: 'saude-mental',
+            care_line_version: 2,
+            status: 'ativa',
+            valid_from: '2026-06-01T00:00:00-03:00',
+            valid_until: '2026-12-01T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Linha A',
+          items: [
+            {
+              item: {
+                id: 'item-v2',
+                ref: 'passo-v2',
+                kind: 'CONSULTA',
+                specialty_code: 'PSI',
+                label: 'Passo da V2 (ativa)',
+                sort_order: 1,
+              },
+              eligibility: { allowed: true, blocks: [] },
+            },
+          ],
+          recent_events: [],
+        },
+        {
+          // Outra linha (code Y), também ativa.
+          enrollment: {
+            id: 'enr-y-ativa',
+            care_line_code: 'ortopedia',
+            care_line_version: 1,
+            status: 'ativa',
+            valid_from: '2026-01-01T00:00:00-03:00',
+            valid_until: '2026-12-01T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Ortopedia',
+          items: [
+            {
+              item: {
+                id: 'item-y',
+                ref: 'passo-y',
+                kind: 'CONSULTA',
+                specialty_code: 'ORTO',
+                label: 'Passo Ortopedia',
+                sort_order: 1,
+              },
+              eligibility: { allowed: true, blocks: [] },
+            },
+          ],
+          recent_events: [],
+        },
+      ],
+    };
+
+    vi.mocked(api.getJourney).mockResolvedValue(tresMatriculas);
+
+    renderPage();
+
+    // (a) só 2 chips visíveis: a matrícula encerrada não entra.
+    const tabs = await screen.findAllByRole('tab');
+    expect(tabs).toHaveLength(2);
+    expect(tabs.map((t) => t.textContent)).toEqual(['Linha A', 'Ortopedia']);
+
+    // (b) sem seleção, a linha padrão é a matrícula ATIVA v2 — não a encerrada
+    // (que vinha primeiro no array e "vencia" no find() antigo por care_line_code).
+    // Aparece 2x (destaque + timeline) — daí findAllByText.
+    expect((await screen.findAllByText('Passo da V2 (ativa)')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Passo da V1 (encerrada)')).not.toBeInTheDocument();
+
+    // (c) output limpo: nenhum warning do React de key duplicada entre chips.
+    const keyDuplicada = consoleErrorSpy.mock.calls.some((args) =>
+      String(args[0]).includes('same key'),
+    );
+    expect(keyDuplicada).toBe(false);
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  /**
+   * Bug ao vivo: itens `kind: 'ATIVIDADE'` (check-in de humor, WHO-5, PHQ-4) não
+   * têm especialidade nem slots — o motor os avalia como liberados por não terem
+   * regras, mas isso NUNCA deve virar um botão "Agendar" (levaria a uma agenda
+   * vazia). O estado de cada ATIVIDADE vem do check-in do dia (`useMoodToday`),
+   * não da elegibilidade.
+   */
+  describe('itens ATIVIDADE na timeline (nunca agendáveis)', () => {
+    function jornadaComItem(item: Journey['enrollments'][number]['items'][number]): Journey {
+      return {
+        enrollments: [
+          {
+            enrollment: jornada.enrollments[0].enrollment,
+            care_line_name: 'Saúde Mental',
+            items: [item],
+            recent_events: [],
+          },
+        ],
+      };
+    }
+
+    const itemCheckin = {
+      item: {
+        id: 'item-checkin',
+        ref: 'checkin-humor-diario',
+        kind: 'ATIVIDADE' as const,
+        specialty_code: '',
+        label: 'Check-in de humor',
+        sort_order: 1,
+      },
+      eligibility: { allowed: true, blocks: [] },
+    };
+
+    const itemWho5 = {
+      item: {
+        id: 'item-who5',
+        ref: 'who5-semanal',
+        kind: 'ATIVIDADE' as const,
+        specialty_code: '',
+        label: 'Questionário semanal (WHO-5)',
+        sort_order: 1,
+      },
+      eligibility: { allowed: true, blocks: [] },
+    };
+
+    it('check-in SEM check-in hoje: sem link/botão "Agendar" e com o aviso de registrar no painel', async () => {
+      vi.mocked(api.getJourney).mockResolvedValue(jornadaComItem(itemCheckin));
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: true,
+        checkin: null,
+      });
+
+      renderPage();
+
+      expect(await screen.findByText('Check-in de humor')).toBeInTheDocument();
+      expect(screen.getByText(/registre no painel ao lado/i)).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /agendar/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /agendar/i })).not.toBeInTheDocument();
+    });
+
+    it('check-in feito hoje: mostra "Feito hoje"', async () => {
+      vi.mocked(api.getJourney).mockResolvedValue(jornadaComItem(itemCheckin));
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: false,
+        checkin: {
+          valencia: 60,
+          energia: 60,
+          quadrante: 'agradavel_media',
+          respondido_em: '2026-07-20T09:00:00-03:00',
+        },
+      });
+
+      renderPage();
+
+      expect(await screen.findByText('Feito hoje')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /agendar/i })).not.toBeInTheDocument();
+    });
+
+    it('WHO-5: sem oferta do gatilho, sem o link "Responder agora"', async () => {
+      vi.mocked(api.getJourney).mockResolvedValue(jornadaComItem(itemWho5));
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: true,
+        checkin: null,
+        offer: null,
+      });
+
+      renderPage();
+
+      expect(await screen.findByText('Questionário semanal (WHO-5)')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /responder agora/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /agendar/i })).not.toBeInTheDocument();
+      expect(screen.getByText(/quando fizer sentido na sua jornada/i)).toBeInTheDocument();
+    });
+
+    it('WHO-5: com a oferta do gatilho igual ao instrumento, link "Responder agora" para /avaliacoes/WHO5', async () => {
+      vi.mocked(api.getJourney).mockResolvedValue(jornadaComItem(itemWho5));
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: false,
+        checkin: null,
+        offer: 'WHO5',
+      });
+
+      renderPage();
+
+      const link = await screen.findByRole('link', { name: /responder agora/i });
+      expect(link.getAttribute('href')).toBe('/avaliacoes/WHO5');
+    });
+  });
+
+  /** Regressão: item CONSULTA liberado continua oferecendo o link "Agendar" (não regride com a mudança acima). */
+  it('regressão: item CONSULTA liberado continua com o link "Agendar"', async () => {
+    renderPage();
+    const links = await screen.findAllByRole('link', { name: /agendar/i });
+    expect(links.some((l) => l.getAttribute('href') === '/jornada/agendar/item-1')).toBe(true);
   });
 });

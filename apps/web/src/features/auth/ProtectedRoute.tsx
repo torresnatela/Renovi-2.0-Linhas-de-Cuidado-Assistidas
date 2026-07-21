@@ -15,7 +15,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const session = useSession();
 
   if (session.isLoading) {
-    return <p className="p-6 text-slate-600">Carregando…</p>;
+    return <p className="p-6 text-sm text-muted">Carregando…</p>;
   }
   if (!session.data) {
     return <Navigate to="/entrar" replace />;

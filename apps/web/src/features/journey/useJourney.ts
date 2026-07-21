@@ -2,16 +2,10 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 
 import * as api from '../../shared/api';
 
-/**
- * O fuso em que as datas SEM `time_zone` próprio da jornada são exibidas.
- *
- * Slots e consultas trazem o fuso da agenda embutido no dado (`time_zone`); já a
- * vigência da matrícula, os eventos e o `available_from` de um bloqueio são
- * instantes sem fuso anexo. A plataforma opera em hora de parede de São Paulo (o
- * legado é de lá), então é esse o fuso de LEITURA — explícito, nunca o do browser
- * (a regra do shared/datetime vale igual: um runner de CI em UTC mentiria a data).
- */
-export const FUSO_PADRAO = 'America/Sao_Paulo';
+// O fuso de leitura mudou-se para shared/datetime (é uma preocupação de
+// data/hora, não da jornada). Re-exportado aqui para os imports antigos
+// (JourneyPage, ui.tsx) continuarem valendo sem alteração.
+export { FUSO_PADRAO } from '../../shared/datetime';
 
 /**
  * Chaves hierárquicas, no padrão do schedulingKeys: a raiz 'journey' permite

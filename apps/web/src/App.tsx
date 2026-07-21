@@ -1,101 +1,91 @@
-import { BrowserRouter, Link, Outlet, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 
 import { LoginPage } from './features/auth/LoginPage';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { RegisterPage } from './features/auth/RegisterPage';
-import { HomePage } from './features/home/HomePage';
-import { CareAppointmentsPage } from './features/journey/CareAppointmentsPage';
+import { ConsultationsPage } from './features/consultations/ConsultationsPage';
 import { JourneyPage } from './features/journey/JourneyPage';
 import { ScheduleCarePage } from './features/journey/ScheduleCarePage';
-import { MoodPage } from './features/mood/MoodPage';
-import { AppointmentPage, AppointmentsPage } from './features/scheduling/AppointmentsPage';
-import { ProfessionalPickerPage, SpecialtyPickerPage } from './features/scheduling/SchedulingPages';
-import { SlotPickerPage } from './features/scheduling/SlotPickerPage';
+import { AssessmentPage } from './features/mood/AssessmentPage';
+import { ProfilePage } from './features/profile/ProfilePage';
+import { AppLayout } from './features/shell/AppLayout';
+import { AppointmentPage } from './features/scheduling/AppointmentPage';
 import { ErrorBoundary } from './shared/ErrorBoundary';
+import { Button } from './shared/ui/Button';
+import { Card } from './shared/ui/Card';
 
 /**
- * Shell do app. A Minha Jornada (SPEC §7) entra ao lado destas quando o motor de
- * elegibilidade existir (ver docs/PROGRESSO.md).
+ * Tabela de rotas final do app do paciente. As telas logadas vivem sob um único
+ * layout (`AppLayout`) que traz o shell desktop (top nav) e a guarda de sessão —
+ * envolver cada tela seria repetir a guarda seis vezes, e uma acaba esquecida.
+ * `/entrar` e `/cadastro` ficam fora do shell (a Etapa 3 traz o layout próprio).
  */
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-slate-50 text-slate-900">
-        <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto max-w-3xl px-6 py-4">
-            <h1 className="text-xl font-semibold">Renovi 2.0</h1>
-            <p className="text-sm text-slate-500">Plataforma do Paciente — Linhas de Cuidado</p>
-          </div>
-        </header>
+      {/*
+        ErrorBoundary: um erro síncrono no render de qualquer tela (ex.: um
+        time_zone malformado da API fazendo toLocaleTimeString lançar) deixaria o
+        app inteiro em branco. O boundary vira isso numa mensagem com saída.
+      */}
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/entrar" element={<LoginPage />} />
+          <Route path="/cadastro" element={<RegisterPage />} />
 
-        {/*
-          ErrorBoundary: um erro síncrono no render de qualquer tela (ex.: um
-          time_zone malformado da API fazendo toLocaleTimeString lançar) deixaria
-          o app inteiro em branco. O boundary vira isso numa mensagem com saída.
-        */}
-        <ErrorBoundary>
-          <Routes>
-            <Route path="/entrar" element={<LoginPage />} />
-            <Route path="/cadastro" element={<RegisterPage />} />
+          {/* Rota de layout: shell + guarda de sessão em UM lugar. */}
+          <Route
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/" element={<Navigate to="/jornada" replace />} />
 
-            {/*
-              Rota de layout sem path: a guarda de sessão fica em UM lugar em vez
-              de envolver cada uma das seis telas — e envolver seis vezes é como
-              uma acaba esquecida.
-            */}
-            <Route
-              element={
-                <ProtectedRoute>
-                  <Outlet />
-                </ProtectedRoute>
-              }
-            >
-              <Route path="/" element={<HomePage />} />
+            {/* Minha jornada (SPEC §7): a linha de cuidado do paciente. Agendar
+                é por ITEM da linha (passa pelo motor de elegibilidade). */}
+            <Route path="/jornada" element={<JourneyPage />} />
+            <Route path="/jornada/agendar/:itemId" element={<ScheduleCarePage />} />
+            {/* Consultas migraram para /consultas: mantém links antigos vivos. */}
+            <Route path="/jornada/consultas" element={<Navigate to="/consultas" replace />} />
 
-              {/*
-                A URL É o estado do wizard: voltar, recarregar e compartilhar
-                funcionam de graça, e cada passo é testável isolado.
-              */}
-              <Route path="/agendar" element={<SpecialtyPickerPage />} />
-              <Route path="/agendar/:specialtyId" element={<ProfessionalPickerPage />} />
-              <Route path="/agendar/:specialtyId/:professionalId" element={<SlotPickerPage />} />
+            <Route path="/consultas" element={<ConsultationsPage />} />
+            <Route path="/consultas/:appointmentId" element={<AppointmentPage />} />
 
-              <Route path="/consultas" element={<AppointmentsPage />} />
-              <Route path="/consultas/:appointmentId" element={<AppointmentPage />} />
+            <Route path="/perfil" element={<ProfilePage />} />
 
-              {/* Verificador Diário de Humor (Anexo C). */}
-              <Route path="/humor" element={<MoodPage />} />
+            {/* /humor aposentado no redesign: o check-in de humor virou o card da
+                Jornada (MoodCheckinCard). Mantém links antigos vivos. */}
+            <Route path="/humor" element={<Navigate to="/jornada" replace />} />
+            {/* Instrumentos periódicos (WHO-5/PHQ-4) por link direto. */}
+            <Route path="/avaliacoes/:codigo" element={<AssessmentPage />} />
+          </Route>
 
-              {/*
-                Minha jornada (SPEC §7): a linha de cuidado do paciente. O agendar
-                é por ITEM da linha (passa pelo motor de elegibilidade), distinto do
-                wizard de /agendar (booking cru por especialidade).
-              */}
-              <Route path="/jornada" element={<JourneyPage />} />
-              <Route path="/jornada/agendar/:itemId" element={<ScheduleCarePage />} />
-              <Route path="/jornada/consultas" element={<CareAppointmentsPage />} />
-            </Route>
-
-            <Route path="*" element={<NaoEncontrada />} />
-          </Routes>
-        </ErrorBoundary>
-      </div>
+          <Route path="*" element={<NaoEncontrada />} />
+        </Routes>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }
 
 /**
- * Esta feature levou o app de 3 para 8 rotas e trouxe o primeiro link de verdade
- * compartilhável (/consultas/:id). Sem isto, um id errado renderiza uma página em
- * branco sob o cabeçalho.
+ * Um id ou endereço errado renderiza uma página com saída, nunca uma tela em
+ * branco. Fica fora do shell (rota `*`): pode ser atingida sem sessão.
  */
 function NaoEncontrada() {
+  const navigate = useNavigate();
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <h2 className="mb-2 text-lg font-medium">Página não encontrada</h2>
-      <Link to="/" className="text-emerald-700 underline">
-        Voltar ao início
-      </Link>
+    <main className="mx-auto flex max-w-shell flex-col items-center px-10 py-16">
+      <Card as="section" padding="lg" className="w-full max-w-md text-center">
+        <h1 className="text-lg font-bold text-primary-300">Página não encontrada</h1>
+        <p className="mt-2 text-sm text-ink">
+          O endereço que você acessou não existe ou mudou de lugar.
+        </p>
+        <Button className="mt-6" onClick={() => navigate('/jornada')}>
+          Voltar para a jornada
+        </Button>
+      </Card>
     </main>
   );
 }

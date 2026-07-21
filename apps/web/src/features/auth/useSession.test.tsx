@@ -5,9 +5,27 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '../../shared/api';
-import { HomePage } from '../home/HomePage';
 import { LoginPage } from './LoginPage';
 import { ProtectedRoute } from './ProtectedRoute';
+import { useLogout, useSession } from './useSession';
+
+/**
+ * Fixture mínima de tela logada. A HomePage foi aposentada no redesign (Etapa 8);
+ * o que este teste trava é a SESSÃO — depois do logout, nenhum dado do paciente
+ * pode sobreviver na tela. Uma tela enxuta preserva exatamente essa intenção.
+ */
+function ContaFixture() {
+  const session = useSession();
+  const logout = useLogout();
+  if (!session.data) return <p>sem sessão</p>;
+  return (
+    <div>
+      <p>Olá, {session.data.full_name}</p>
+      <p>{session.data.email}</p>
+      <button onClick={() => logout.mutate()}>Sair</button>
+    </div>
+  );
+}
 
 vi.mock('../../shared/api', async () => {
   const actual = await vi.importActual<typeof import('../../shared/api')>('../../shared/api');
@@ -32,7 +50,7 @@ function renderApp() {
             path="/"
             element={
               <ProtectedRoute>
-                <HomePage />
+                <ContaFixture />
               </ProtectedRoute>
             }
           />
