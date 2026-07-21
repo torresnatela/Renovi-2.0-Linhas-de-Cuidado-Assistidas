@@ -37,8 +37,15 @@ export function ToScheduleAside({ journey }: { journey: Journey | undefined }) {
           className="flex flex-col gap-3 rounded-lg border-[1.5px] border-dashed border-primary-200 bg-white p-[18px]"
         >
           <div className="flex flex-col gap-px">
-            <span className="text-base font-bold text-primary-300">{item.label}</span>
-            <span className="text-[13px] text-muted">{item.recurrence ?? 'Consulta'}</span>
+            {/* 15px/12.5px no mock mobile (Consultas.dc.html:86-87), espelhando
+                AppointmentCard; `lg:` devolve o tamanho de sempre do desktop
+                (base/13px). */}
+            <span className="text-[15px] font-bold text-primary-300 lg:text-base">
+              {item.label}
+            </span>
+            <span className="text-[12.5px] text-muted lg:text-[13px]">
+              {item.recurrence ?? 'Consulta'}
+            </span>
           </div>
 
           {eligibility.allowed ? (
