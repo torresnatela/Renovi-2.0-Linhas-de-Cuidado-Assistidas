@@ -4,31 +4,51 @@ import { Link, useParams } from 'react-router-dom';
 import { ApiError, type Appointment, type AppointmentStatus } from '../../shared/api';
 import { formatDateLong, formatTime } from '../../shared/datetime';
 import { openExternal } from '../../shared/navigate';
+import { useIsDesktop } from '../../shared/viewport';
 import { Badge } from '../../shared/ui/Badge';
 import { Button } from '../../shared/ui/Button';
 import { Card } from '../../shared/ui/Card';
 import { DateBadge } from '../../shared/ui/DateBadge';
 import { ErrorNotice, Loading } from '../../shared/ui/feedback';
+import { FlowHeader } from '../../shared/ui/FlowHeader';
 import { IconBack } from '../../shared/ui/icons';
 import { AssessmentForm } from '../mood/AssessmentForm';
+import { HelpNowMenu } from '../mood/HelpNowMenu';
 import { useMoodToday } from '../mood/useMood';
 import { reasonText } from './reasons';
 import { useAppointment, useJoinAppointment } from './useScheduling';
 
-/** /consultas/:appointmentId — o detalhe, com o botão de entrar. */
+/**
+ * /consultas/:appointmentId — o detalhe, com o botão de entrar.
+ *
+ * No mobile é um fluxo empilhado (ADR-041): o breadcrumb "Minhas consultas" do
+ * desktop dá lugar ao `FlowHeader` (voltar → /consultas, ajuda no lugar de
+ * sempre). O `title` é o nome da especialidade quando a consulta já carregou —
+ * nada inventado enquanto ela ainda não chegou. Desktop intocado.
+ */
 export function AppointmentPage() {
   const { appointmentId } = useParams();
   const { data, isLoading, error } = useAppointment(appointmentId);
+  const isDesktop = useIsDesktop();
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
-      <Link
-        to="/consultas"
-        className="inline-flex w-fit items-center gap-1 text-sm font-bold text-primary-300"
-      >
-        <IconBack size={18} />
-        Minhas consultas
-      </Link>
+      {isDesktop ? (
+        <Link
+          to="/consultas"
+          className="inline-flex w-fit items-center gap-1 text-sm font-bold text-primary-300"
+        >
+          <IconBack size={18} />
+          Minhas consultas
+        </Link>
+      ) : (
+        <FlowHeader
+          eyebrow="Consulta"
+          title={data?.specialty.name ?? 'Consulta'}
+          backTo="/consultas"
+          help={<HelpNowMenu />}
+        />
+      )}
 
       {isLoading && <Loading label="Carregando a consulta…" />}
       {error && <ErrorNotice error={error} />}
@@ -107,6 +127,7 @@ function PainelDeEntrada({ consulta }: { consulta: Appointment }) {
 function JoinGate({ consulta }: { consulta: Appointment }) {
   const entrar = useJoinAppointment(consulta.id);
   const today = useMoodToday();
+  const isDesktop = useIsDesktop();
   const [mostrarForm, setMostrarForm] = useState(false);
   const [gateFeito, setGateFeito] = useState(false);
 
@@ -152,7 +173,12 @@ function JoinGate({ consulta }: { consulta: Appointment }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <Button color="primary" loading={entrar.isPending} onClick={aoClicarEntrar}>
+      <Button
+        color="primary"
+        loading={entrar.isPending}
+        onClick={aoClicarEntrar}
+        fullWidth={!isDesktop}
+      >
         {entrar.isPending ? 'Abrindo sua sala…' : 'Entrar na consulta'}
       </Button>
 
