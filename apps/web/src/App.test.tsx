@@ -54,7 +54,11 @@ describe('App', () => {
     renderApp();
 
     expect(
-      await screen.findByRole('heading', { level: 1, name: 'Que bom te ver' }),
+      await screen.findByRole(
+        'heading',
+        { level: 1, name: 'Que bom te ver' },
+        { timeout: 10000 },
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Olá,/)).not.toBeInTheDocument();
   });

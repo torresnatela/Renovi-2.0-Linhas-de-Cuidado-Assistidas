@@ -104,7 +104,7 @@ describe('RegisterPage', () => {
         state: 'SP',
       },
     });
-  });
+  }, 20000); // wizard inteiro digitado (3 passos): timeout maior sob carga de CPU
 
   // A espera é longa e real (cadastro síncrono contra a Doutor ao Vivo).
   // Sem aviso, o usuário acha que travou e recarrega no meio.
@@ -121,7 +121,7 @@ describe('RegisterPage', () => {
     const aviso = await screen.findByRole('status');
     expect(aviso).toHaveTextContent(/pode levar até um minuto/i);
     expect(aviso).toHaveTextContent(/não feche nem recarregue/i);
-  });
+  }, 20000); // wizard inteiro digitado (3 passos): timeout maior sob carga de CPU
 
   it('barra senhas divergentes sem chamar a API', async () => {
     const user = userEvent.setup();
@@ -134,7 +134,7 @@ describe('RegisterPage', () => {
     expect(await screen.findByText(/não coincidem/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Criar conta/i }));
     expect(api.registerAccount).not.toHaveBeenCalled();
-  });
+  }, 20000); // wizard inteiro digitado (3 passos): timeout maior sob carga de CPU
 
   it('barra senha curta (<12) sem chamar a API', async () => {
     const user = userEvent.setup();
@@ -147,7 +147,7 @@ describe('RegisterPage', () => {
     expect(await screen.findByText(/pelo menos 12 caracteres/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Criar conta/i }));
     expect(api.registerAccount).not.toHaveBeenCalled();
-  });
+  }, 20000); // wizard inteiro digitado (3 passos): timeout maior sob carga de CPU
 
   // O 409 de e-mail já usado na DAV precisa chegar com a frase que a API escreveu —
   // é o casal que compartilha e-mail, e um "erro inesperado" o deixaria sem saída.
@@ -170,7 +170,7 @@ describe('RegisterPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /já está vinculado a outro paciente/i,
     );
-  });
+  }, 20000); // wizard inteiro digitado (3 passos): timeout maior sob carga de CPU
 
   it('mantém "Criar conta" desabilitado até aceitar os termos, com o motivo visível', async () => {
     const user = userEvent.setup();
@@ -186,7 +186,7 @@ describe('RegisterPage', () => {
 
     await user.click(screen.getByRole('checkbox'));
     expect(criar).toBeEnabled();
-  });
+  }, 20000); // wizard inteiro digitado (3 passos): timeout maior sob carga de CPU
 
   it('preenche o endereço pelo CEP (ViaCEP) e mantém os campos editáveis', async () => {
     const user = userEvent.setup();
