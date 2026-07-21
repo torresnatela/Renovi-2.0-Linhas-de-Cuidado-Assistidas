@@ -39,7 +39,9 @@ describe('App', () => {
     vi.mocked(api.getMe).mockRejectedValue(new ApiError(401, 'não autenticado'));
     renderApp();
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Entrar' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Que bom te ver' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Olá,/)).not.toBeInTheDocument();
   });
 

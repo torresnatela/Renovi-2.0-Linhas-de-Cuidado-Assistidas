@@ -1,176 +1,228 @@
-import { FormEvent, useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 
 import type { RegisterRequest } from '../../shared/api';
+import { dateBrToIso, digitsOnly, maskUf } from '../../shared/masks';
+import { IconBack } from '../../shared/ui/icons';
+import { AccessLayout } from './AccessLayout';
+import { AccessConsentStep } from './steps/AccessConsentStep';
+import { AddressStep } from './steps/AddressStep';
+import { PersonalDataStep } from './steps/PersonalDataStep';
+import { SuccessStep } from './steps/SuccessStep';
 import { useRegister, useSession } from './useSession';
+import { lookupCep } from './viaCep';
 
 const MIN_PASSWORD = 12;
 
-function Field({
-  label,
-  name,
-  ...props
-}: { label: string; name: string } & React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <label className="block">
-      <span className="text-sm font-medium">{label}</span>
-      <input name={name} className="mt-1 w-full rounded border px-3 py-2" {...props} />
-    </label>
-  );
+/** Estado do wizard. Vive em memória (fora da URL): recarregar reinicia — aceitável. */
+export interface RegisterForm {
+  nome: string;
+  cpf: string;
+  nasc: string;
+  cel: string;
+  cep: string;
+  rua: string;
+  numero: string;
+  compl: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  email: string;
+  senha: string;
+  senha2: string;
 }
+
+const EMPTY_FORM: RegisterForm = {
+  nome: '',
+  cpf: '',
+  nasc: '',
+  cel: '',
+  cep: '',
+  rua: '',
+  numero: '',
+  compl: '',
+  bairro: '',
+  cidade: '',
+  uf: '',
+  email: '',
+  senha: '',
+  senha2: '',
+};
+
+type Step = 1 | 2 | 3;
+const STEP_TITLES: Record<Step, string> = { 1: 'Sobre você', 2: 'Seu endereço', 3: 'Seu acesso' };
 
 export function RegisterPage() {
   const session = useSession();
   const register = useRegister();
-  const [erroLocal, setErroLocal] = useState<string | null>(null);
+  const navigate = useNavigate();
 
-  if (session.data) return <Navigate to="/" replace />;
+  const [form, setForm] = useState<RegisterForm>(EMPTY_FORM);
+  const [step, setStep] = useState<Step>(1);
+  const [stepError, setStepError] = useState<string | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setErroLocal(null);
+  // Só barra a entrada de quem JÁ estava logado. Depois de um cadastro bem-sucedido
+  // a sessão também existe, mas aí queremos a tela de sucesso, não o redirect.
+  if (session.data && !register.isSuccess) return <Navigate to="/" replace />;
 
-    const f = new FormData(e.currentTarget);
-    const password = String(f.get('password'));
+  const patch = (p: Partial<RegisterForm>) => setForm((f) => ({ ...f, ...p }));
 
-    // Só o que dá para checar sem o servidor. CPF, e-mail duplicado e vínculo
-    // com a Doutor ao Vivo são decisão da API — replicar essas regras aqui só
-    // criaria duas verdades que divergem com o tempo.
-    if (password.length < MIN_PASSWORD) {
-      setErroLocal(`A senha precisa ter pelo menos ${MIN_PASSWORD} caracteres.`);
+  if (register.isSuccess) {
+    const firstName = form.nome.trim().split(' ')[0] || 'tudo pronto';
+    return (
+      <AccessLayout active="cadastro" showSwitcher={false}>
+        <SuccessStep firstName={firstName} onStart={() => navigate('/')} />
+      </AccessLayout>
+    );
+  }
+
+  // Validação leve (o que dá pra checar sem servidor). CPF válido, e-mail duplicado
+  // e vínculo com a DAV são decisão da API — replicar aqui só criaria duas verdades.
+  function validateStep1(): string | null {
+    if (!form.nome.trim()) return 'Informe seu nome completo.';
+    if (digitsOnly(form.cpf).length !== 11) return 'Confira o CPF — precisa ter 11 dígitos.';
+    if (dateBrToIso(form.nasc) === null) return 'Confira a data de nascimento (dd/mm/aaaa).';
+    const cel = digitsOnly(form.cel).length;
+    if (cel < 10 || cel > 11) return 'Confira o celular com DDD.';
+    return null;
+  }
+
+  function validateStep2(): string | null {
+    if (digitsOnly(form.cep).length !== 8) return 'Confira o CEP — precisa ter 8 dígitos.';
+    if (!form.rua.trim()) return 'Informe o endereço.';
+    if (!form.numero.trim()) return 'Informe o número.';
+    if (!form.bairro.trim()) return 'Informe o bairro.';
+    if (!form.cidade.trim()) return 'Informe a cidade.';
+    if (maskUf(form.uf).length !== 2) return 'Informe a UF (2 letras).';
+    return null;
+  }
+
+  function advance(validate: () => string | null, next: Step) {
+    const err = validate();
+    if (err) {
+      setStepError(err);
       return;
     }
-    if (password !== String(f.get('password_confirm'))) {
-      setErroLocal('As senhas não conferem.');
-      return;
-    }
+    setStepError(null);
+    setStep(next);
+  }
+
+  function goBack() {
+    setStepError(null);
+    setStep((s) => (s > 1 ? ((s - 1) as Step) : s));
+  }
+
+  async function onCepComplete(cep: string) {
+    setCepLoading(true);
+    const addr = await lookupCep(cep);
+    setCepLoading(false);
+    if (!addr) return; // falha/ inexistente: silêncio, preenche à mão
+    setForm((f) => ({
+      ...f,
+      rua: addr.street || f.rua,
+      bairro: addr.neighborhood || f.bairro,
+      cidade: addr.city || f.cidade,
+      uf: maskUf(addr.state) || f.uf,
+    }));
+  }
+
+  // Um único motivo, na ordem em que o usuário deve resolvê-los.
+  function submitBlockReason(): string | null {
+    if (!consent) return 'Aceite os termos para continuar.';
+    if (form.senha.length < MIN_PASSWORD)
+      return `A senha precisa ter pelo menos ${MIN_PASSWORD} caracteres.`;
+    if (form.senha !== form.senha2) return 'As senhas precisam coincidir.';
+    if (!form.email.trim()) return 'Informe seu e-mail.';
+    return null;
+  }
+
+  function onSubmit() {
+    if (submitBlockReason() !== null) return; // defensivo (o botão já fica desabilitado)
 
     const body: RegisterRequest = {
-      full_name: String(f.get('full_name')),
-      cpf: String(f.get('cpf')),
-      birth_date: String(f.get('birth_date')),
-      email: String(f.get('email')),
-      phone: String(f.get('phone')),
-      password,
+      full_name: form.nome.trim(),
+      cpf: form.cpf,
+      birth_date: dateBrToIso(form.nasc) ?? '',
+      email: form.email.trim(),
+      phone: digitsOnly(form.cel),
+      password: form.senha,
       address: {
-        zip_code: String(f.get('zip_code')),
-        street: String(f.get('street')),
-        number: String(f.get('number')),
-        complement: String(f.get('complement') ?? ''),
-        neighborhood: String(f.get('neighborhood')),
-        city: String(f.get('city')),
-        state: String(f.get('state')),
+        zip_code: form.cep,
+        street: form.rua.trim(),
+        number: form.numero.trim(),
+        complement: form.compl.trim(),
+        neighborhood: form.bairro.trim(),
+        city: form.cidade.trim(),
+        state: form.uf,
       },
     };
     register.mutate(body);
   }
 
-  const erro = erroLocal ?? (register.isError ? register.error.message : null);
-
   return (
-    <main className="mx-auto max-w-2xl p-6">
-      <h1 className="mb-2 text-2xl font-semibold">Criar minha conta</h1>
-      <p className="mb-6 text-sm text-slate-600">
-        Seus dados são usados para criar seu cadastro de saúde e liberar suas consultas.
-      </p>
-
-      <form onSubmit={onSubmit} className="space-y-6">
-        <fieldset disabled={register.isPending} className="space-y-4">
-          <legend className="mb-2 font-medium">Dados pessoais</legend>
-          <Field label="Nome completo" name="full_name" required minLength={3} autoComplete="name" />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="CPF" name="cpf" required inputMode="numeric" placeholder="000.000.000-00" />
-            <Field label="Data de nascimento" name="birth_date" type="date" required />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="E-mail" name="email" type="email" required autoComplete="email" />
-            <Field
-              label="Celular"
-              name="phone"
-              required
-              inputMode="tel"
-              placeholder="11912345678"
-              autoComplete="tel"
-            />
-          </div>
-        </fieldset>
-
-        <fieldset disabled={register.isPending} className="space-y-4">
-          <legend className="mb-2 font-medium">Endereço</legend>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="CEP" name="zip_code" required inputMode="numeric" placeholder="06472000" />
-            <div className="sm:col-span-2">
-              <Field label="Logradouro" name="street" required />
+    <AccessLayout active="cadastro">
+      <div className="flex flex-col gap-[18px]">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2.5">
+            {step > 1 && (
+              <button
+                type="button"
+                onClick={goBack}
+                aria-label="Voltar"
+                className="inline-flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-full border border-primary-200 bg-white text-primary-300 transition active:opacity-70"
+              >
+                <IconBack size={16} />
+              </button>
+            )}
+            <div className="flex flex-col">
+              <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
+                Passo {step} de 3
+              </span>
+              <span className="text-[22px] font-bold text-primary-300">{STEP_TITLES[step]}</span>
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Número" name="number" required />
-            <Field label="Complemento" name="complement" />
-            <Field label="Bairro" name="neighborhood" required />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="sm:col-span-2">
-              <Field label="Cidade" name="city" required />
-            </div>
-            <Field label="UF" name="state" required maxLength={2} placeholder="SP" />
-          </div>
-        </fieldset>
-
-        <fieldset disabled={register.isPending} className="space-y-4">
-          <legend className="mb-2 font-medium">Senha</legend>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label={`Senha (mínimo ${MIN_PASSWORD} caracteres)`}
-              name="password"
-              type="password"
-              required
-              minLength={MIN_PASSWORD}
-              autoComplete="new-password"
-            />
-            <Field
-              label="Confirme a senha"
-              name="password_confirm"
-              type="password"
-              required
-              autoComplete="new-password"
+          <div className="h-1.5 overflow-hidden rounded-pill bg-primary-100">
+            <div
+              className="h-full rounded-pill bg-primary-300 transition-[width] duration-300"
+              style={{ width: `${(step / 3) * 100}%` }}
             />
           </div>
-        </fieldset>
+          <span className="text-[12.5px] text-muted">Leva menos de 2 minutos.</span>
+        </div>
 
-        {erro && (
-          <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700">
-            {erro}
-          </p>
+        {step === 1 && (
+          <PersonalDataStep
+            form={form}
+            onChange={patch}
+            onContinue={() => advance(validateStep1, 2)}
+            error={stepError}
+          />
         )}
-
-        {/*
-          A espera aqui é longa e real: o cadastro é síncrono contra a Doutor ao
-          Vivo, que já levou dezenas de segundos em homologação. Um spinner mudo
-          faria o usuário achar que travou e recarregar a página no meio — então
-          dizemos o que está acontecendo e quanto pode demorar.
-        */}
-        {register.isPending && (
-          <p role="status" className="rounded bg-emerald-50 p-3 text-sm text-emerald-900">
-            Estamos criando seu cadastro de saúde na Doutor ao Vivo. Isso pode levar até um minuto —
-            <strong> não feche nem recarregue esta página.</strong>
-          </p>
+        {step === 2 && (
+          <AddressStep
+            form={form}
+            onChange={patch}
+            onContinue={() => advance(validateStep2, 3)}
+            onCepComplete={onCepComplete}
+            cepLoading={cepLoading}
+            error={stepError}
+          />
         )}
-
-        <button
-          type="submit"
-          disabled={register.isPending}
-          className="w-full rounded bg-emerald-700 py-2 font-medium text-white disabled:opacity-60"
-        >
-          {register.isPending ? 'Criando sua conta…' : 'Criar conta'}
-        </button>
-      </form>
-
-      <p className="mt-6 text-sm">
-        Já tem conta?{' '}
-        <Link to="/entrar" className="text-emerald-700 underline">
-          Entrar
-        </Link>
-      </p>
-    </main>
+        {step === 3 && (
+          <AccessConsentStep
+            form={form}
+            onChange={patch}
+            consent={consent}
+            onToggleConsent={() => setConsent((c) => !c)}
+            onSubmit={onSubmit}
+            pending={register.isPending}
+            blockReason={submitBlockReason()}
+            apiError={register.isError ? register.error.message : null}
+          />
+        )}
+      </div>
+    </AccessLayout>
   );
 }
