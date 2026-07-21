@@ -3,10 +3,67 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-20 — **Redesign desktop do front concluído (Etapas 0–8)**: design system (tokens Nunito/navy/laranja), 17 componentes em `shared/ui/`, AppShell + rotas finais, telas novas (Acesso, Jornada com check-in, Agendar por item, Consultas com gate de pré-consulta, Perfil reduzido) e instrumentos WHO-5/PHQ-4 restilizados. Telas emerald/slate e rotas mortas aposentadas; sweep emerald/slate zerado. ADR-038 (design system) + ADR-039 (decisões de produto). Gate `typecheck && test && build` verde. Ver a seção "Redesign desktop" abaixo.
+_Última atualização: 2026-07-21 — **Mobile responsivo concluído (Etapas 0–8)**: same-codebase, desktop intacto ≥`lg` (1024px). Hook `useIsDesktop` + testkit, chrome `tabs`×`flow` (`AppShell`/`TabBar`/`FlowHeader`), ícones filled verbatim do handoff, jornada/agendar/consultas/acesso/perfil relayoutados por viewport, nó sintético de check-in na timeline, smoke de integração no `App` e docs vivos (ADR-041/042). ADR-039 (decisões de produto desktop) herdado integralmente. Ver a seção "Mobile responsivo" abaixo.
+Antes: 2026-07-20 — **Redesign desktop do front concluído (Etapas 0–8)**: design system (tokens Nunito/navy/laranja), 17 componentes em `shared/ui/`, AppShell + rotas finais, telas novas (Acesso, Jornada com check-in, Agendar por item, Consultas com gate de pré-consulta, Perfil reduzido) e instrumentos WHO-5/PHQ-4 restilizados. Telas emerald/slate e rotas mortas aposentadas; sweep emerald/slate zerado. ADR-038 (design system) + ADR-039 (decisões de produto). Gate `typecheck && test && build` verde. Ver a seção "Redesign desktop" abaixo.
 Antes: 2026-07-20 — **Revisão do CodeRabbit na PR #13** endereçada (ADR-037, 2ª rodada): cortes na conexão da tx, streak recente, locks de consentimento (Grant/Revoke/Record), a11y (aria-live + aria-pressed), clamp de limit, `maxItems: 120` no contrato, e fix de teste flaky (meia-noite BR). Não aplicado: `NOT VALID` nas migrations (golang-migrate roda em tx única; desproporcional no piloto). `make ci` + integração completa (incl. e2e) + front verdes.
 Antes: 2026-07-19 — **Correções pós-review (PR #13)** do Verificador de Humor: streak = dias consecutivos de calendário (gatilho), guard de concorrência (advisory lock + rechecagem na tx) no Submit do assessment, e nits (teto do History em 120, `limit` no `getMoodHistory`, grade operável por teclado). `make ci` + integração verdes. Ver ADR-037.
 Antes: 2026-07-19 — **Verificador Diário de Humor (Anexo C): completo (Módulos 0–6 + telas de WHO-5/PHQ-4)**, pronto para merge na main, sobre o Slice 1 concluído._
+
+## 📱 Mobile responsivo — Etapas 0–8 (CONCLUÍDO, branch `feat/mobile-ui`)
+
+Same-codebase: o desktop segue intacto ≥`lg` (1024px); abaixo disso o app troca
+de chrome (tab bar em vez de header+nav) e relayouta as telas do produto. Nenhum
+token novo — mesmo design system do redesign desktop (Etapas 0–8 acima).
+
+- [x] **Etapa 0 — Fundação mobile**: `shared/viewport.ts` (`useIsDesktop`,
+  `useSyncExternalStore` sobre `matchMedia`, default DESKTOP no jsdom) +
+  `viewport.testkit.ts` (`mockViewport`); ícones filled do tab bar
+  (`IconHomeFilled`/`IconAppointmentsFilled`/`IconProfileFilled`) transcritos
+  **verbatim** do handoff — `viewBox` nativo `21×21`, detalhe em
+  `var(--color-white)`. Commits `aae0fb6`, `990e034`.
+- [x] **Etapa 1 — Chrome mobile**: `AppShell` responsivo (`mobileVariant: 'tabs' |
+  'flow'`), `TabBar` fixa (3 abas, ícone outline→filled no ativo, safe-area) e
+  `FlowHeader` (voltar 36px + logo-icon + eyebrow + título + progress). Commit
+  `16740d4`.
+- [x] **Etapa 2 — Jornada mobile**: arranjo por viewport (MIN → check-in →
+  renovação → timeline → próxima → eventos), nó sintético de check-in na
+  timeline (`itensComCheckinSintetico`, só linha `saude-mental-aberta`) e
+  tipografia mobile do card "Para agendar". Commits `cfccefd`, `dd29a10`
+  (merge `a7eff6a`).
+- [x] **Etapa 3 — Consultas mobile**: re-layout (header padrão, segmented
+  full-width, tipografia do mock), rótulo **"Ver consulta"** (join fica atrás
+  do gate de pré-consulta no detalhe), sem Remarcar (herdado). Commit
+  `718115d` (merge `60818e3`).
+- [x] **Etapa 4 — Agendar mobile**: fluxo linear com `FlowHeader` + progress
+  "Passo N de 3", `CalendarGrid` 7×4 (aritmética civil pura sobre `dayKey`,
+  algoritmo Howard Hinnant, zero `new Date()`), sucesso com oferta sequencial
+  (reset da intenção → passo 2), `Idempotency-Key` intocada. Commit `e4f38f8`
+  (merge `71cb396`).
+- [x] **Etapa 5 — Fluxos empilhados + Perfil**: detalhe de consulta e
+  avaliações (`/consultas/:id`, `/avaliacoes/:codigo`) com `FlowHeader`; Perfil
+  como header raiz mobile. Commit `1b2cf6c` (merge `0a76ab2`; ajuste de review
+  `0e7c1d4` — `opacity-75` no lugar de `/alpha`).
+- [x] **Etapa 6 — Acesso mobile**: coluna única, logo decorativa
+  (`aria-hidden`), tagline, barra de progresso do cadastro, microcopy honesta
+  ("Você pode voltar aos passos anteriores sem perder o que preencheu" — o mock
+  prometia persistência que não existe). Commit `b901b2e` (merge `22aede2`).
+- [x] **Etapa 7 — Smoke de integração**: teste smoke mobile no `App` (rotas +
+  chrome `tabs`/`flow` exercitados via `mockViewport`). Commit `49cd803`.
+- [x] **Etapa 8 — Docs vivos**: nova seção "Layout mobile" em
+  `docs/DESIGN-SYSTEM.md` (§9), ADR-041 (hook de viewport) + ADR-042 (produto
+  mobile) em `docs/DECISOES.md`, este arquivo e `apps/web/CLAUDE.md`
+  atualizados.
+
+**Estado:** `npm --prefix apps/web run test` verde; nenhuma mudança de código
+nesta etapa (só docs).
+
+**Próximo passo:**
+- **QA visual no browser contra os mocks** — comparar cada tela mobile
+  (Acesso/Jornada/Agendar/Consultas/Perfil) com o handoff, viewport por
+  viewport (ainda não verificado no browser real, análogo à pendência do
+  redesign desktop).
+- **Suite completa** (`make ci` + `typecheck && build`) antes de abrir PR para
+  `main`.
 
 ## 🎨 Redesign desktop do front — Etapas 0–8 (CONCLUÍDO, branch `feat/desktop-ui`)
 

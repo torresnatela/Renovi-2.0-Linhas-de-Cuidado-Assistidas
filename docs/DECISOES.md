@@ -1044,3 +1044,92 @@ aparece em `/me/audit` como o evento **mais antigo** da conta — consistente co
 eventos de humor (`checkin_humor_registrado`/`assessment_respondido`), que também são
 gravados na matrícula universal. Os E2E de auditoria (`scenario_a` A22, `scenario_c`
 C10) contam esse evento no total.
+
+---
+
+> **Nota de numeração — Mobile responsivo.** O mobile (Etapas 0–7, 2026-07-21,
+> branch `feat/mobile-ui`) veio depois do Degrau 1 do Verificador de Humor
+> (ADR-040). Os ADRs do mobile começam em **ADR-041**.
+
+## ADR-041 — Hook de viewport (`useIsDesktop`), não CSS dual-render
+
+**Contexto:** o mobile responsivo (same-codebase, desktop intacto ≥`lg`/1024px)
+precisa trocar de CHROME por viewport (tab bar em vez de header+nav, `FlowHeader`
+em vez de header sticky) — uma mudança de ESTRUTURA, não só de estilo. Fazer isso
+só com classes Tailwind (`hidden lg:block` renderizando os dois chromes e
+escondendo um via CSS) tem dois problemas: o jsdom dos testes **não computa CSS**,
+então `getByRole` colide com o mesmo *accessible name* renderizado duas vezes; e
+componentes com estado (inputs, toggles) duplicariam a fonte da verdade.
+
+**Decisão:**
+- `shared/viewport.ts` exporta `useIsDesktop()`: `useSyncExternalStore` sobre
+  `window.matchMedia('(min-width: 1024px)')` — o mesmo breakpoint estrutural `lg`
+  do Tailwind, para nunca divergir dele.
+- **Regra arquitetural:** estrutura muda (elemento a mais/a menos, componente
+  diferente) → decide pelo hook; só estilo muda (espaçamento, fonte, ordem) →
+  classes `lg:` no MESMO elemento.
+- **Proibido dual-render de elementos com o mesmo *accessible name*** entre
+  mobile e desktop — é a regra que evita a colisão de `getByRole` e a duplicação
+  de estado.
+- O jsdom do projeto não implementa `matchMedia`: quando `getMql()` não encontra
+  a API, o snapshot cai para **`true` (DESKTOP)** por padrão. É esse default que
+  mantém os ~200 testes escritos ANTES do mobile passando sem edição — só telas
+  que chamam `useIsDesktop()` diretamente precisam simular o viewport.
+- `shared/viewport.testkit.ts` expõe `mockViewport('mobile' | 'desktop')` →
+  `{ set, restore }`: instala um `matchMedia` fake por teste (referência NOVA a
+  cada chamada, o que invalida o cache do hook em vez de vazar estado/listeners
+  entre `it()`s do mesmo arquivo).
+
+**Consequência:** `AppShell` e `AppLayout` são os únicos pontos que perguntam
+"desktop ou mobile" para decidir estrutura; toda tela abaixo só varia por classe.
+`docs/DESIGN-SYSTEM.md` §9.1 documenta a regra para quem estiliza telas novas.
+
+## ADR-042 — Decisões de produto do mobile
+
+**Contexto:** portar as telas para mobile (same-codebase, `feat/mobile-ui`)
+forçou decisões de produto que não existiam (ou eram diferentes) no desktop —
+registradas juntas, como o ADR-039 fez para o redesign desktop.
+
+**Decisão (todas de 2026-07-21):**
+- **Nó sintético de check-in na timeline da Jornada.** A timeline mobile precisa
+  do check-in de humor como um item da lista (no desktop ele vive só no aside).
+  `itensComCheckinSintetico` (`features/journey/derivations.ts`) sintetiza esse nó
+  **só** para a linha `saude-mental-aberta` (constante espelhada de
+  `apps/api/internal/models/universal_enrollment.go`, `UniversalMentalHealthCode`)
+  e **só** quando o paciente tem matrícula na linha universal do humor, com dedupe
+  por referência — não duplica um item que já exista organicamente.
+- **Rótulo "Ver consulta", não "Entrar na consulta".** O mock trazia "Entrar na
+  consulta" nos cartões de lista (Jornada/Consultas); mantivemos "Ver consulta"
+  porque o `join` de verdade fica atrás do gate de pré-consulta no **detalhe**
+  (`scheduling/AppointmentPage`, ADR-039) — o cartão de lista nunca abre a sala
+  direto.
+- **Sem Remarcar no mobile.** Decisão herdada do desktop (ADR-039, issue #17):
+  o produto cancela + agenda de novo; não há botão de remarcar em nenhum
+  viewport.
+- **Microcopy honesta no cadastro.** O mock do Acesso prometia persistência entre
+  passos ("seus dados ficam salvos"); como isso é FALSO hoje (não há
+  autosave/rascunho no servidor), o texto mobile diz "Você pode voltar aos passos
+  anteriores sem perder o que preencheu" — verdade sobre o estado em memória do
+  wizard, sem prometer o que o backend não garante.
+- **`FlowHeader` do Agendar com eyebrow REAL, não genérico.** O eyebrow mostra
+  `Agendar · {label}` — o nome real do item/especialidade sendo agendado —,
+  nunca um rótulo fixo "Agendar" solto sem contexto.
+- **"Agendar a próxima" reseta a intenção para o passo 2, sem endpoint novo.** A
+  oferta sequencial pós-sucesso (agendar outro item da mesma linha) reusa o MESMO
+  fluxo de `ScheduleCarePage`, só voltando ao passo 2 com a intenção anterior
+  limpa — nenhuma rota nova no contrato.
+- **Barra de progresso sem contagem inventada.** O `progress` do `FlowHeader`
+  mostra só o passo do FLUXO local ("Passo N de 3", com `N` derivado do passo
+  atual do stepper); nunca uma contagem de cota/uso que pertence ao motor de
+  elegibilidade (regra herdada do ADR-039: "cotas sem contagem de uso no front").
+- **Herança integral das decisões de produto do desktop (ADR-039).** Perfil
+  reduzido (sem edição), gate de pré-consulta via WHO-5/PHQ-4 ofertados, wizard
+  por especialidade aposentado, `/humor` aposentada, login por CPF sem reset de
+  senha, cotas sem contagem de uso, orval adiado — nenhuma dessas foi revisitada
+  para o mobile; valem para as duas telas do mesmo componente.
+
+**Consequência:** o mobile não introduz regra de negócio nova — só reformata a
+mesma jornada/motor/gate para um viewport estreito. A única peça de dado NOVA é o
+nó sintético de check-in (puramente de apresentação, sem escrita), e a única cópia
+nova (microcopy do cadastro) corrige uma promessa falsa que já existia no mock, em
+vez de introduzir uma.

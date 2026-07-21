@@ -16,7 +16,8 @@ src/
   App.tsx            # tabela de rotas do paciente
   features/<feat>/   # cada tela/feature (colocation: componente + hooks + teste)
   shared/            # api client (shared/api.ts), helpers (datetime, masks, navigate)
-  shared/ui/         # 17 componentes do design system (ver docs/DESIGN-SYSTEM.md §7)
+  shared/viewport.ts # useIsDesktop() (hook de chrome mobile×desktop) + viewport.testkit.ts (mockViewport) — ADR-041
+  shared/ui/         # 19 componentes do design system (ver docs/DESIGN-SYSTEM.md §7; layout mobile §9)
   styles/            # tokens.css + fonts.css (fonte de verdade do DS)
   assets/            # fonts/ (Nunito .ttf) + logos/ (logo-blue, logo-icon)
   index.css          # imports de fonts/tokens ANTES do @tailwind + @layer base
@@ -40,6 +41,11 @@ src/
 `SlotPickerPage`) e a **lista** `AppointmentsPage`; `journey/CareAppointmentsPage`
 (virou `ConsultationsPage`); a `MoodPage` (a `/humor` redireciona para `/jornada`).
 
+Todas as features acima são **same-codebase**: mobile (`< lg`) e desktop
+(`≥ lg`) compartilham componente e hooks — só o layout muda por viewport
+(Etapas 0–7 do mobile, ADR-041/042). Nenhuma feature nova; ver "Mobile
+responsivo" nas Convenções.
+
 ## Convenções
 
 - **Uma pasta por feature** em `src/features/` (colocation: componente + hooks + teste juntos).
@@ -54,6 +60,26 @@ src/
   (use tints `100/200`); sem CSS solto salvo necessidade. O gate é o sweep
   `grep -rn "emerald\|slate\|rose-" apps/web/src` **zerado** (fora comentários e o
   falso-positivo `translate`).
+- **Mobile responsivo (ADR-041/042):** abaixo de `lg` (1024px) o chrome muda —
+  `AppShell` vira `tabs` (tela raiz + `TabBar`) ou `flow` (fluxo empilhado com
+  `FlowHeader`), decidido pelo `AppLayout` via `matchPath` contra as rotas de
+  fluxo (`/jornada/agendar/:itemId`, `/consultas/:appointmentId`,
+  `/avaliacoes/:codigo`). **Regra do hook:** estrutura muda (elemento a
+  mais/a menos, componente diferente) → `useIsDesktop()` (`shared/viewport.ts`);
+  só estilo muda (espaçamento, fonte, ordem) → classes `lg:` no MESMO elemento.
+  **Proibido dual-render** do mesmo *accessible name* entre mobile/desktop — o
+  jsdom não computa CSS, então as duas cópias colidem no `getByRole`, e um
+  componente com estado duplicaria a fonte da verdade. **Testes que dependem do
+  viewport** usam `mockViewport('mobile' | 'desktop')`
+  (`shared/viewport.testkit.ts`, `{ set, restore }`) — sem ele, o hook assume
+  DESKTOP (default quando o jsdom não implementa `matchMedia`, o que preserva os
+  testes anteriores ao mobile sem edição). Detalhe completo em
+  `docs/DESIGN-SYSTEM.md` §9.
+- **Ícones filled do tab bar são exceção ao grid de ícones (§9.5):**
+  `IconHomeFilled`/`IconAppointmentsFilled`/`IconProfileFilled`
+  (`shared/ui/icons.tsx`) usam `viewBox` nativo `0 0 21 21` (não o grid 24 dos
+  demais ícones) e detalhe interno em `var(--color-white)` — transcritos
+  **verbatim** do handoff, não redesenhados a partir do outline.
 - **Gate de pré-consulta (ADR-039):** em `scheduling/AppointmentPage`, ao clicar
   "Entrar" com uma oferta ativa (`today.offer` = WHO-5/PHQ-4), o `AssessmentForm`
   aparece ANTES de abrir a sala. Ele **nunca prende** o paciente: avaliado só no
