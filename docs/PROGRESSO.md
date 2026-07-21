@@ -10,8 +10,8 @@ Antes: 2026-07-19 — **Verificador Diário de Humor (Anexo C): completo (Módul
 ## 🌡️ Verificador Diário de Humor — Anexo C (em andamento, branch `feat/verificador-humor`)
 
 Check-in emocional contínuo como **atividade** da linha de cuidado (3 anéis:
-diário → WHO-5 semanal → PHQ-4 gatilhado). Só Degrau 2 (exige matrícula ativa).
-Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
+diário → WHO-5 semanal → PHQ-4 gatilhado). Degrau 2 (linha real) **e** Degrau 1
+(linha universal para todos, ADR-040 — ver abaixo). Ramo do Slice 1.
 
 - [x] **Módulo 0 — item ATIVIDADE na fundação** (ADR-030): migration
   `0009_activity_item` (kind `IN ('CONSULTA','ATIVIDADE')`, `specialty_code`
@@ -60,7 +60,15 @@ Execução em loops orientados a `/goal` (plano aprovado). Ramo do Slice 1.
 - [x] **Front dos anéis periódicos** (WHO-5/PHQ-4) + oferta do gatilho, escalonamento
   e "preciso de ajuda agora" na `/humor` (`AssessmentForm` + `MoodPage`).
 - **Comentário livre cifrado** (adiado — exige pacote de cifra em repouso).
-- **Degrau 1** (termômetro populacional fora de linha de cuidado) — fork adiado.
+- [x] **Degrau 1 — Verificador de Humor para TODOS** (ADR-040): saúde mental liberada
+  independentemente de plano via **linha de cuidado universal** (`saude-mental-aberta`,
+  migration `0015`) + **matrícula automática** (hook em `commitLink` para contas novas;
+  backfill das `ACTIVE`). Vigência perpétua (sentinela `2999-12-31`), motor puro
+  intacto; a linha universal fica **fora** da jornada/perfil (filtro em
+  `JourneyRepo.ListEnrollmentsByPatient`), então o perfil segue "Sem plano ativo". O
+  gate de consentimento LGPD permanece. Migration validada contra Postgres 16 (seed +
+  backfill idempotente + cadeia de FKs + down); testes de integração escritos
+  (`universal_enrollment_integration_test.go`) — rodar com `make test-integration`.
 - **Integração real da trilha clínica** e **worker de retenção** (hoje o escalonamento
   grava o fato/flag; o roteamento efetivo entra quando a trilha existir).
 - **Camada agregada/gestor** (índice coletivo, k-anonimato) — documento próprio (C.8).

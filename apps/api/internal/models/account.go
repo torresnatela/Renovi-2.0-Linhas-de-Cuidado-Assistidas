@@ -354,6 +354,14 @@ func (s *AccountStore) commitLink(ctx context.Context, accountID uuid.UUID, davP
 		return fmt.Errorf("auditar vínculo: %w", err)
 	}
 
+	// A conta acabou de virar ACTIVE: matricula-a na linha de cuidado universal
+	// (Verificador de Humor para todos, Degrau 1/ADR-040), NA MESMA TX — ativação e
+	// matrícula comitam juntas. Idempotente e fail-open (seed ausente não bloqueia).
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := insertUniversalEnrollment(ctx, q, accountID, now); err != nil {
+		return fmt.Errorf("matricular na linha universal: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit do vínculo: %w", err)
 	}

@@ -84,6 +84,13 @@ func (r *JourneyRepo) ListEnrollmentsByPatient(ctx context.Context, patientID uu
 	}
 	out := make([]EnrollmentSnapshot, 0, len(rows))
 	for _, enr := range rows {
+		// A linha universal (Verificador de Humor para todos, ADR-040) NÃO é um
+		// "plano": fica fora da jornada/perfil. O humor lê /me/mood/today (endpoint
+		// separado), então não depende desta listagem. Filtrar só AQUI (não na query
+		// gerada) mantém SnapshotByItem/labelIndex enxergando a linha para a auditoria.
+		if enr.CareLineCode == UniversalMentalHealthCode {
+			continue
+		}
 		snap, err := r.hydrateSnapshot(ctx, enr)
 		if err != nil {
 			return nil, err
