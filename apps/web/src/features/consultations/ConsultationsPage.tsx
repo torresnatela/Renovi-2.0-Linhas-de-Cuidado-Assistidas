@@ -9,6 +9,7 @@ import { AppointmentCard } from './AppointmentCard';
 import { HistorySection } from './HistorySection';
 import { LinkButton, SectionLabel } from './parts';
 import { ToScheduleAside } from './ToScheduleAside';
+import { useBookingProfessionals } from './useBookingProfessionals';
 
 type Tab = 'proximas' | 'historico';
 
@@ -42,6 +43,11 @@ export function ConsultationsPage({ now = new Date() }: { now?: Date } = {}) {
 
   const proximas = (consultas ?? []).filter((c) => ATIVAS.has(c.status)).sort(porDataAsc);
   const historico = (consultas ?? []).filter((c) => HISTORICO.has(c.status)).sort(porDataDesc);
+
+  // Só os bookings da aba VISÍVEL: não dispara o histórico inteiro contra a DAV
+  // enquanto o paciente está em Próximas (e vice-versa).
+  const idsVisiveis = (tab === 'proximas' ? proximas : historico).map((c) => c.booking_id);
+  const profissionais = useBookingProfessionals(idsVisiveis);
 
   function pedirCancelamento(consulta: CareAppointment) {
     if (cancelar.isPending) return;
@@ -105,6 +111,7 @@ export function ConsultationsPage({ now = new Date() }: { now?: Date } = {}) {
                     now={now}
                     onCancel={pedirCancelamento}
                     cancelando={cancelar.isPending && cancelar.variables === c.id}
+                    nomeProfissional={profissionais[c.booking_id]}
                   />
                 ))}
               </div>
@@ -115,7 +122,9 @@ export function ConsultationsPage({ now = new Date() }: { now?: Date } = {}) {
         </div>
       )}
 
-      {!isLoading && tab === 'historico' && <HistorySection consultas={historico} />}
+      {!isLoading && tab === 'historico' && (
+        <HistorySection consultas={historico} profissionais={profissionais} />
+      )}
     </div>
   );
 }

@@ -4,7 +4,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, type CareAppointment, type Journey, type JourneyItem } from '../../shared/api';
+import {
+  ApiError,
+  type Appointment,
+  type CareAppointment,
+  type Journey,
+  type JourneyItem,
+} from '../../shared/api';
 import { ConsultationsPage } from './ConsultationsPage';
 
 vi.mock('../../shared/api', async () => {
@@ -14,6 +20,7 @@ vi.mock('../../shared/api', async () => {
     listCareAppointments: vi.fn(),
     cancelCareAppointment: vi.fn(),
     getJourney: vi.fn(),
+    getAppointment: vi.fn(),
   };
 });
 const api = await import('../../shared/api');
@@ -27,6 +34,26 @@ function consulta(over: Partial<CareAppointment> = {}): CareAppointment {
     scheduled_at: '2026-07-20T09:00:00-03:00',
     time_zone: 'America/Sao_Paulo',
     booking_id: 'book-1',
+    ...over,
+  };
+}
+
+// O detalhe do booking (`getAppointment`) — fonte do nome do profissional que os
+// cards de "Minhas Consultas" mostram ao lado do label (enriquecimento client-side).
+function appointment(over: Partial<Appointment> = {}): Appointment {
+  return {
+    id: 'book-1',
+    status: 'CONFIRMED',
+    starts_at: '2026-07-20T09:00:00-03:00',
+    ends_at: '2026-07-20T09:50:00-03:00',
+    time_zone: 'America/Sao_Paulo',
+    specialty: { id: 'psi', name: 'Psicologia' },
+    professional: { id: 'prof-1', full_name: 'Dra. Marina Costa' },
+    join: {
+      status: 'TOO_EARLY',
+      opens_at: '2026-07-20T08:30:00-03:00',
+      closes_at: '2026-07-20T09:50:00-03:00',
+    },
     ...over,
   };
 }
@@ -94,6 +121,9 @@ describe('ConsultationsPage', () => {
     vi.clearAllMocks();
     vi.mocked(api.getJourney).mockResolvedValue({ enrollments: [] });
     vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+    // Default: sem profissional configurado — os testes que não mexem nisto
+    // continuam vendo só o label (o enriquecimento é opt-in por teste).
+    vi.mocked(api.getAppointment).mockRejectedValue(new Error('getAppointment não configurado'));
   });
 
   // --- As 4 intenções migradas de CareAppointmentsPage.test ---
@@ -278,5 +308,28 @@ describe('ConsultationsPage', () => {
 
     expect(await screen.findByText(/não tem consultas agendadas/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Agendar' })).toHaveAttribute('href', '/jornada');
+  });
+
+  // --- Nome do profissional ao lado do label (enriquecimento client-side via booking) ---
+
+  it('mostra o nome do profissional ao lado do label quando o booking carrega', async () => {
+    vi.mocked(api.listCareAppointments).mockResolvedValue([consulta({ label: 'Psicologia' })]);
+    vi.mocked(api.getAppointment).mockResolvedValue(
+      appointment({ professional: { id: 'prof-1', full_name: 'Dra. Marina Costa' } }),
+    );
+    renderPage();
+
+    expect(await screen.findByText('Psicologia · Dra. Marina Costa')).toBeInTheDocument();
+    expect(api.getAppointment).toHaveBeenCalledWith('book-1');
+  });
+
+  it('mostra só o label quando o booking falha — enhancement, sem erro na tela', async () => {
+    vi.mocked(api.listCareAppointments).mockResolvedValue([consulta({ label: 'Psicologia' })]);
+    vi.mocked(api.getAppointment).mockRejectedValue(new Error('sem acesso ao booking'));
+    renderPage();
+
+    expect(await screen.findByText('Psicologia')).toBeInTheDocument();
+    expect(screen.queryByText(/Psicologia ·/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

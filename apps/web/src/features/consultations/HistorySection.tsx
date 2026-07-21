@@ -4,7 +4,7 @@ import type { CareAppointment } from '../../shared/api';
 import { formatDateTimeShort, monthKey, monthLabel } from '../../shared/datetime';
 import { Empty } from '../../shared/ui/feedback';
 import { IconCheck } from '../../shared/ui/icons';
-import { SectionLabel } from './parts';
+import { SectionLabel, tituloConsulta } from './parts';
 
 type Filtro = 'todas' | 'realizadas' | 'canceladas';
 type HistoryStatus = 'realizada' | 'falta' | 'cancelada';
@@ -38,7 +38,14 @@ function matches(status: CareAppointment['status'], filtro: Filtro): boolean {
  * a jogaria no balde errado. As consultas chegam já ordenadas desc, então os
  * grupos saem em ordem sem reordenar.
  */
-export function HistorySection({ consultas }: { consultas: CareAppointment[] }) {
+export function HistorySection({
+  consultas,
+  profissionais,
+}: {
+  consultas: CareAppointment[];
+  /** `booking_id → nome` de `useBookingProfessionals`; ausente = ainda carregando ou falhou (enhancement). */
+  profissionais: Record<string, string | undefined>;
+}) {
   const [filtro, setFiltro] = useState<Filtro>('todas');
   const filtradas = consultas.filter((c) => matches(c.status, filtro));
 
@@ -83,7 +90,7 @@ export function HistorySection({ consultas }: { consultas: CareAppointment[] }) 
           <div key={grupo.key} className="flex flex-col gap-3">
             <SectionLabel>{grupo.label}</SectionLabel>
             {grupo.itens.map((c) => (
-              <HistoryRow key={c.id} consulta={c} />
+              <HistoryRow key={c.id} consulta={c} nomeProfissional={profissionais[c.booking_id]} />
             ))}
           </div>
         ))
@@ -96,7 +103,13 @@ export function HistorySection({ consultas }: { consultas: CareAppointment[] }) 
   );
 }
 
-function HistoryRow({ consulta }: { consulta: CareAppointment }) {
+function HistoryRow({
+  consulta,
+  nomeProfissional,
+}: {
+  consulta: CareAppointment;
+  nomeProfissional?: string;
+}) {
   const meta = META[consulta.status as HistoryStatus];
   const caption = `${formatDateTimeShort(consulta.scheduled_at, consulta.time_zone)} · ${meta.word}`;
 
@@ -110,7 +123,9 @@ function HistoryRow({ consulta }: { consulta: CareAppointment }) {
         {meta.done ? <IconCheck size={16} /> : <IconX size={15} />}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-px">
-        <span className="font-bold text-primary-300">{consulta.label}</span>
+        <span className="font-bold text-primary-300">
+          {tituloConsulta(consulta.label, nomeProfissional)}
+        </span>
         <span className="text-[13px] text-muted">{caption}</span>
       </div>
       <span

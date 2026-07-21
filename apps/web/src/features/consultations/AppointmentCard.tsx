@@ -4,7 +4,7 @@ import type { CareAppointment, CareAppointmentStatus } from '../../shared/api';
 import { dayKey, formatDateTimeShort, formatTime } from '../../shared/datetime';
 import { Badge } from '../../shared/ui/Badge';
 import { DateBadge } from '../../shared/ui/DateBadge';
-import { LinkButton } from './parts';
+import { LinkButton, tituloConsulta } from './parts';
 
 // Só destes dois estados dá para cancelar — os mesmos da tela antiga
 // (`CareAppointmentsPage`): o servidor confirma com 409, mas o botão nem aparece
@@ -27,11 +27,14 @@ export function AppointmentCard({
   now,
   onCancel,
   cancelando,
+  nomeProfissional,
 }: {
   consulta: CareAppointment;
   now: Date;
   onCancel: (consulta: CareAppointment) => void;
   cancelando: boolean;
+  /** "Dra. Marina Costa" — enriquecimento client-side de `useBookingProfessionals`; `undefined` enquanto carrega/falha. */
+  nomeProfissional?: string;
 }) {
   const tz = consulta.time_zone;
   const hoje = dayKey(consulta.scheduled_at, tz) === dayKey(now.toISOString(), tz);
@@ -53,7 +56,9 @@ export function AppointmentCard({
       <div className="flex items-center gap-3">
         <DateBadge iso={consulta.scheduled_at} timeZone={tz} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="font-bold text-primary-300">{consulta.label}</span>
+          <span className="font-bold text-primary-300">
+            {tituloConsulta(consulta.label, nomeProfissional)}
+          </span>
           <span className="text-[13px] text-muted">{caption}</span>
         </div>
         {hoje && <Badge tone="success">Hoje</Badge>}

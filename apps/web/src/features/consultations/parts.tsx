@@ -3,6 +3,17 @@ import { Link } from 'react-router-dom';
 
 const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(' ');
 
+/**
+ * "{label}" ou "{label} · {nome}" quando o profissional já carregou.
+ *
+ * O nome vem de `useBookingProfessionals` (enriquecimento client-side via o
+ * booking) e é ENHANCEMENT: enquanto carrega ou se a busca falhar, `nome` chega
+ * `undefined` e o título cai de volta para só o label — sem skeleton, sem erro.
+ */
+export function tituloConsulta(label: string, nomeProfissional?: string): string {
+  return nomeProfissional ? `${label} · ${nomeProfissional}` : label;
+}
+
 /** Rótulo de seção do design: 12px, bold, caixa-alta, tracking largo, muted. */
 export function SectionLabel({ children }: { children: ReactNode }) {
   return (
