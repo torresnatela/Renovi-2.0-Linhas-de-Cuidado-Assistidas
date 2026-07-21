@@ -103,8 +103,18 @@ export function AccessLayout({ active, showSwitcher = true, children }: AccessLa
     <div className="grid min-h-screen bg-page lg:grid-cols-[1.05fr_1fr]">
       <BrandPanel />
 
-      <div className="flex items-center justify-center px-6 py-12 sm:px-10">
+      <div className="flex items-center justify-center px-6 py-12 lg:px-10">
         <div className="flex w-full max-w-[440px] flex-col gap-6">
+          {/* Logo mobile: puramente decorativa. O painel de marca (lg:flex) já
+              tem seu próprio logo com alt="Renovi" — este aqui NÃO pode repetir
+              o accessible name (por isso alt vazio + aria-hidden), senão um
+              leitor de tela veria duas imagens chamadas "Renovi" na mesma tela. */}
+          <img
+            src={logoBlue}
+            alt=""
+            aria-hidden="true"
+            className="h-[34px] self-center lg:hidden"
+          />
           {showSwitcher && (
             <SegmentedControl
               options={[
@@ -116,6 +126,11 @@ export function AccessLayout({ active, showSwitcher = true, children }: AccessLa
             />
           )}
           {children}
+          {/* Rodapé institucional: só no mobile — no desktop o painel de marca
+              já tem a mesma frase (BrandPanel, acima). */}
+          <span className="text-xs text-muted text-center lg:hidden">
+            Renovi — tecnologia a serviço da sua saúde e do seu bem-estar.
+          </span>
         </div>
       </div>
     </div>

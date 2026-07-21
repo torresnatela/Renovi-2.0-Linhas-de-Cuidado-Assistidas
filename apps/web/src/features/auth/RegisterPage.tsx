@@ -225,11 +225,16 @@ export function RegisterPage() {
           </div>
           <div className="h-1.5 overflow-hidden rounded-pill bg-primary-100">
             <div
+              data-testid="cadastro-progress-fill"
               className="h-full rounded-pill bg-primary-300 transition-[width] duration-300"
               style={{ width: `${(step / 3) * 100}%` }}
             />
           </div>
-          <span className="text-[12.5px] text-muted">Leva menos de 2 minutos.</span>
+          {/* Honesta: o estado do wizard vive em memória (RegisterForm) — recarregar
+              a página reinicia tudo. "Progresso fica salvo" (mock) seria falso aqui. */}
+          <span className="text-[12.5px] text-muted">
+            Você pode voltar aos passos anteriores sem perder o que preencheu.
+          </span>
         </div>
 
         {step === 1 && (

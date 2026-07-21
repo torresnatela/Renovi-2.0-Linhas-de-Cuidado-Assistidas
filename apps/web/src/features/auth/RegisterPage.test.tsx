@@ -266,4 +266,32 @@ describe('RegisterPage', () => {
 
     await waitFor(() => expect(viaCep.lookupCep).toHaveBeenCalledTimes(1));
   });
+
+  // A barra de progresso do wizard (trilho + preenchimento) precisa refletir o
+  // passo atual em TODOS os viewports — não é exclusiva do desktop.
+  it('a barra de progresso reflete o passo atual (1/3 → 2/3 → 3/3)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const fill = () => screen.getByTestId('cadastro-progress-fill');
+    expect(parseFloat(fill().style.width)).toBeCloseTo((1 / 3) * 100, 5);
+
+    await fillStep1(user);
+    expect(parseFloat(fill().style.width)).toBeCloseTo((2 / 3) * 100, 5);
+
+    await fillStep2(user);
+    expect(parseFloat(fill().style.width)).toBeCloseTo(100, 5);
+  }, 20000); // wizard inteiro digitado (3 passos): timeout maior sob carga de CPU
+
+  // Microcopy honesta: o estado do wizard vive em memória (RegisterForm), então
+  // "progresso fica salvo" seria falso — recarregar a página reinicia tudo.
+  it('mostra a microcopy honesta sobre navegação entre passos (não a antiga "fica salvo")', () => {
+    renderPage();
+
+    expect(
+      screen.getByText(/pode voltar aos passos anteriores sem perder o que preencheu/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/fica salvo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Leva menos de 2 minutos/i)).not.toBeInTheDocument();
+  });
 });
