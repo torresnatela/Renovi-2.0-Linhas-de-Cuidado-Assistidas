@@ -916,3 +916,46 @@ implícita, então `ADD ... NOT VALID` + `VALIDATE` no mesmo arquivo mantêm o
 exigiria dividir cada extensão de `event_type` em duas migrations (add / validate),
 desproporcional para o piloto (tabela `journey_event` minúscula). Registrado como
 follow-up se/quando a tabela crescer.
+
+## ADR-040 — Verificador de Humor para todos (Degrau 1) via linha de cuidado universal + matrícula automática (2026-07-20)
+
+**Contexto:** o Verificador de Humor (GRID diário, WHO-5, PHQ-4) nasceu como
+**Degrau 2** — só funciona para quem tem matrícula ativa numa linha de cuidado que
+contenha os itens de atividade. O produto passou a exigir saúde mental **para todo
+colaborador, com ou sem plano** (o "Degrau 1", antes adiado). O obstáculo é
+estrutural: `mood_checkin`, `wellbeing_assessment` e `journey_event` amarram
+`enrollment_id` **e** `care_line_item_id` como **NOT NULL** — toda escrita de humor
+pressupõe uma matrícula.
+
+**Decisão:**
+- **Linha de cuidado universal, não desacoplamento.** Em vez de tornar as FKs
+  opcionais (mudança grande no schema, no motor e em dezenas de testes), semeamos uma
+  **linha publicada `saude-mental-aberta`** (migration `0015`) com os 3 itens
+  ATIVIDADE (`checkin-humor-diario`, `who5-semanal`, `phq4-gatilhado`) e matriculamos
+  **todo colaborador** nela. O modelo de dados, o motor puro, a jornada, o gatilho e a
+  suíte de testes ficam intactos. Humor continua sendo uma ATIVIDADE de linha de cuidado.
+- **Matrícula automática.** Contas novas: hook em `AccountStore.commitLink`, **na
+  mesma transação** de ativação (idempotente e *fail-open* — seed ausente não bloqueia
+  o cadastro). Contas existentes: **backfill** na própria `0015` (só contas `ACTIVE`,
+  com `NOT EXISTS`).
+- **Vigência PERPÉTUA via data-sentinela (`2999-12-31`), não `infinity`.** pgx v5 não
+  faz scan de `infinity` em `time.Time`, e o `valid_until` entra no motor puro. Com a
+  sentinela, o `vigenciaBlock` nunca bloqueia e a expiração lazy nunca dispara —
+  **zero mudança no motor** (mantém a pureza). Descartadas: auto-renovação por cron
+  (worker ainda é stub) e caso-especial no motor (violaria a pureza).
+- **A linha universal NÃO é "plano".** Fica **fora** da listagem da jornada, filtrada
+  em `JourneyRepo.ListEnrollmentsByPatient` (só no wrapper Go — `SnapshotByItem`/
+  `labelIndex` seguem enxergando-a para a auditoria). Assim o perfil mantém "Sem plano
+  ativo" para quem não tem matrícula real, e o card de humor (endpoint
+  `/me/mood/today`, separado da jornada) continua liberado.
+- **Consentimento LGPD permanece.** `finalidade = checkin_humor` (art. 11) segue como
+  pré-condição de gravação — liberar por plano não é liberar por consentimento.
+- **Cadência preservada.** WHO-5/PHQ-4 levam `MIN_INTERVAL` (7d/14d) na linha
+  universal; o check-in diário **não** leva regra — o "1 por dia" é do upsert em
+  `(patient_id, dia_ref)`.
+
+**Consequência:** qualquer conta ativa, após consentir, faz GRID + WHO-5 + PHQ-4 sem
+matrícula em linha real. O ramo `not_enrolled`/`NotEnrolledCard` do front fica como
+fallback defensivo (raro: seed ausente). A reversão da `0015` é **forward-only** após
+o primeiro check-in (FKs `ON DELETE RESTRICT` protegem o dado de saúde). Migration
+validada contra Postgres 16 (seed, backfill idempotente, cadeia de FKs e down).
