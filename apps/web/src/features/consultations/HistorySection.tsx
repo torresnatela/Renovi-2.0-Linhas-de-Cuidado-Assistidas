@@ -96,7 +96,9 @@ export function HistorySection({
         ))
       )}
 
-      <span className="py-1.5 text-[12.5px] text-muted">
+      {/* Centrada no mock mobile (Consultas.dc.html:142); `lg:text-left` preserva
+          o alinhamento de sempre do desktop. */}
+      <span className="py-1.5 text-center text-[12.5px] text-muted lg:text-left">
         Consultas canceladas com mais de 24h de antecedência não contam na sua cota.
       </span>
     </div>
@@ -115,8 +117,11 @@ function HistoryRow({
 
   return (
     <div className="flex items-center gap-3.5 rounded-lg border border-primary-100 bg-white px-[18px] py-[15px]">
+      {/* 34px no mock mobile (Consultas.dc.html:125); `lg:` devolve os 38px de
+          sempre do desktop. `bg-primary-100` JÁ É `--surface-subtle` (tokens.css) —
+          é o mesmo valor do mock, não precisa de token novo. */}
       <span
-        className={`inline-flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full ${
+        className={`inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full lg:h-[38px] lg:w-[38px] ${
           meta.done ? 'bg-[rgba(41,176,29,0.12)] text-success' : 'bg-primary-100 text-muted'
         }`}
       >

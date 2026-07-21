@@ -11,6 +11,7 @@ import {
   type Journey,
   type JourneyItem,
 } from '../../shared/api';
+import { mockViewport } from '../../shared/viewport.testkit';
 import { ConsultationsPage } from './ConsultationsPage';
 
 vi.mock('../../shared/api', async () => {
@@ -402,5 +403,89 @@ describe('ConsultationsPage', () => {
     expect(await screen.findByText('Psicologia')).toBeInTheDocument();
     expect(screen.queryByText(/Psicologia ·/)).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // --- Mobile (Etapa 3): mock em design_files/Consultas.dc.html ---
+
+  describe('mobile', () => {
+    let viewport: ReturnType<typeof mockViewport>;
+
+    beforeEach(() => {
+      viewport = mockViewport('mobile');
+    });
+    afterEach(() => {
+      viewport.restore();
+    });
+
+    it('mostra o header mobile: eyebrow "Suas consultas", título 26px e o HelpNowMenu', async () => {
+      vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+      renderPage();
+
+      expect(await screen.findByText('Suas consultas')).toBeInTheDocument();
+      const titulo = screen.getByRole('heading', { level: 1, name: 'Consultas' });
+      expect(titulo).toHaveClass('text-[26px]');
+      expect(screen.getByRole('button', { name: /pedir ajuda/i })).toBeInTheDocument();
+    });
+
+    it('a aba (SegmentedControl) ocupa a largura toda', async () => {
+      vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+      renderPage();
+
+      const tablist = await screen.findByRole('tablist');
+      expect(tablist.parentElement).toHaveClass('w-full');
+    });
+
+    // Adaptação registrada no report: o mock rotula "Entrar na consulta", mas o
+    // clique navega ao DETALHE (o join vive lá, atrás do gate de pré-consulta) —
+    // por isso o rótulo é "Ver consulta", que não mente sobre o que o botão faz.
+    it('CTA da consulta de hoje usa o rótulo honesto "Ver consulta", nunca "Entrar na consulta"', async () => {
+      const now = new Date('2026-07-20T12:00:00Z'); // 09:00 em São Paulo
+      vi.mocked(api.listCareAppointments).mockResolvedValue([
+        consulta({ scheduled_at: '2026-07-20T16:00:00-03:00' }),
+      ]);
+      renderPage({ now });
+
+      expect(await screen.findByText('Hoje')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Ver consulta' })).toHaveAttribute(
+        'href',
+        '/consultas/book-1',
+      );
+      expect(screen.queryByText(/entrar na consulta/i)).not.toBeInTheDocument();
+    });
+
+    it('a ação Cancelar aparece no card; a tela nunca menciona "Remarcar"', async () => {
+      vi.mocked(api.listCareAppointments).mockResolvedValue([consulta()]);
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: 'Cancelar' })).toBeInTheDocument();
+      expect(screen.queryByText(/remarcar/i)).not.toBeInTheDocument();
+    });
+
+    it('Para agendar aparece depois de Agendadas na ordem do documento', async () => {
+      vi.mocked(api.listCareAppointments).mockResolvedValue([consulta()]);
+      vi.mocked(api.getJourney).mockResolvedValue(
+        journeyWith([journeyItem({ id: 'i1', label: 'Psicologia' }, true)]),
+      );
+      renderPage();
+
+      const agendadas = await screen.findByText('Agendadas');
+      const paraAgendar = await screen.findByText('Para agendar');
+      // eslint-disable-next-line no-bitwise
+      expect(
+        agendadas.compareDocumentPosition(paraAgendar) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('mostra a nota final do histórico, centralizada', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+      renderPage();
+
+      await user.click(screen.getByRole('tab', { name: 'Histórico' }));
+      const nota = await screen.findByText(
+        /consultas canceladas com mais de 24h de antecedência não contam na sua cota/i,
+      );
+      expect(nota).toHaveClass('text-center');
+    });
   });
 });
