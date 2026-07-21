@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 
 import type { EnrollmentStatus, JourneyEnrollment } from '../../shared/api';
+import { useIsDesktop } from '../../shared/viewport';
 import { Avatar } from '../../shared/ui/Avatar';
 import { Card } from '../../shared/ui/Card';
 import { IconLogout } from '../../shared/ui/icons';
@@ -25,14 +26,19 @@ const ANCORAS = [
  * Resumo sticky do perfil (aside): identidade, o selo do plano e a navegação por
  * âncoras para as seções. O selo é verde SÓ quando há uma matrícula `ativa` —
  * senão é neutro e diz o estado real (nunca finge um plano ativo). As âncoras são
- * links `#`, e as seções compensam o header sticky com `scroll-mt-24`. A saída é
- * ação real de conta: `useLogout` limpa todo o cache derivado e leva ao /entrar.
+ * links `#`, e as seções compensam o header sticky com `scroll-mt-24` (desktop).
+ *
+ * O botão de Sair mora aqui SÓ no desktop, dentro do aside sticky — de propósito.
+ * No mobile, a ordem sensata (resumo → dados → plano → privacidade → Sair) exige
+ * que ele vá para o FIM da pilha de seções, então a `ProfilePage` renderiza
+ * `LogoutAction` separadamente lá embaixo. O aside sticky não existe no mobile
+ * (só ativa em `lg:`), então nada se perde ao mover — é a MESMA ação real de
+ * conta (`useLogout`, que limpa o cache derivado e leva ao /entrar).
  */
 export function ProfileSummary() {
   const session = useSession();
   const journey = useJourney();
-  const logout = useLogout();
-  const navigate = useNavigate();
+  const isDesktop = useIsDesktop();
 
   const nome = session.data?.full_name ?? '';
   const email = session.data?.email ?? '';
@@ -62,16 +68,26 @@ export function ProfileSummary() {
         ))}
       </nav>
 
-      <button
-        type="button"
-        onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/entrar') })}
-        disabled={logout.isPending}
-        className="inline-flex items-center justify-center gap-2 rounded-md border border-primary-100 bg-white p-3.5 text-sm font-bold text-error transition hover:bg-page focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <IconLogout size={17} />
-        Sair da conta
-      </button>
+      {isDesktop && <LogoutAction />}
     </aside>
+  );
+}
+
+/** O botão real de Sair da conta — `useLogout` limpa o cache derivado e leva ao /entrar. */
+export function LogoutAction() {
+  const logout = useLogout();
+  const navigate = useNavigate();
+
+  return (
+    <button
+      type="button"
+      onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/entrar') })}
+      disabled={logout.isPending}
+      className="inline-flex items-center justify-center gap-2 rounded-md border border-primary-100 bg-white p-3.5 text-sm font-bold text-error transition hover:bg-page focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      <IconLogout size={17} />
+      Sair da conta
+    </button>
   );
 }
 

@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Account, ConsentStatus, Journey } from '../../shared/api';
+import { mockViewport } from '../../shared/viewport.testkit';
 import { ProfilePage } from './ProfilePage';
 
 // Só o useNavigate é espionado; o resto do router (MemoryRouter, âncoras) é real.
@@ -249,5 +250,80 @@ describe('ProfilePage', () => {
 
     await waitFor(() => expect(api.logout).toHaveBeenCalled());
     await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith('/entrar'));
+  });
+
+  // --- Mobile: tela raiz (Etapa 5) ---
+
+  describe('no mobile (tela raiz)', () => {
+    let viewport: ReturnType<typeof mockViewport>;
+
+    beforeEach(() => {
+      viewport = mockViewport('mobile');
+    });
+
+    afterEach(() => {
+      viewport.restore();
+    });
+
+    /**
+     * O cabeçalho de duas linhas do desktop ("Sua conta" / "Perfil" 32px) dá
+     * lugar ao padrão de tela raiz: eyebrow "Seu perfil" + título 26px + Pedir
+     * ajuda — mesmo padrão do mock da Jornada.
+     */
+    it('mostra o cabeçalho padrão de tela raiz com Pedir ajuda', async () => {
+      renderPage();
+
+      expect(await screen.findByText('Seu perfil')).toBeInTheDocument();
+      expect(screen.getByText('Perfil')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Pedir ajuda/i })).toBeInTheDocument();
+      // O cabeçalho de desktop não coexiste com o mobile.
+      expect(screen.queryByText('Sua conta')).not.toBeInTheDocument();
+    });
+
+    /**
+     * Ordem mobile sensata (regra do brief): resumo → dados → plano →
+     * privacidade → Sair. No desktop o Sair mora dentro do aside (logo depois
+     * do resumo); no mobile ele precisa ir para o FIM, depois de Privacidade.
+     */
+    it('reordena o Sair da conta para o fim da pilha de seções', async () => {
+      renderPage();
+
+      await screen.findByRole('heading', { name: 'Ana Beatriz Silva' });
+      const texto = document.body.textContent ?? '';
+
+      const posResumo = texto.indexOf('Ana Beatriz Silva');
+      const posDados = texto.indexOf('Dados pessoais');
+      const posPlano = texto.indexOf('Plano e cobertura');
+      const posPrivacidade = texto.indexOf('Privacidade e segurança');
+      const posSair = texto.indexOf('Sair da conta');
+
+      expect(posResumo).toBeGreaterThanOrEqual(0);
+      expect(posDados).toBeGreaterThan(posResumo);
+      expect(posPlano).toBeGreaterThan(posDados);
+      expect(posPrivacidade).toBeGreaterThan(posPlano);
+      expect(posSair).toBeGreaterThan(posPrivacidade);
+    });
+
+    // A revogação real ainda precisa funcionar dentro do novo layout mobile —
+    // o gate de LGPD não é intocável só no desktop.
+    it('revoga o consentimento no mobile igual ao desktop', async () => {
+      vi.mocked(api.getConsent)
+        .mockResolvedValueOnce(consentAtivo)
+        .mockResolvedValue(consentInativo);
+      vi.mocked(api.revokeConsent).mockResolvedValue(consentInativo);
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /revogar consentimento/i }));
+
+      expect(api.revokeConsent).toHaveBeenCalledWith('checkin_humor');
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('button', { name: /revogar consentimento/i }),
+        ).not.toBeInTheDocument(),
+      );
+    });
   });
 });

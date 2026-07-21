@@ -2,8 +2,9 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { mockViewport } from '../../shared/viewport.testkit';
 import { AssessmentPage } from './AssessmentPage';
 
 vi.mock('../../shared/api', async () => {
@@ -97,5 +98,53 @@ describe('AssessmentPage', () => {
 
     expect(botaoEnviar).toBeEnabled();
     expect(screen.queryByText('Responda todas as perguntas para enviar.')).not.toBeInTheDocument();
+  });
+
+  // --- Mobile: fluxo empilhado (Etapa 5) ---
+
+  describe('no mobile (fluxo empilhado)', () => {
+    let viewport: ReturnType<typeof mockViewport>;
+
+    beforeEach(() => {
+      viewport = mockViewport('mobile');
+    });
+
+    afterEach(() => {
+      viewport.restore();
+    });
+
+    /**
+     * O cabeçalho do card (h1 + "Voltar") some; o FlowHeader assume com o nome
+     * REAL do instrumento (nada inventado) e volta para /jornada.
+     */
+    it('troca o cabeçalho do card pelo FlowHeader, com o nome do instrumento e voltar para /jornada', async () => {
+      renderAt('/avaliacoes/WHO5');
+
+      await screen.findByText(/Nas últimas duas semanas/);
+      expect(screen.getByText('Índice de bem-estar (WHO-5)')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Voltar' })).toHaveAttribute('href', '/jornada');
+      expect(screen.getByRole('button', { name: /Pedir ajuda/i })).toBeInTheDocument();
+    });
+
+    /**
+     * Código inválido: sem instrumento para titular, o FlowHeader cai no mesmo
+     * rótulo do eyebrow — nunca inventa um nome de instrumento que não existe.
+     */
+    it('código inválido: o FlowHeader não inventa um nome de instrumento', () => {
+      renderAt('/avaliacoes/XPTO');
+
+      expect(screen.getByRole('link', { name: 'Voltar' })).toHaveAttribute('href', '/jornada');
+      expect(screen.getByText(/Este instrumento não existe/i)).toBeInTheDocument();
+      expect(screen.queryByText('Avaliação não encontrada')).not.toBeInTheDocument();
+    });
+
+    // Alvo de toque ≥44px é regra de acessibilidade motora do DS, não estética.
+    it('as opções do instrumento viram alvos de toque full-width ≥44px', async () => {
+      renderAt('/avaliacoes/WHO5');
+
+      const [opcao] = await screen.findAllByRole('button', { name: /Em nenhum momento/i });
+      expect(opcao.className).toContain('min-h-[44px]');
+      expect(opcao.className).toContain('w-full');
+    });
   });
 });
