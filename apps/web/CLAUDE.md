@@ -43,7 +43,7 @@ src/
 
 Todas as features acima são **same-codebase**: mobile (`< lg`) e desktop
 (`≥ lg`) compartilham componente e hooks — só o layout muda por viewport
-(Etapas 0–7 do mobile, ADR-041/042). Nenhuma feature nova; ver "Mobile
+(Etapas 0–8 do mobile, ADR-041/042). Nenhuma feature nova; ver "Mobile
 responsivo" nas Convenções.
 
 ## Convenções
@@ -78,8 +78,13 @@ responsivo" nas Convenções.
 - **Ícones filled do tab bar são exceção ao grid de ícones (§9.5):**
   `IconHomeFilled`/`IconAppointmentsFilled`/`IconProfileFilled`
   (`shared/ui/icons.tsx`) usam `viewBox` nativo `0 0 21 21` (não o grid 24 dos
-  demais ícones) e detalhe interno em `var(--color-white)` — transcritos
-  **verbatim** do handoff, não redesenhados a partir do outline.
+  demais ícones), nos três — transcritos **verbatim** do handoff, não
+  redesenhados a partir do outline. O detalhe interno NÃO é uniforme:
+  `IconAppointmentsFilled`/`IconProfileFilled` têm preenchimento sólido navy com
+  o contorno/pontos internos em `var(--color-white)` por cima; `IconHomeFilled`
+  não tem preenchimento sólido (só os traços do teto/parede), então seus dois
+  `<path>` internos ficam em `stroke="currentColor"` mesmo — não há
+  branco-sobre-navy para resolver ali.
 - **Gate de pré-consulta (ADR-039):** em `scheduling/AppointmentPage`, ao clicar
   "Entrar" com uma oferta ativa (`today.offer` = WHO-5/PHQ-4), o `AssessmentForm`
   aparece ANTES de abrir a sala. Ele **nunca prende** o paciente: avaliado só no

@@ -1047,7 +1047,7 @@ C10) contam esse evento no total.
 
 ---
 
-> **Nota de numeração — Mobile responsivo.** O mobile (Etapas 0–7, 2026-07-21,
+> **Nota de numeração — Mobile responsivo.** O mobile (Etapas 0–8, 2026-07-21,
 > branch `feat/mobile-ui`) veio depois do Degrau 1 do Verificador de Humor
 > (ADR-040). Os ADRs do mobile começam em **ADR-041**.
 

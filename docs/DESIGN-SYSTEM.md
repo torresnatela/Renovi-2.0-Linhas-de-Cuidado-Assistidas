@@ -12,7 +12,7 @@ O redesign desktop foi concluído nas **Etapas 0–8** (2026-07-20): a fundaçã
 **ADR-038** (design system) e **ADR-039** (produto). Este doc é a referência
 antes de estilizar qualquer tela nova.
 
-O mobile responsivo chegou por cima do MESMO design system (Etapas 0–7,
+O mobile responsivo chegou por cima do MESMO design system (Etapas 0–8,
 2026-07-21, branch `feat/mobile-ui`) — nenhum token novo, mesma paleta/tipografia/
 raios. Só o **layout** muda por viewport (container, chrome, headers — §9).
 Decisões em **ADR-041** (hook de viewport) e **ADR-042** (produto mobile).
@@ -304,10 +304,16 @@ página decide o conteúdo.
 `IconHomeFilled` / `IconAppointmentsFilled` / `IconProfileFilled` (`shared/ui/icons.tsx`)
 são transcritos **verbatim** do handoff, não redesenhados a partir do outline. Duas
 exceções documentadas às regras de §2 ("SVG de linha", grid 24):
-- **`viewBox` nativo `0 0 21 21`** (não o grid 24 dos demais ícones).
-- O detalhe interno das formas preenchidas (contorno/pontos sobre o fundo sólido
-  navy) usa o token `var(--color-white)` em vez de `currentColor` — é
-  literalmente branco por cima do preenchimento, não uma cor de tema.
+- **`viewBox` nativo `0 0 21 21`** (não o grid 24 dos demais ícones), nos três.
+- O detalhe interno **não é uniforme entre os três** — cada um segue o que o
+  handoff desenhou: `IconAppointmentsFilled` e `IconProfileFilled` têm um
+  preenchimento sólido navy (`fill="currentColor"` herdado do `<svg>`) com o
+  contorno/pontos internos por cima em `var(--color-white)` (`icons.tsx:179–220`)
+  — é literalmente branco sobre o preenchimento, não uma cor de tema.
+  `IconHomeFilled` **não** tem essa camada: não há preenchimento sólido por trás
+  (só os dois traços do teto/parede), então os dois `<path>` internos ficam em
+  `stroke="currentColor"` mesmo (`icons.tsx:156–167`) — não há contraste de
+  branco-sobre-navy para resolver ali.
 
 ### 9.6 Escala de z-index
 
