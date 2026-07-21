@@ -280,6 +280,14 @@ describe('ProfilePage', () => {
       expect(screen.queryByText('Sua conta')).not.toBeInTheDocument();
     });
 
+    // A a11y de heading não muda por viewport: "Perfil" é o h1 da tela raiz no
+    // mobile, exatamente como no desktop (e como ConsultationsPage).
+    it('renderiza "Perfil" como heading de nível 1 (a11y)', async () => {
+      renderPage();
+
+      expect(await screen.findByRole('heading', { level: 1, name: 'Perfil' })).toBeInTheDocument();
+    });
+
     /**
      * Ordem mobile sensata (regra do brief): resumo → dados → plano →
      * privacidade → Sair. No desktop o Sair mora dentro do aside (logo depois

@@ -58,7 +58,12 @@ export function AppointmentPage() {
           <div className="flex items-start gap-4">
             <DateBadge iso={data.starts_at} timeZone={data.time_zone} />
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <h1 className="text-lg font-bold text-primary-300">{data.specialty.name}</h1>
+              {/* No mobile o FlowHeader já é o h1 (a especialidade): repetir aqui
+                  duplicaria o heading de nível 1. Some abaixo de lg — mesmo padrão
+                  de AssessmentPage. Desktop mantém o h1 no card, intocado. */}
+              {isDesktop && (
+                <h1 className="text-lg font-bold text-primary-300">{data.specialty.name}</h1>
+              )}
               <p className="text-sm text-muted">com {data.professional.full_name}</p>
               <p className="mt-1 text-sm text-ink first-letter:uppercase">
                 {formatDateLong(data.starts_at, data.time_zone)} às{' '}

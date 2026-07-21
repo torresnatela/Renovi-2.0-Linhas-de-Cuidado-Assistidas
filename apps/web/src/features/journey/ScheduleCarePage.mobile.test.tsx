@@ -288,4 +288,36 @@ describe('ScheduleCarePage (mobile)', () => {
     const keyNova = vi.mocked(api.createCareAppointment).mock.calls[1][1];
     expect(keyNova).not.toBe(keyAnterior);
   });
+
+  /**
+   * Regressão: reservar o ÚLTIMO horário livre faz o refetch do `onSettled`
+   * devolver disponibilidade VAZIA. O sucesso é hasteado acima do gate de slots —
+   * a confirmação PERMANECE e o Empty ("Nenhum horário disponível") NÃO toma o seu
+   * lugar (o FlowHeader ainda diz "Tudo certo").
+   */
+  it('o sucesso permanece quando o refetch devolve a lista vazia (último horário)', async () => {
+    const user = userEvent.setup();
+    // 1ª chamada (mount): há horários; a partir do refetch pós-sucesso: vazio.
+    vi.mocked(api.getAvailability)
+      .mockResolvedValueOnce(pagina)
+      .mockResolvedValue({ ...pagina, items: [] });
+    vi.mocked(api.createCareAppointment).mockResolvedValue(consultaOk);
+    renderPage();
+
+    await escolherProfissional(user);
+    await escolherDia(user);
+    await escolherHorario(user, /Horário das 09:00/i);
+    await confirmar(user);
+
+    // O sucesso aparece…
+    expect(await screen.findByText(/consulta marcada/i)).toBeInTheDocument();
+    // …e SOBREVIVE ao refetch que esvaziou a disponibilidade (2ª chamada+).
+    await waitFor(() =>
+      expect(vi.mocked(api.getAvailability).mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+    expect(screen.getByText(/consulta marcada/i)).toBeInTheDocument();
+    // O Empty NÃO substitui a confirmação, e o FlowHeader segue coerente.
+    expect(screen.queryByText('Nenhum horário disponível')).not.toBeInTheDocument();
+    expect(screen.getByText('Tudo certo')).toBeInTheDocument();
+  });
 });

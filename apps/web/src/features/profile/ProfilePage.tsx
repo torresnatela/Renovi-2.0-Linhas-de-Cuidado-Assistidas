@@ -41,7 +41,9 @@ export function ProfilePage() {
             <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
               Seu perfil
             </span>
-            <span className="text-[26px] font-bold leading-8 text-primary-300">Perfil</span>
+            {/* h1 da tela raiz no mobile (igual a ConsultationsPage): a a11y de
+                heading não muda por viewport — só o tamanho da fonte muda. */}
+            <h1 className="text-[26px] font-bold leading-8 text-primary-300">Perfil</h1>
           </div>
           <HelpNowMenu />
         </div>

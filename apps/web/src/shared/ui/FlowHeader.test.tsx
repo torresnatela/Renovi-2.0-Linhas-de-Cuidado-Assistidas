@@ -16,6 +16,13 @@ describe('FlowHeader', () => {
     expect(screen.getByText('Com quem?')).toBeInTheDocument();
   });
 
+  // O título é o h1 do fluxo empilhado: cada tela mobile precisa de exatamente um
+  // heading de nível 1, e o FlowHeader é quem o provê (a11y de heading).
+  it('renderiza o título como heading de nível 1 (a11y)', () => {
+    renderFlow(<FlowHeader eyebrow="Agendar" title="Com quem?" backTo="/jornada" />);
+    expect(screen.getByRole('heading', { level: 1, name: 'Com quem?' })).toBeInTheDocument();
+  });
+
   it('com backTo vira um link "Voltar" para o destino', () => {
     renderFlow(<FlowHeader eyebrow="Agendar" title="Com quem?" backTo="/jornada" />);
     const back = screen.getByRole('link', { name: 'Voltar' });

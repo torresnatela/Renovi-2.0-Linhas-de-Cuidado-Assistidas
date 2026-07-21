@@ -7,7 +7,7 @@ import { IconBack } from './icons';
 interface FlowHeaderProps {
   /** Rótulo de contexto acima do título — renderizado UPPERCASE via classe. */
   eyebrow: string;
-  /** Título do passo/fluxo (20px bold navy). */
+  /** Título do passo/fluxo — o `<h1>` do fluxo empilhado (20px bold navy). */
   title: string;
   /** Destino do botão voltar como `<Link>`. Use OU `backTo` OU `onBack`. */
   backTo?: string;
@@ -48,7 +48,10 @@ export function FlowHeader({ eyebrow, title, backTo, onBack, help, progress }: F
           <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
             {eyebrow}
           </span>
-          <span className="text-xl font-bold text-primary-300">{title}</span>
+          {/* O título do fluxo é o `<h1>` da tela no mobile: cada fluxo empilhado
+              precisa de exatamente um h1, e é aqui que ele mora (a a11y de heading
+              não pode depender de a página lembrar de criar o seu). */}
+          <h1 className="text-xl font-bold text-primary-300">{title}</h1>
         </div>
 
         {help}

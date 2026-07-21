@@ -153,23 +153,27 @@ export function ScheduleCarePage() {
 
         {isLoading && <Loading label="Carregando horários…" />}
         {error && <ErrorNotice error={error} />}
-        {data && slots.length === 0 && (
+
+        {/* O sucesso é HASTEADO acima do gate de slots: reservar o ÚLTIMO horário
+            livre faz o refetch do `onSettled` voltar lista vazia — e a confirmação
+            não pode sumir dando lugar ao Empty enquanto o FlowHeader ainda diz
+            "Tudo certo". Sucesso → MobileSuccess (haja ou não slots); senão, lista
+            vazia → Empty; senão, os passos. */}
+        {sucesso && agendar.data ? (
+          <MobileSuccess
+            consulta={agendar.data}
+            profNome={profEscolhido?.full_name ?? 'seu profissional'}
+            recurrence={recurrence}
+            onAgendarProxima={() => profEscolhido && escolherProfissional(profEscolhido.id)}
+          />
+        ) : data && slots.length === 0 ? (
           <Empty
             title="Nenhum horário disponível"
             hint="Não há horários agendáveis para este item nos próximos dias."
           />
-        )}
-
-        {data &&
-          slots.length > 0 &&
-          (sucesso && agendar.data ? (
-            <MobileSuccess
-              consulta={agendar.data}
-              profNome={profEscolhido?.full_name ?? 'seu profissional'}
-              recurrence={recurrence}
-              onAgendarProxima={() => profEscolhido && escolherProfissional(profEscolhido.id)}
-            />
-          ) : (
+        ) : (
+          data &&
+          slots.length > 0 && (
             <>
               {passo === 1 && (
                 <ProfessionalStep
@@ -220,7 +224,8 @@ export function ScheduleCarePage() {
                 </div>
               )}
             </>
-          ))}
+          )
+        )}
       </div>
     );
   }
@@ -407,7 +412,10 @@ function MobileSuccess({
         <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(41,176,29,0.12)] text-success">
           <IconCheck size={26} />
         </span>
-        <h1 className="text-[22px] font-bold text-primary-300">Consulta marcada</h1>
+        {/* h2, não h1: o FlowHeader ("Tudo certo") já é o h1 da tela de sucesso —
+            esta é a seção abaixo dele (mesma hierarquia do SucessoCard no desktop,
+            que fica sob o h1 "Agendar consulta"). Um h1 por branch de viewport. */}
+        <h2 className="text-[22px] font-bold text-primary-300">Consulta marcada</h2>
         <p className="text-sm leading-relaxed text-ink">
           {consulta.label} com {profNome}
           <br />

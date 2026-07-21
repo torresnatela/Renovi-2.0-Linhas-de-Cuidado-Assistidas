@@ -3,7 +3,7 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-21 — **Mobile responsivo concluído (Etapas 0–8)**: same-codebase, desktop intacto ≥`lg` (1024px). Hook `useIsDesktop` + testkit, chrome `tabs`×`flow` (`AppShell`/`TabBar`/`FlowHeader`), ícones filled verbatim do handoff, jornada/agendar/consultas/acesso/perfil relayoutados por viewport, nó sintético de check-in na timeline, smoke de integração no `App` e docs vivos (ADR-041/042). ADR-039 (decisões de produto desktop) herdado integralmente. Ver a seção "Mobile responsivo" abaixo.
+_Última atualização: 2026-07-21 — **Mobile responsivo concluído (Etapas 0–8)**: same-codebase, desktop intacto ≥`lg` (1024px). Hook `useIsDesktop` + testkit, chrome `tabs`×`flow` (`AppShell`/`TabBar`/`FlowHeader`), ícones filled verbatim do handoff, jornada/agendar/consultas/acesso/perfil relayoutados por viewport, nó sintético de check-in na timeline, smoke de integração no `App` e docs vivos (ADR-041/042). ADR-039 (decisões de produto desktop) herdado integralmente. **QA visual concluído** (emulação iPhone 390×844; 1 bug de overflow no cadastro corrigido) e **review final aplicado** (sucesso do agendar hasteado acima do gate de slots; unificação de h1 no mobile). Ver a seção "Mobile responsivo" abaixo.
 Antes: 2026-07-20 — **Redesign desktop do front concluído (Etapas 0–8)**: design system (tokens Nunito/navy/laranja), 17 componentes em `shared/ui/`, AppShell + rotas finais, telas novas (Acesso, Jornada com check-in, Agendar por item, Consultas com gate de pré-consulta, Perfil reduzido) e instrumentos WHO-5/PHQ-4 restilizados. Telas emerald/slate e rotas mortas aposentadas; sweep emerald/slate zerado. ADR-038 (design system) + ADR-039 (decisões de produto). Gate `typecheck && test && build` verde. Ver a seção "Redesign desktop" abaixo.
 Antes: 2026-07-20 — **Revisão do CodeRabbit na PR #13** endereçada (ADR-037, 2ª rodada): cortes na conexão da tx, streak recente, locks de consentimento (Grant/Revoke/Record), a11y (aria-live + aria-pressed), clamp de limit, `maxItems: 120` no contrato, e fix de teste flaky (meia-noite BR). Não aplicado: `NOT VALID` nas migrations (golang-migrate roda em tx única; desproporcional no piloto). `make ci` + integração completa (incl. e2e) + front verdes.
 Antes: 2026-07-19 — **Correções pós-review (PR #13)** do Verificador de Humor: streak = dias consecutivos de calendário (gatilho), guard de concorrência (advisory lock + rechecagem na tx) no Submit do assessment, e nits (teto do History em 120, `limit` no `getMoodHistory`, grade operável por teclado). `make ci` + integração verdes. Ver ADR-037.
@@ -54,16 +54,31 @@ token novo — mesmo design system do redesign desktop (Etapas 0–8 acima).
   mobile) em `docs/DECISOES.md`, este arquivo e `apps/web/CLAUDE.md`
   atualizados.
 
-**Estado:** `npm --prefix apps/web run test` verde; nenhuma mudança de código
-nesta etapa (só docs).
+**Estado:** suíte completa verde — web **280** testes, Go unit, integração
+(testcontainers), lint e `generate-check`. QA visual **concluído** (2026-07-21,
+emulação iPhone 390×844, fluxos reais: login, cadastro, check-in por toque,
+agendar até o booking, consultas, perfil, avaliações e landscape); **1 bug
+encontrado e corrigido** — overflow do cadastro. Review final do branch aplicado
+(sucesso do agendar hasteado acima do gate de slots no mobile; unificação de h1
+no mobile — `FlowHeader` vira `<h1>`, h1 duplicado do card em `AppointmentPage`
+escondido abaixo de `lg`, título "Perfil" do mobile vira `<h1>`, `MobileSuccess`
+rebaixado a `<h2>` sob o h1 do `FlowHeader` — exatamente um h1 por branch de
+viewport).
 
 **Próximo passo:**
-- **QA visual no browser contra os mocks** — comparar cada tela mobile
-  (Acesso/Jornada/Agendar/Consultas/Perfil) com o handoff, viewport por
-  viewport (ainda não verificado no browser real, análogo à pendência do
-  redesign desktop).
-- **Suite completa** (`make ci` + `typecheck && build`) antes de abrir PR para
-  `main`.
+- **PR para `main`** com o mobile responsivo (Etapas 0–8) + os fixes do review
+  final.
+- **Follow-ups do review final** (fora deste PR):
+  - **Espelhar no desktop** o fix do sucesso do agendar (mesmo gating latente em
+    `ScheduleCarePage`, mantido byte-for-byte por ora — logado como follow-up).
+  - **`RootHeader` extraction** + `FlowHeader` union/clamp/typo/alt unification
+    (cabeçalho de tela raiz repetido em Jornada/Consultas/Perfil vira um só
+    componente; unificar a prop de voltar em union type, `clamp` de tipografia,
+    correção de typo e `alt` da logo).
+  - **`SectionLabel` 11px no mobile** (rótulo de seção).
+  - **`CtaLink fullWidth`** no `AgendarCard`.
+  - **Token `success-subtle`** (o tinte `rgba(41,176,29,0.12)` hoje literal vira
+    token do DS).
 
 ## 🎨 Redesign desktop do front — Etapas 0–8 (CONCLUÍDO, branch `feat/desktop-ui`)
 
