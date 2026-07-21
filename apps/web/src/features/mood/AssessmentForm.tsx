@@ -1,7 +1,10 @@
 import { useState } from 'react';
 
 import { ApiError, type AssessmentCode } from '../../shared/api';
+import { Button } from '../../shared/ui/Button';
 import { useAssessmentAvailability, useSubmitAssessment } from './useMood';
+
+const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(' ');
 
 type Instrumento = {
   titulo: string;
@@ -55,6 +58,16 @@ const FAIXA_LABEL: Record<string, string> = {
   moderado: 'sofrimento moderado',
 };
 
+/**
+ * O formulário do instrumento periódico (WHO-5/PHQ-4), no visual do design system.
+ * Estilizado só com tokens do DS (sem paletas fora do design system). O resultado
+ * (faixa e encaminhamento) sai em tom INFORMATIVO: um rastreio positivo não é falha do
+ * paciente, então nunca é vermelho de erro; só o ERRO REAL do envio usa `error`.
+ *
+ * O contrato — props `{ codigo, onDone }`, uma pergunta por vez e os rótulos dos
+ * botões ("Enviar respostas", "Concluir", "Fechar") — é preservado: a
+ * AssessmentPage e o gate de pré-consulta (AppointmentPage) dependem dele.
+ */
 export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onDone: () => void }) {
   const inst = INSTRUMENTOS[codigo];
   const availability = useAssessmentAvailability(codigo);
@@ -70,55 +83,60 @@ export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onD
 
   if (resultado) {
     return (
-      <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-6" role="status">
-        <h3 className="mb-2 font-medium">{inst.titulo} — resultado</h3>
+      <section role="status" className="flex flex-col gap-3 rounded-md bg-primary-100 p-5">
+        <span className="text-[15px] font-bold text-primary-300">Seu resultado</span>
         {codigo === 'WHO5' && resultado.index_score != null && (
-          <p className="text-sm text-emerald-900">
-            Índice de bem-estar: <strong>{resultado.index_score}/100</strong> —{' '}
+          <p className="text-sm text-ink">
+            Índice de bem-estar:{' '}
+            <strong className="text-primary-300">{resultado.index_score}/100</strong> —{' '}
             {FAIXA_LABEL[resultado.faixa] ?? resultado.faixa}
           </p>
         )}
         {codigo === 'PHQ4' && resultado.subscores && (
-          <p className="text-sm text-emerald-900">
-            Humor (PHQ-2): <strong>{resultado.subscores.phq2}</strong> · Ansiedade (GAD-2):{' '}
-            <strong>{resultado.subscores.gad2}</strong> — {FAIXA_LABEL[resultado.faixa] ?? resultado.faixa}
+          <p className="text-sm text-ink">
+            Humor (PHQ-2): <strong className="text-primary-300">{resultado.subscores.phq2}</strong> ·
+            Ansiedade (GAD-2):{' '}
+            <strong className="text-primary-300">{resultado.subscores.gad2}</strong> —{' '}
+            {FAIXA_LABEL[resultado.faixa] ?? resultado.faixa}
           </p>
         )}
         {resultado.flag_encaminhar && (
-          <p className="mt-3 rounded bg-rose-50 p-3 text-sm text-rose-900">
+          <p className="rounded-md bg-[rgba(250,143,27,0.12)] p-3 text-sm text-ink">
             Seu resultado sugere que vale conversar com a equipe de cuidado. Isso vai apenas para a
             trilha clínica — nunca para gestores ou RH.
           </p>
         )}
-        <button
-          type="button"
-          onClick={onDone}
-          className="mt-4 rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-        >
+        <Button color="primary" size="sm" onClick={onDone} className="self-start">
           Concluir
-        </button>
+        </Button>
       </section>
     );
   }
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-6">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="font-medium">{inst.titulo}</h3>
-        <button type="button" onClick={onDone} className="text-sm text-slate-500 underline">
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm text-muted">{inst.instrucao}</p>
+        <button
+          type="button"
+          onClick={onDone}
+          className="shrink-0 rounded-sm text-sm font-bold text-primary-300 underline transition active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300"
+        >
           Fechar
         </button>
       </div>
-      <p className="mb-4 text-sm text-slate-600">{inst.instrucao}</p>
 
       {bloqueio ? (
-        <p className="rounded bg-amber-50 p-3 text-sm text-amber-900">{bloqueio.reason}</p>
+        // Bloqueio de cadência é estado do plano, não erro: fundo subtle navy.
+        <p role="status" className="rounded-md bg-primary-100 p-3 text-sm text-primary-300">
+          {bloqueio.reason}
+        </p>
       ) : (
         <>
-          <ol className="space-y-4">
+          <ol className="flex flex-col gap-5">
             {inst.itens.map((texto, i) => (
-              <li key={i}>
-                <p className="mb-2 text-sm text-slate-800">
+              <li key={i} className="flex flex-col gap-2">
+                <p className="text-sm text-ink">
                   {i + 1}. {texto}
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -130,12 +148,13 @@ export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onD
                         type="button"
                         aria-pressed={on}
                         onClick={() => setAnswers((prev) => prev.map((a, k) => (k === i ? v : a)))}
-                        className={
-                          'rounded border px-2 py-1 text-xs ' +
-                          (on
-                            ? 'border-emerald-600 bg-emerald-600 text-white'
-                            : 'border-slate-300 text-slate-600')
-                        }
+                        className={cx(
+                          'rounded-pill border px-3 py-1 text-xs font-semibold transition',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300',
+                          on
+                            ? 'border-primary-300 bg-primary-300 text-white'
+                            : 'border-primary-200 text-muted hover:border-primary-300 hover:text-primary-300',
+                        )}
                       >
                         {v} · {rotulo}
                       </button>
@@ -145,21 +164,29 @@ export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onD
               </li>
             ))}
           </ol>
-          <button
-            type="button"
-            onClick={() => completo && submit.mutate({ codigo, items: answers.map((a) => a as number) })}
-            disabled={!completo || submit.isPending}
-            className="mt-6 rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60"
-          >
-            {submit.isPending ? 'Enviando…' : 'Enviar respostas'}
-          </button>
-          {submit.isError && (
-            <p className="mt-3 text-sm text-rose-700">
-              {submit.error instanceof ApiError ? submit.error.message : 'Não foi possível enviar.'}
-            </p>
-          )}
+
+          <div className="flex flex-col gap-3">
+            <Button
+              color="primary"
+              size="md"
+              loading={submit.isPending}
+              disabled={!completo}
+              onClick={() =>
+                completo && submit.mutate({ codigo, items: answers.map((a) => a as number) })
+              }
+              className="self-start"
+            >
+              {submit.isPending ? 'Enviando…' : 'Enviar respostas'}
+            </Button>
+            {submit.isError && (
+              // Falha do ENVIO é erro real: tom de erro (o único vermelho aqui).
+              <p role="alert" className="rounded-md bg-[rgba(205,25,25,0.08)] p-3 text-sm text-error">
+                {submit.error instanceof ApiError ? submit.error.message : 'Não foi possível enviar.'}
+              </p>
+            )}
+          </div>
         </>
       )}
-    </section>
+    </div>
   );
 }

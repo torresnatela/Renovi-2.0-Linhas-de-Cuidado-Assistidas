@@ -16,8 +16,9 @@ function isAssessmentCode(codigo: string | undefined): codigo is AssessmentCode 
 /**
  * Entrada fina de /avaliacoes/:codigo — hospeda um instrumento periódico
  * (WHO-5/PHQ-4) fora do fluxo diário do humor, para links diretos. Um código
- * desconhecido não vira página em branco: mostra o aviso e a volta. A
- * restilização final é da Etapa 8.
+ * desconhecido não vira página em branco: mostra o aviso e a volta. A página é a
+ * ÚNICA a titular o instrumento (o h1 abaixo); o AssessmentForm não repete o
+ * título, evitando o duplo-heading e o card-in-card.
  */
 export function AssessmentPage() {
   const { codigo } = useParams();
