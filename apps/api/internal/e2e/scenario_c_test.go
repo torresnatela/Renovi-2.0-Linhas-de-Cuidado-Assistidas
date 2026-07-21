@@ -423,6 +423,7 @@ func TestE2E_C_SaudeMentalSemanal(t *testing.T) {
 			"consulta_agendada",  // C04 psico +11
 			"consulta_agendada",  // C04 psico +4
 			"matricula_criada",   // C03
+			"matricula_criada",   // auto-matrícula na linha universal (actor=sistema, ADR-040) — evento mais antigo
 		}
 		require.Len(t, full.Items, len(want), "total de eventos da jornada do paciente 3")
 		for i, ev := range full.Items {
