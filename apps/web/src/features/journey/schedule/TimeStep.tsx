@@ -39,7 +39,9 @@ export function TimeStep({ slots, intencaoSlotId, emVoo, onEscolher }: TimeStepP
         <EligibilityNotice compact blocks={comuns} timeZone={primeiro?.time_zone} />
       )}
 
-      <div className="flex flex-wrap gap-3">
+      {/* Mobile: grade de 3 colunas (mock). Desktop (lg): a régua flex-wrap
+          original — as classes `lg:` restauram o layout byte a byte. */}
+      <div className="grid grid-cols-3 gap-2 lg:flex lg:flex-wrap lg:gap-3">
         {slots.map((s) => {
           const permitido = s.eligibility.allowed;
           const selecionado = s.id === intencaoSlotId;
