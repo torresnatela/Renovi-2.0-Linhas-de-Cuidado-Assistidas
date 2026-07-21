@@ -62,6 +62,24 @@ describe('MoodCheckinCard', () => {
     await waitFor(() => expect(api.recordMoodCheckin).toHaveBeenCalled());
   });
 
+  // Intenção migrada de MoodPage.test (aposentada na Etapa 8): sem matrícula
+  // elegível, o aside informa em tom neutro e NÃO oferece consentimento nem CTA —
+  // bloqueio não é erro.
+  it('avisa quando não há matrícula elegível, sem CTA de consentimento', async () => {
+    vi.mocked(api.getMoodToday).mockResolvedValue({
+      dia: '2026-07-20',
+      can_checkin: false,
+      reason: 'not_enrolled',
+    });
+
+    renderCard();
+
+    expect(
+      await screen.findByText(/Fica disponível quando sua linha de cuidado/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /aceitar e continuar/i })).not.toBeInTheDocument();
+  });
+
   it('seleciona no grid pelo teclado e envia o shape correto ao registrar', async () => {
     vi.mocked(api.getMoodToday).mockResolvedValue({
       dia: '2026-07-20',

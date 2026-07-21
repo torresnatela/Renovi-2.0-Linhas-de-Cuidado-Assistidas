@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { ApiError, type Appointment, type AppointmentStatus } from '../../shared/api';
-import { formatDateLong, formatDateTimeShort, formatTime } from '../../shared/datetime';
+import { formatDateLong, formatTime } from '../../shared/datetime';
 import { openExternal } from '../../shared/navigate';
 import { Badge } from '../../shared/ui/Badge';
 import { Button } from '../../shared/ui/Button';
@@ -13,60 +13,7 @@ import { IconBack } from '../../shared/ui/icons';
 import { AssessmentForm } from '../mood/AssessmentForm';
 import { useMoodToday } from '../mood/useMood';
 import { reasonText } from './reasons';
-import { useAppointment, useAppointments, useJoinAppointment } from './useScheduling';
-import { Carregando, Erro, Vazio } from './ui';
-
-/** /consultas — a lista. */
-export function AppointmentsPage() {
-  const { data, isLoading, error } = useAppointments();
-
-  return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <h2 className="text-lg font-medium">Minhas consultas</h2>
-        <Link
-          to="/agendar"
-          className="rounded bg-emerald-700 px-3 py-2 text-sm font-medium text-white"
-        >
-          Agendar consulta
-        </Link>
-      </div>
-
-      {isLoading && <Carregando>Carregando suas consultas…</Carregando>}
-      {error && <Erro error={error} />}
-      {data?.length === 0 && (
-        <Vazio>
-          Você ainda não tem consultas.{' '}
-          <Link to="/agendar" className="text-emerald-700 underline">
-            Agendar a primeira
-          </Link>
-        </Vazio>
-      )}
-
-      <ul className="grid gap-3">
-        {data?.map((c) => (
-          <li key={c.id}>
-            <Link
-              to={`/consultas/${c.id}`}
-              className="block rounded-lg border border-slate-200 bg-white p-4 hover:border-emerald-600"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <span className="block font-medium">{c.specialty.name}</span>
-                  <span className="block text-sm text-slate-600">{c.professional.full_name}</span>
-                </div>
-                <Selo consulta={c} />
-              </div>
-              <p className="mt-2 text-sm text-slate-700">
-                {formatDateTimeShort(c.starts_at, c.time_zone)}
-              </p>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </main>
-  );
-}
+import { useAppointment, useJoinAppointment } from './useScheduling';
 
 /** /consultas/:appointmentId — o detalhe, com o botão de entrar. */
 export function AppointmentPage() {

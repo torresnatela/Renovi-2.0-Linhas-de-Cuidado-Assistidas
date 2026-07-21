@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, type Appointment, type MoodToday } from '../../shared/api';
 import { moodKeys } from '../mood/useMood';
-import { AppointmentPage } from './AppointmentsPage';
+import { AppointmentPage } from './AppointmentPage';
 
 vi.mock('../../shared/api', async () => {
   const actual = await vi.importActual<typeof import('../../shared/api')>('../../shared/api');

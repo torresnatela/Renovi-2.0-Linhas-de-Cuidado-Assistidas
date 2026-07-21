@@ -8,7 +8,7 @@ import { IconCheck } from '../../shared/ui/icons';
 import { MoodGrid, type MoodPoint } from './MoodGrid';
 import { useGrantConsent, useMoodToday, useRecordCheckin } from './useMood';
 
-/** Mesma versão de termo aceita na MoodPage — mantê-las iguais evita divergência. */
+/** Versão do termo de consentimento aceito no check-in de humor. */
 const TERMO_VERSAO = 'v1';
 
 /**
@@ -37,9 +37,10 @@ function regiao(p: MoodPoint): { rotulo: string; cor: string } {
 
 /**
  * O card de check-in de humor do aside da Jornada — uma máquina de estados guiada
- * pela resposta de `useMoodToday()`. É a mesma semântica da MoodPage (consentimento,
- * elegibilidade, feito, aprofundamento), mas na forma compacta do painel lateral e
- * roteando o aprofundamento para `/avaliacoes/{codigo}` em vez do formulário inline.
+ * pela resposta de `useMoodToday()`. É a ÚNICA superfície do check-in diário desde
+ * o redesign (a antiga /humor foi aposentada): cobre consentimento, elegibilidade,
+ * feito e aprofundamento, na forma compacta do painel lateral, roteando o
+ * aprofundamento para `/avaliacoes/{codigo}`.
  */
 export function MoodCheckinCard() {
   const today = useMoodToday();

@@ -7,10 +7,9 @@ import { ConsultationsPage } from './features/consultations/ConsultationsPage';
 import { JourneyPage } from './features/journey/JourneyPage';
 import { ScheduleCarePage } from './features/journey/ScheduleCarePage';
 import { AssessmentPage } from './features/mood/AssessmentPage';
-import { MoodPage } from './features/mood/MoodPage';
 import { ProfilePage } from './features/profile/ProfilePage';
 import { AppLayout } from './features/shell/AppLayout';
-import { AppointmentPage } from './features/scheduling/AppointmentsPage';
+import { AppointmentPage } from './features/scheduling/AppointmentPage';
 import { ErrorBoundary } from './shared/ErrorBoundary';
 import { Button } from './shared/ui/Button';
 import { Card } from './shared/ui/Card';
@@ -56,8 +55,9 @@ export default function App() {
 
             <Route path="/perfil" element={<ProfilePage />} />
 
-            {/* Verificador Diário de Humor (Anexo C). */}
-            <Route path="/humor" element={<MoodPage />} />
+            {/* /humor aposentado no redesign: o check-in de humor virou o card da
+                Jornada (MoodCheckinCard). Mantém links antigos vivos. */}
+            <Route path="/humor" element={<Navigate to="/jornada" replace />} />
             {/* Instrumentos periódicos (WHO-5/PHQ-4) por link direto. */}
             <Route path="/avaliacoes/:codigo" element={<AssessmentPage />} />
           </Route>
