@@ -8,6 +8,8 @@ import {
   formatTime,
   FUSO_PADRAO,
   monthAbbrev,
+  monthKey,
+  monthLabel,
 } from './datetime';
 
 // 09:00 em São Paulo. O mesmo INSTANTE é meio-dia em UTC e 13:00 em Lisboa.
@@ -78,6 +80,30 @@ describe('dayOfMonth', () => {
   it('dá o dia do mês no fuso da agenda', () => {
     expect(dayOfMonth(fimDeJulhoEmSP, 'America/Sao_Paulo')).toBe('31');
     expect(dayOfMonth(fimDeJulhoEmSP, 'UTC')).toBe('01');
+  });
+});
+
+describe('monthKey', () => {
+  it('agrupa pelo MÊS do fuso da agenda, não pelo do ambiente', () => {
+    // 00:30 UTC de 01/08 ainda é 31/07 (à noite) em São Paulo — logo, mês de
+    // JULHO. Agrupar pelo mês do browser (UTC) jogaria a consulta no balde de
+    // agosto e ela sumiria do grupo certo.
+    const viraMes = '2026-08-01T00:30:00Z';
+    expect(monthKey(viraMes, 'America/Sao_Paulo')).toBe('2026-07');
+    expect(monthKey(viraMes, 'UTC')).toBe('2026-08');
+  });
+
+  it('dá o mês do instante no fuso pedido', () => {
+    expect(monthKey(noveDaManhaEmSP, 'America/Sao_Paulo')).toBe('2026-07');
+  });
+});
+
+describe('monthLabel', () => {
+  it('rótulo PT-BR capitalizado, no fuso da agenda', () => {
+    expect(monthLabel(noveDaManhaEmSP, 'America/Sao_Paulo')).toBe('Julho de 2026');
+    // A mesma virada de mês: em SP ainda é julho; em UTC já é agosto.
+    expect(monthLabel('2026-08-01T00:30:00Z', 'America/Sao_Paulo')).toBe('Julho de 2026');
+    expect(monthLabel('2026-08-01T00:30:00Z', 'UTC')).toBe('Agosto de 2026');
   });
 });
 

@@ -93,3 +93,31 @@ export function dayKey(iso: string, timeZone: string): string {
   // a data à mão.
   return new Date(iso).toLocaleDateString('en-CA', { timeZone });
 }
+
+/**
+ * "2026-07" — a chave para agrupar consultas por MÊS (o histórico).
+ *
+ * Mesma disciplina do `dayKey`: calculada NO fuso da agenda. Uma consulta às
+ * 23:30 de 31/07 em São Paulo é 01/08 em UTC — agrupar pelo mês do browser a
+ * jogaria em agosto e ela sumiria do grupo "Julho". Deriva de `dayKey` para não
+ * repetir a regra de fuso.
+ */
+export function monthKey(iso: string, timeZone: string): string {
+  return dayKey(iso, timeZone).slice(0, 7);
+}
+
+/**
+ * "Julho de 2026" — o rótulo humano do grupo de mês, capitalizado.
+ *
+ * O pt-BR devolve "julho de 2026" (minúsculo); o design pede a inicial maiúscula
+ * (e o caixa-alta visual fica por conta do CSS, para o nome acessível seguir
+ * legível). Lido no fuso da agenda, como todo o resto deste módulo.
+ */
+export function monthLabel(iso: string, timeZone: string): string {
+  const s = new Date(iso).toLocaleDateString('pt-BR', {
+    timeZone,
+    month: 'long',
+    year: 'numeric',
+  });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
