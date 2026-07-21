@@ -107,7 +107,7 @@ export function MoodGrid({ value, onChange, disabled = false }: MoodGridProps) {
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className="relative h-[210px] cursor-crosshair overflow-hidden rounded-md border border-primary-100 [touch-action:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300"
+        className="relative h-[190px] cursor-crosshair overflow-hidden rounded-md border border-primary-100 [touch-action:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300 lg:h-[210px]"
         style={{
           // Um gradiente radial por canto (energia/valência), sobre branco.
           background:

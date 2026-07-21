@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 
 import type { CareAppointment, CareLineItemInfo, JourneyEnrollment } from '../../shared/api';
 import { formatDateTimeShort } from '../../shared/datetime';
 import { IconCheck } from '../../shared/ui/icons';
+import { useIsDesktop } from '../../shared/viewport';
 import { CtaLink } from './CtaLink';
 import { ehAtividade, proximaConsulta } from './derivations';
 import { SectionLabel } from './JourneyHero';
@@ -87,7 +89,33 @@ function ConsultaCard({ appointment, linha }: { appointment: CareAppointment; li
 }
 
 function AgendarCard({ item, linha }: { item: CareLineItemInfo; linha: string }) {
+  const isDesktop = useIsDesktop();
   const caption = item.recurrence ?? 'Consulta';
+
+  // Mobile (mock linhas 51–73): pill navy "Consulta", título 16.5px e CTA fullWidth
+  // "Agendar {label}". Mantém a SEMÂNTICA de link (agendar por item) — só a
+  // apresentação muda; a derivação de "o mais importante agora" é a mesma.
+  if (!isDesktop) {
+    return (
+      <DestaqueCard>
+        <div className="flex items-center gap-2">
+          <Pill>Consulta</Pill>
+          <span className="truncate text-[12.5px] text-muted">{linha}</span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[16.5px] font-bold text-primary-300">{item.label}</span>
+          <span className="text-[13px] text-muted">{caption}</span>
+        </div>
+        <Link
+          to={`/jornada/agendar/${item.id}`}
+          className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary-300 px-6 text-sm font-bold uppercase text-white transition active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300 focus-visible:ring-offset-2"
+        >
+          Agendar {item.label}
+        </Link>
+      </DestaqueCard>
+    );
+  }
+
   return (
     <DestaqueCard>
       <div className="flex items-center gap-2">
