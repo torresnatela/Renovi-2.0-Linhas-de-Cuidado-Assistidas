@@ -127,3 +127,62 @@ export function IconBack({ size }: IconProps) {
     </Icon>
   );
 }
+
+/**
+ * Ícones *filled* (fill em `currentColor`, sem stroke): exceção documentada
+ * do DS, usada só no estado ATIVO da tab bar mobile (Etapa 1) — o par
+ * outline/filled sinaliza a aba selecionada sem depender só de cor.
+ */
+function IconFilled({ size = 20, children }: { size?: number; children: ReactNode }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+// Mesma silhueta de IconHome (roof + walls), mas sólida: o triângulo do
+// telhado e o corpo da casa preenchidos em vez de contornados.
+export function IconHomeFilled({ size }: IconProps) {
+  return (
+    <IconFilled size={size}>
+      <path d="M3 10.5 12 3l9 7.5Z" />
+      <path d="M5.5 9.5V19a1 1 0 0 0 1 1H10v-5h4v5h3.5a1 1 0 0 0 1-1V9.5Z" />
+    </IconFilled>
+  );
+}
+
+// Corpo do calendário sólido + os dois "aneis" do topo (mesma composição de
+// IconAppointments, sem a grade/check interna — o preenchimento já basta
+// para distinguir do outline ao lado dele na tab bar).
+export function IconAppointmentsFilled({ size }: IconProps) {
+  return (
+    <IconFilled size={size}>
+      <rect x="4" y="6" width="16" height="15" rx="2" />
+      <rect x="7" y="3" width="1.8" height="4.5" rx="0.9" />
+      <rect x="15.2" y="3" width="1.8" height="4.5" rx="0.9" />
+    </IconFilled>
+  );
+}
+
+// Anel (mesmo raio 9 de IconProfile, via evenodd círculo-menos-círculo) +
+// cabeça e ombros sólidos dentro — mesma leitura de "perfil", só que cheia.
+export function IconProfileFilled({ size }: IconProps) {
+  return (
+    <IconFilled size={size}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-1.6a7.4 7.4 0 1 1 0-14.8 7.4 7.4 0 0 1 0 14.8Z"
+      />
+      <circle cx="12" cy="10" r="3" />
+      <path d="M6.5 18.3a6 6 0 0 1 11 0Z" />
+    </IconFilled>
+  );
+}
