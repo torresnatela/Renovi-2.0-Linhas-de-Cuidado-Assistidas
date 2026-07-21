@@ -7,7 +7,13 @@ import { ApiError } from './shared/api';
 
 vi.mock('./shared/api', async () => {
   const actual = await vi.importActual<typeof import('./shared/api')>('./shared/api');
-  return { ...actual, getMe: vi.fn(), getJourney: vi.fn() };
+  return {
+    ...actual,
+    getMe: vi.fn(),
+    getJourney: vi.fn(),
+    listCareAppointments: vi.fn(),
+    getMoodToday: vi.fn(),
+  };
 });
 const api = await import('./shared/api');
 
@@ -32,6 +38,13 @@ describe('App', () => {
     vi.mocked(api.getJourney).mockReset();
     // A raiz redireciona para a Jornada, que consome getJourney: mock inócuo.
     vi.mocked(api.getJourney).mockResolvedValue({ enrollments: [] });
+    // A Jornada também lê consultas e o dia de humor (card do aside): mocks inócuos.
+    vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+    vi.mocked(api.getMoodToday).mockResolvedValue({
+      dia: '2026-07-20',
+      can_checkin: false,
+      reason: 'not_enrolled',
+    });
     window.history.pushState({}, '', '/');
   });
 
@@ -46,12 +59,16 @@ describe('App', () => {
     expect(screen.queryByText(/Olá,/)).not.toBeInTheDocument();
   });
 
-  // A home foi aposentada: a raiz agora cai na Jornada (dentro do shell).
+  // A home foi aposentada: a raiz agora cai na Jornada (dentro do shell). Sem
+  // matrículas, a Jornada mostra o estado vazio informativo — prova de que a tela
+  // (e não a home antiga) renderizou no caminho certo.
   it('redireciona a raiz para a Jornada quando há sessão', async () => {
     vi.mocked(api.getMe).mockResolvedValue(conta);
     renderApp();
 
-    expect(await screen.findByRole('heading', { name: 'Minha jornada' })).toBeInTheDocument();
+    expect(
+      await screen.findByText('Você ainda não está em nenhuma linha de cuidado.'),
+    ).toBeInTheDocument();
     expect(window.location.pathname).toBe('/jornada');
   });
 

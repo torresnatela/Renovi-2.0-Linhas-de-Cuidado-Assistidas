@@ -3,14 +3,25 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Journey } from '../../shared/api';
+import type { Account, Journey } from '../../shared/api';
 import { JourneyPage } from './JourneyPage';
 
+// A página agora orquestra várias fontes: a jornada, as consultas (para "o mais
+// importante agora" e a timeline), a sessão (saudação) e o dia de humor (card do
+// aside). Todas passam pelo mesmo shared/api mockado.
 vi.mock('../../shared/api', async () => {
   const actual = await vi.importActual<typeof import('../../shared/api')>('../../shared/api');
-  return { ...actual, getJourney: vi.fn() };
+  return {
+    ...actual,
+    getJourney: vi.fn(),
+    listCareAppointments: vi.fn(),
+    getMe: vi.fn(),
+    getMoodToday: vi.fn(),
+  };
 });
 const api = await import('../../shared/api');
+
+const conta: Account = { id: 'acc-1', full_name: 'Ana Paula', email: 'ana@example.com' };
 
 const jornada: Journey = {
   enrollments: [
@@ -86,24 +97,30 @@ describe('JourneyPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getJourney).mockResolvedValue(jornada);
+    vi.mocked(api.getMe).mockResolvedValue(conta);
+    vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+    // not_enrolled mantém o card do aside num estado neutro (sem grade a operar).
+    vi.mocked(api.getMoodToday).mockResolvedValue({
+      dia: '2026-07-20',
+      can_checkin: false,
+      reason: 'not_enrolled',
+    });
   });
 
   it('mostra a matrícula com sua vigência e o status', async () => {
     renderPage();
-    expect(await screen.findByText('Saúde Mental')).toBeInTheDocument();
-    expect(screen.getByText('Ativa')).toBeInTheDocument();
-    expect(screen.getByText(/Vigência:/)).toBeInTheDocument();
+    // Status via faixa de vigência (estado do plano, não texto cru).
+    expect(await screen.findByText('Plano ativo')).toBeInTheDocument();
+    expect(screen.getByText(/Vigente até/)).toBeInTheDocument();
+    // O nome da linha aparece ao menos uma vez (faixa de vigência).
+    expect(screen.getAllByText('Saúde Mental').length).toBeGreaterThan(0);
   });
 
-  it('no item liberado, oferece o link de agendar', async () => {
+  it('no item liberado, oferece o link de agendar por item', async () => {
     renderPage();
-    expect(await screen.findByText('Avaliação inicial')).toBeInTheDocument();
-    expect(screen.getByText('Disponível')).toBeInTheDocument();
-    // O link leva ao agendar POR ITEM (não ao wizard de booking).
-    expect(screen.getByRole('link', { name: 'Agendar' })).toHaveAttribute(
-      'href',
-      '/jornada/agendar/item-1',
-    );
+    // Há pelo menos um link "Agendar" que leva ao agendar POR ITEM (não ao booking).
+    const links = await screen.findAllByRole('link', { name: /agendar/i });
+    expect(links.some((l) => l.getAttribute('href') === '/jornada/agendar/item-1')).toBe(true);
   });
 
   /**
@@ -117,7 +134,8 @@ describe('JourneyPage', () => {
     // available_from formatado no fuso da agenda — em UTC cairia noutro dia.
     expect(screen.getByText(/01\/08/)).toBeInTheDocument();
     // E NÃO oferece agendar este item.
-    expect(screen.queryByRole('link', { name: /item-2/ })).not.toBeInTheDocument();
+    const links = screen.getAllByRole('link', { name: /agendar/i });
+    expect(links.some((l) => l.getAttribute('href') === '/jornada/agendar/item-2')).toBe(false);
   });
 
   it('lista os eventos recentes da jornada', async () => {

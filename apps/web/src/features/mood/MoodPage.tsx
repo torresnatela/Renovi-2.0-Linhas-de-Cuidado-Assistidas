@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ApiError, type AssessmentCode, type MoodCheckin, type MoodToday } from '../../shared/api';
 import { AssessmentForm } from './AssessmentForm';
+import { MoodGrid, type MoodPoint } from './MoodGrid';
 import {
   useGrantConsent,
   useHelpNow,
@@ -164,48 +165,12 @@ function NotEnrolledCard() {
 function CheckinSection({ existente }: { existente: MoodCheckin | null }) {
   const instrument = useMoodInstrument('GRID');
   const record = useRecordCheckin();
-  const [ponto, setPonto] = useState<{ valencia: number; energia: number } | null>(null);
+  const [ponto, setPonto] = useState<MoodPoint | null>(null);
   const [tags, setTags] = useState<string[]>([]);
-  const gridRef = useRef<HTMLDivElement>(null);
 
   // O check-in mais recente conhecido: o que o servidor devolveu no submit, ou o
   // de hoje já existente. Nunca recalculamos o quadrante — exibimos o do servidor.
   const salvo = record.data ?? existente;
-
-  function selecionar(e: React.MouseEvent<HTMLDivElement>) {
-    const el = gridRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const x = clamp((e.clientX - rect.left) / rect.width);
-    const y = clamp((e.clientY - rect.top) / rect.height);
-    setPonto({ valencia: Math.round(x * 100), energia: Math.round((1 - y) * 100) });
-  }
-
-  // Acessibilidade: a grade também é operável por teclado. As setas movem o ponto
-  // em passos de 5; partindo do centro (50,50) quando ainda não há ponto.
-  function ajustar(dValencia: number, dEnergia: number) {
-    setPonto((prev) => {
-      const base = prev ?? { valencia: 50, energia: 50 };
-      return {
-        valencia: Math.min(100, Math.max(0, base.valencia + dValencia)),
-        energia: Math.min(100, Math.max(0, base.energia + dEnergia)),
-      };
-    });
-  }
-
-  function teclado(e: React.KeyboardEvent<HTMLDivElement>) {
-    const passo = 5;
-    const movimentos: Record<string, [number, number]> = {
-      ArrowLeft: [-passo, 0],
-      ArrowRight: [passo, 0],
-      ArrowUp: [0, passo],
-      ArrowDown: [0, -passo],
-    };
-    const mov = movimentos[e.key];
-    if (!mov) return;
-    e.preventDefault();
-    ajustar(mov[0], mov[1]);
-  }
 
   function registrar() {
     if (!ponto) return;
@@ -229,52 +194,13 @@ function CheckinSection({ existente }: { existente: MoodCheckin | null }) {
       )}
 
       <div className="rounded-lg border border-slate-200 bg-white p-6">
-        <p className="mb-1 text-sm text-slate-600">
+        <p className="mb-4 text-sm text-slate-600">
           Toque no ponto que representa como você se sente (ou use as setas do teclado). O eixo
           horizontal é o quão agradável; o vertical, o quanto de energia.
         </p>
 
-        <div className="mx-auto mt-4 max-w-sm">
-          <div className="mb-1 text-center text-xs text-slate-400">Mais energia</div>
-          <div className="flex items-stretch gap-1">
-            <div className="flex items-center text-xs text-slate-400">
-              <span className="-rotate-180 [writing-mode:vertical-rl]">Desagradável</span>
-            </div>
-            <div
-              ref={gridRef}
-              onClick={selecionar}
-              onKeyDown={teclado}
-              role="button"
-              tabIndex={0}
-              aria-label="Grade de humor: valência por energia"
-              className="relative grid aspect-square w-full grid-cols-2 grid-rows-2 overflow-hidden rounded-lg border border-slate-300"
-            >
-              {/* Quadrantes (linha de cima = mais energia). Cores próprias da Renovi. */}
-              <div className={QUADRANTES.desagradavel_ativado.cor} />
-              <div className={QUADRANTES.agradavel_ativado.cor} />
-              <div className={QUADRANTES.desagradavel_calmo.cor} />
-              <div className={QUADRANTES.agradavel_calmo.cor} />
-              {ponto && (
-                <span
-                  data-testid="mood-marker"
-                  className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-slate-900 shadow"
-                  style={{ left: `${ponto.valencia}%`, top: `${100 - ponto.energia}%` }}
-                />
-              )}
-            </div>
-            <div className="flex items-center text-xs text-slate-400">
-              <span className="[writing-mode:vertical-rl]">Agradável</span>
-            </div>
-          </div>
-          <div className="mt-1 text-center text-xs text-slate-400">Menos energia</div>
-        </div>
-
-        {/* Anuncia o ponto escolhido a leitores de tela (a grade é visual). */}
-        {ponto && (
-          <p className="sr-only" aria-live="polite" data-testid="mood-value">
-            Selecionado: valência {ponto.valencia} de 100, energia {ponto.energia} de 100.
-          </p>
-        )}
+        {/* A grade valência×energia agora vive num componente compartilhado. */}
+        <MoodGrid value={ponto} onChange={setPonto} disabled={record.isPending} />
 
         {instrument.data && instrument.data.context_tags.length > 0 && (
           <fieldset className="mt-6">
@@ -325,8 +251,4 @@ function CheckinSection({ existente }: { existente: MoodCheckin | null }) {
       </div>
     </section>
   );
-}
-
-function clamp(v: number): number {
-  return Math.min(1, Math.max(0, v));
 }
