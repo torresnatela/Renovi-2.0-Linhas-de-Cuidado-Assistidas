@@ -18,9 +18,11 @@ export interface ProfissionalResumo {
 interface ProfessionalStepProps {
   profissionais: ProfissionalResumo[];
   onEscolher: (id: string) => void;
+  /** No fluxo mobile a lista é sempre 1 coluna (o container tem só 430px). */
+  colunaUnica?: boolean;
 }
 
-export function ProfessionalStep({ profissionais, onEscolher }: ProfessionalStepProps) {
+export function ProfessionalStep({ profissionais, onEscolher, colunaUnica = false }: ProfessionalStepProps) {
   return (
     <section className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
@@ -30,7 +32,7 @@ export function ProfessionalStep({ profissionais, onEscolher }: ProfessionalStep
         </p>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className={colunaUnica ? 'grid gap-4' : 'grid gap-4 sm:grid-cols-2'}>
         {profissionais.map((p) => (
           <button
             key={p.id}
