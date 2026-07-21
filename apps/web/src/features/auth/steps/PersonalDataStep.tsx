@@ -29,21 +29,26 @@ export function PersonalDataStep({ form, onChange, onContinue, error }: Props) {
         onChange={(e) => onChange({ cpf: maskCpf(e.target.value) })}
       />
       <div className="flex gap-3">
-        <div className="flex-1">
+        {/* min-w-0: sem isso, o <input> nativo impõe seu min-width intrínseco
+            (~size 20) ao item flex, e o par estoura a largura em telas estreitas
+            (o mobile Chrome chega a alargar o viewport todo para caber). */}
+        <div className="min-w-0 flex-1">
           <Input
             label="Nascimento"
             placeholder="dd/mm/aaaa"
             inputMode="numeric"
+            className="w-full min-w-0"
             value={form.nasc}
             onChange={(e) => onChange({ nasc: maskDate(e.target.value) })}
           />
         </div>
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <Input
             label="Celular"
             placeholder="(00) 00000-0000"
             inputMode="numeric"
             autoComplete="tel"
+            className="w-full min-w-0"
             value={form.cel}
             onChange={(e) => onChange({ cel: maskPhone(e.target.value) })}
           />
