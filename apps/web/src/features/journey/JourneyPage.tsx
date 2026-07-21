@@ -1,23 +1,21 @@
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
-import type {
-  Enrollment,
-  JourneyEnrollment,
-  JourneyEvent,
-  JourneyItem,
-} from '../../shared/api';
-import { formatDateLong, formatDateTimeShort } from '../../shared/datetime';
-import { Carregando, Erro, Vazio } from '../scheduling/ui';
-import { Blocos } from './ui';
-import { FUSO_PADRAO, useJourney } from './useJourney';
-
-const STATUS_MATRICULA: Record<Enrollment['status'], string> = {
-  ativa: 'Ativa',
-  pausada: 'Pausada',
-  concluida: 'Concluída',
-  encerrada: 'Encerrada',
-  expirada: 'Expirada',
-};
+import type { CareAppointment, JourneyEvent } from '../../shared/api';
+import { formatDateTimeShort, FUSO_PADRAO } from '../../shared/datetime';
+import { Card } from '../../shared/ui/Card';
+import { Empty, ErrorNotice, Loading } from '../../shared/ui/feedback';
+import { IconCalendar, IconCaretRight } from '../../shared/ui/icons';
+import { ListRow } from '../../shared/ui/ListRow';
+import { PlanValidityBanner } from '../../shared/ui/PlanValidityBanner';
+import { useSession } from '../auth/useSession';
+import { MoodCheckinCard } from '../mood/MoodCheckinCard';
+import { proximaConsulta, resumoDoDia, vigenciaPertoDoFim } from './derivations';
+import { JourneyHero, SectionLabel } from './JourneyHero';
+import { JourneyTimeline } from './JourneyTimeline';
+import { MostImportantNow } from './MostImportantNow';
+import { useCareAppointments, useJourney } from './useJourney';
+import { useMoodToday } from '../mood/useMood';
 
 const TIPO_EVENTO: Record<JourneyEvent['event_type'], string> = {
   matricula_criada: 'Matrícula criada',
@@ -30,119 +28,126 @@ const TIPO_EVENTO: Record<JourneyEvent['event_type'], string> = {
 };
 
 /**
- * A tela-mãe do paciente (SPEC §7): cada matrícula com seus itens JÁ avaliados
- * pelo motor. O front NÃO recalcula elegibilidade — ele exibe o veredito (`allowed`
- * e os `blocks`) que a API mandou pronto.
+ * A tela-mãe do paciente (SPEC §7) e nova home do app: a linha de cuidado como uma
+ * jornada. O front NÃO recalcula elegibilidade — exibe o veredito pronto do motor.
+ * Renderiza DENTRO do AppShell (que já tem o <main> e o header), então a raiz é uma
+ * div de conteúdo, nunca um <main> próprio.
  */
 export function JourneyPage() {
-  const { data, isLoading, error } = useJourney();
+  const journey = useJourney();
+  const appointmentsQuery = useCareAppointments();
+  const session = useSession();
+  const mood = useMoodToday();
+  const [linhaAtiva, setLinhaAtiva] = useState<string | null>(null);
+
+  if (journey.isLoading) return <Loading label="Carregando sua jornada…" />;
+  if (journey.isError) return <ErrorNotice error={journey.error} retry={() => journey.refetch()} />;
+
+  const enrollments = journey.data?.enrollments ?? [];
+  if (enrollments.length === 0) {
+    return (
+      <Empty
+        title="Você ainda não está em nenhuma linha de cuidado."
+        hint="Quando a equipe ativar a sua, ela aparece aqui com os próximos passos."
+      />
+    );
+  }
+
+  // A linha ativa é a selecionada nos chips; sem seleção, a primeira matrícula.
+  const active =
+    enrollments.find((e) => e.enrollment.care_line_code === linhaAtiva) ?? enrollments[0];
+  const appointments = appointmentsQuery.data ?? [];
+  const lines = enrollments.map((e) => ({
+    code: e.enrollment.care_line_code,
+    name: e.care_line_name,
+  }));
+
+  // Resumo do dia derivado do que já carregamos (sem chamadas novas).
+  const checkinPendente = mood.data
+    ? Boolean(mood.data.can_checkin && !mood.data.checkin)
+    : false;
+  const temItemLiberado = active.items.some((it) => it.eligibility.allowed);
+  const resumo = resumoDoDia(temItemLiberado, checkinPendente);
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <h2 className="text-lg font-medium">Minha jornada</h2>
-        <Link to="/jornada/consultas" className="rounded border px-3 py-2 text-sm">
-          Minhas consultas
+    <div>
+      <JourneyHero
+        fullName={session.data?.full_name}
+        resumo={resumo}
+        lines={lines}
+        activeCode={active.enrollment.care_line_code}
+        onSelect={setLinhaAtiva}
+      />
+
+      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_388px]">
+        {/* Coluna principal */}
+        <div className="flex min-w-0 flex-col gap-8">
+          <MostImportantNow enrollment={active} appointments={appointments} />
+          <JourneyTimeline enrollment={active} appointments={appointments} />
+          {active.recent_events.length > 0 && <EventosRecentes eventos={active.recent_events} />}
+        </div>
+
+        {/* Aside sticky sob o header de 70px (top 102 = 70 + respiro). */}
+        <aside className="flex flex-col gap-5 self-start lg:sticky lg:top-[102px]">
+          <MoodCheckinCard />
+          {vigenciaPertoDoFim(active.enrollment.valid_until) && (
+            <PlanValidityBanner
+              enrollment={active.enrollment}
+              careLineName={active.care_line_name}
+              nearExpiry
+            />
+          )}
+          <ProximaConsulta appointments={appointments} />
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function ProximaConsulta({ appointments }: { appointments: CareAppointment[] }) {
+  const navigate = useNavigate();
+  const proxima = proximaConsulta(appointments);
+  // Sem consulta futura, a seção some (nada de espaço vazio).
+  if (!proxima) return null;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between">
+        <SectionLabel>Próxima consulta</SectionLabel>
+        <Link
+          to="/consultas"
+          className="rounded-sm text-[13px] font-bold text-primary-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300"
+        >
+          Ver todas
         </Link>
       </div>
-
-      {isLoading && <Carregando>Carregando sua jornada…</Carregando>}
-      {error && <Erro error={error} />}
-      {data?.enrollments.length === 0 && (
-        <Vazio>Você ainda não está em nenhuma linha de cuidado.</Vazio>
-      )}
-
-      <div className="grid gap-6">
-        {data?.enrollments.map((je) => <Matricula key={je.enrollment.id} matricula={je} />)}
-      </div>
-    </main>
-  );
-}
-
-function Matricula({ matricula }: { matricula: JourneyEnrollment }) {
-  const { enrollment, care_line_name, items, recent_events } = matricula;
-
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white p-6">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-medium">{care_line_name}</h3>
-          <p className="text-sm text-slate-600 first-letter:uppercase">
-            Vigência: {formatDateLong(enrollment.valid_from, FUSO_PADRAO)} até{' '}
-            {formatDateLong(enrollment.valid_until, FUSO_PADRAO)}
-          </p>
-        </div>
-        <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-          {STATUS_MATRICULA[enrollment.status]}
-        </span>
-      </div>
-
-      <ul className="grid gap-3">
-        {items.map((it) => (
-          <li key={it.item.id}>
-            <ItemDaLinha item={it} />
-          </li>
-        ))}
-      </ul>
-
-      {recent_events.length > 0 && <EventosRecentes eventos={recent_events} />}
-    </section>
-  );
-}
-
-function ItemDaLinha({ item }: { item: JourneyItem }) {
-  const { eligibility } = item;
-
-  return (
-    <div className="rounded border border-slate-200 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-medium">{item.item.label}</span>
-        {eligibility.allowed ? (
-          <div className="flex shrink-0 items-center gap-3">
-            <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800">
-              Disponível
-            </span>
-            <Link
-              to={`/jornada/agendar/${item.item.id}`}
-              className="rounded bg-emerald-700 px-3 py-1 text-sm font-medium text-white"
-            >
-              Agendar
-            </Link>
-          </div>
-        ) : (
-          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900">
-            Indisponível
-          </span>
-        )}
-      </div>
-
-      {item.item.recurrence && (
-        <p className="mt-1 text-xs text-slate-500">{item.item.recurrence}</p>
-      )}
-
-      {/* Regra de ouro: nunca só "indisponível" — o porquê, pronto do servidor. */}
-      {!eligibility.allowed && eligibility.blocks.length > 0 && (
-        <div className="mt-2">
-          <Blocos blocks={eligibility.blocks} />
-        </div>
-      )}
+      <Card className="!p-0">
+        <ListRow
+          icon={<IconCalendar size={22} />}
+          title={proxima.label}
+          caption={formatDateTimeShort(proxima.scheduled_at, proxima.time_zone)}
+          right={<IconCaretRight size={16} />}
+          onClick={() => navigate(`/consultas/${proxima.booking_id}`)}
+        />
+      </Card>
+      <span className="text-xs text-muted">Cancelamento gratuito até 24h antes da consulta.</span>
     </div>
   );
 }
 
+// Uma seção discreta no fim da coluna principal — a jornada é um event log, e ver a
+// atividade recente ajuda o paciente a se situar sem virar timeline social.
 function EventosRecentes({ eventos }: { eventos: JourneyEvent[] }) {
   return (
-    <div className="mt-4 border-t border-slate-100 pt-4">
-      <h4 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-        Atividade recente
-      </h4>
-      <ul className="grid gap-1">
+    <section className="flex flex-col gap-2.5">
+      <SectionLabel>Atividade recente</SectionLabel>
+      <ul className="flex flex-col gap-1">
         {eventos.map((ev) => (
-          <li key={ev.id} className="text-sm text-slate-600">
-            {TIPO_EVENTO[ev.event_type]} — {formatDateTimeShort(ev.occurred_at, FUSO_PADRAO)}
+          <li key={ev.id} className="text-[13px] text-muted">
+            {TIPO_EVENTO[ev.event_type]} · {formatDateTimeShort(ev.occurred_at, FUSO_PADRAO)}
           </li>
         ))}
       </ul>
-    </div>
+    </section>
   );
 }
