@@ -7,9 +7,15 @@ import { ApiError } from './shared/api';
 
 vi.mock('./shared/api', async () => {
   const actual = await vi.importActual<typeof import('./shared/api')>('./shared/api');
-  return { ...actual, getMe: vi.fn(), getHealth: vi.fn() };
+  return { ...actual, getMe: vi.fn(), getJourney: vi.fn() };
 });
 const api = await import('./shared/api');
+
+const conta = {
+  id: '019f6c75-1ec9-7a93-b852-66a70d765ca6',
+  full_name: 'Roberval Juvencio Lazaroti',
+  email: 'roberval@example.com',
+};
 
 function renderApp() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -23,18 +29,13 @@ function renderApp() {
 describe('App', () => {
   beforeEach(() => {
     vi.mocked(api.getMe).mockReset();
-    vi.mocked(api.getHealth).mockReset();
+    vi.mocked(api.getJourney).mockReset();
+    // A raiz redireciona para a Jornada, que consome getJourney: mock inócuo.
+    vi.mocked(api.getJourney).mockResolvedValue({ enrollments: [] });
     window.history.pushState({}, '', '/');
   });
 
-  it('renderiza o cabeçalho do produto', () => {
-    vi.mocked(api.getMe).mockRejectedValue(new ApiError(401, 'não autenticado'));
-    renderApp();
-    expect(screen.getByRole('heading', { level: 1, name: 'Renovi 2.0' })).toBeInTheDocument();
-  });
-
-  // Sem sessão, a home não pode aparecer nem por um instante: ela mostra dados
-  // do paciente.
+  // Sem sessão, nenhuma tela do paciente pode aparecer nem por um instante.
   it('manda quem não tem sessão para o login', async () => {
     vi.mocked(api.getMe).mockRejectedValue(new ApiError(401, 'não autenticado'));
     renderApp();
@@ -43,15 +44,24 @@ describe('App', () => {
     expect(screen.queryByText(/Olá,/)).not.toBeInTheDocument();
   });
 
-  it('mostra a home para quem tem sessão', async () => {
-    vi.mocked(api.getMe).mockResolvedValue({
-      id: '019f6c75-1ec9-7a93-b852-66a70d765ca6',
-      full_name: 'Roberval Juvencio Lazaroti',
-      email: 'roberval@example.com',
-    });
-    vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', service: 'renovi-care', version: 'dev' });
+  // A home foi aposentada: a raiz agora cai na Jornada (dentro do shell).
+  it('redireciona a raiz para a Jornada quando há sessão', async () => {
+    vi.mocked(api.getMe).mockResolvedValue(conta);
     renderApp();
 
-    expect(await screen.findByText(/Olá, Roberval/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Minha jornada' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/jornada');
+  });
+
+  // O antigo cabeçalho "Renovi 2.0" deu lugar ao shell com a navegação principal.
+  it('renderiza o shell do produto com a navegação principal', async () => {
+    vi.mocked(api.getMe).mockResolvedValue(conta);
+    renderApp();
+
+    expect(await screen.findByRole('navigation')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Jornada' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Consultas' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Perfil' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Pedir ajuda' })).toBeInTheDocument();
   });
 });
