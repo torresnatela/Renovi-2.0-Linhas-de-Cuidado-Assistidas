@@ -38,12 +38,22 @@ export function JourneyPage() {
   const appointmentsQuery = useCareAppointments();
   const session = useSession();
   const mood = useMoodToday();
-  const [linhaAtiva, setLinhaAtiva] = useState<string | null>(null);
+  // Guarda o enrollment.id selecionado nos chips — NUNCA o care_line_code (ver
+  // filtro abaixo: duas matrículas podem compartilhar o mesmo code).
+  const [matriculaAtivaId, setMatriculaAtivaId] = useState<string | null>(null);
 
   if (journey.isLoading) return <Loading label="Carregando sua jornada…" />;
   if (journey.isError) return <ErrorNotice error={journey.error} retry={() => journey.refetch()} />;
 
-  const enrollments = journey.data?.enrollments ?? [];
+  // `GET /me/journey` devolve TODO o histórico de matrículas (inclusive
+  // encerrada/expirada/concluída), e uma renovação de linha gera uma NOVA
+  // matrícula com o MESMO care_line_code da anterior. A Jornada é "o presente":
+  // só mostra chips e conteúdo das matrículas ATIVAS — histórico não é papel
+  // desta tela. Sem este filtro, linhas encerradas apareciam como chips
+  // duplicados (mesmo nome) e o find por care_line_code podia escolher a versão
+  // errada.
+  const todasMatriculas = journey.data?.enrollments ?? [];
+  const enrollments = todasMatriculas.filter((e) => e.enrollment.status === 'ativa');
   if (enrollments.length === 0) {
     return (
       <Empty
@@ -53,12 +63,15 @@ export function JourneyPage() {
     );
   }
 
-  // A linha ativa é a selecionada nos chips; sem seleção, a primeira matrícula.
+  // A linha ativa é a selecionada nos chips (por enrollment.id, que é único);
+  // sem seleção, a primeira matrícula ativa.
   const active =
-    enrollments.find((e) => e.enrollment.care_line_code === linhaAtiva) ?? enrollments[0];
+    enrollments.find((e) => e.enrollment.id === matriculaAtivaId) ?? enrollments[0];
   const appointments = appointmentsQuery.data ?? [];
+  // `code` aqui é só a chave opaca que o LineChips usa para destacar/selecionar
+  // (não o care_line_code de domínio, que pode se repetir entre versões).
   const lines = enrollments.map((e) => ({
-    code: e.enrollment.care_line_code,
+    code: e.enrollment.id,
     name: e.care_line_name,
   }));
 
@@ -75,8 +88,8 @@ export function JourneyPage() {
         fullName={session.data?.full_name}
         resumo={resumo}
         lines={lines}
-        activeCode={active.enrollment.care_line_code}
-        onSelect={setLinhaAtiva}
+        activeCode={active.enrollment.id}
+        onSelect={setMatriculaAtivaId}
       />
 
       <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_388px]">
