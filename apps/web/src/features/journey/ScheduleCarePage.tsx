@@ -3,14 +3,20 @@ import { Link, useParams } from 'react-router-dom';
 
 import { ApiError, type AnnotatedSlot, type CareAppointment } from '../../shared/api';
 import { FUSO_PADRAO, dayKey, formatDateLong, formatTime } from '../../shared/datetime';
+import { Button } from '../../shared/ui/Button';
 import { Card } from '../../shared/ui/Card';
 import { EligibilityNotice } from '../../shared/ui/EligibilityNotice';
+import { FlowHeader } from '../../shared/ui/FlowHeader';
 import { Empty, ErrorNotice, Loading } from '../../shared/ui/feedback';
 import { IconBack, IconCheck } from '../../shared/ui/icons';
+import { useIsDesktop } from '../../shared/viewport';
+import { HelpNowMenu } from '../mood/HelpNowMenu';
 import { reasonText } from '../scheduling/reasons';
+import { CalendarGrid } from './schedule/CalendarGrid';
 import { ConfirmCard } from './schedule/ConfirmCard';
 import { DateStep, type DiaResumo } from './schedule/DateStep';
 import { ProfessionalStep, type ProfissionalResumo } from './schedule/ProfessionalStep';
+import { ResumoBar } from './schedule/ResumoBar';
 import { Stepper, type PassoEstado, type PassoInfo } from './schedule/Stepper';
 import { TimeStep } from './schedule/TimeStep';
 import { useAvailability, useJourney, useScheduleCare } from './useJourney';
@@ -40,6 +46,7 @@ export function ScheduleCarePage() {
   const { data, isLoading, error } = useAvailability(itemId);
   const journey = useJourney();
   const agendar = useScheduleCare();
+  const isDesktop = useIsDesktop();
 
   const [passo, setPasso] = useState<Passo>(1);
   const [profId, setProfId] = useState<string | null>(null);
@@ -51,6 +58,9 @@ export function ScheduleCarePage() {
   // O rótulo do item não vem na disponibilidade — a jornada é a fonte. Uso apenas
   // de leitura (a tela anterior já a aqueceu); se faltar, um termo neutro serve.
   const label = useMemo(() => rotuloDoItem(journey.data, itemId), [journey.data, itemId]);
+  // A recorrência (texto livre da API) alimenta SÓ a oferta de sucesso no mobile —
+  // exibida verbatim; nada de contagem inventada ("você ainda tem 1 consulta").
+  const recurrence = useMemo(() => recorrenciaDoItem(journey.data, itemId), [journey.data, itemId]);
 
   const profissionais = useMemo(() => derivarProfissionais(slots), [slots]);
   const dias = useMemo(() => derivarDias(slots, profId), [slots, profId]);
@@ -115,6 +125,110 @@ export function ScheduleCarePage() {
       estado: estado(3, passo),
     },
   ];
+
+  // ── Mobile (< lg): fluxo linear empilhado sob o FlowHeader (mock `Agendar`). ──
+  // Bifurcação SÓ de apresentação: reusa o MESMO estado, as MESMAS derivações e a
+  // MESMA idempotência do desktop — nenhuma regra de agendamento muda aqui.
+  if (!isDesktop) {
+    const sucesso = agendar.isSuccess && Boolean(agendar.data);
+    const tituloPasso = passo === 1 ? 'Com quem?' : passo === 2 ? 'Que dia?' : 'Que horário?';
+    const voltar =
+      sucesso || passo === 1
+        ? { backTo: '/jornada' }
+        : { onBack: () => irParaPasso(passo - 1) };
+
+    return (
+      <div className="flex flex-col gap-5">
+        <FlowHeader
+          eyebrow={`Agendar · ${label}`}
+          title={sucesso ? 'Tudo certo' : tituloPasso}
+          help={<HelpNowMenu />}
+          progress={
+            sucesso
+              ? undefined
+              : { pct: Math.round((passo / 3) * 100), caption: `Passo ${passo} de 3` }
+          }
+          {...voltar}
+        />
+
+        {isLoading && <Loading label="Carregando horários…" />}
+        {error && <ErrorNotice error={error} />}
+
+        {/* O sucesso é HASTEADO acima do gate de slots: reservar o ÚLTIMO horário
+            livre faz o refetch do `onSettled` voltar lista vazia — e a confirmação
+            não pode sumir dando lugar ao Empty enquanto o FlowHeader ainda diz
+            "Tudo certo". Sucesso → MobileSuccess (haja ou não slots); senão, lista
+            vazia → Empty; senão, os passos. */}
+        {sucesso && agendar.data ? (
+          <MobileSuccess
+            consulta={agendar.data}
+            profNome={profEscolhido?.full_name ?? 'seu profissional'}
+            recurrence={recurrence}
+            onAgendarProxima={() => profEscolhido && escolherProfissional(profEscolhido.id)}
+          />
+        ) : data && slots.length === 0 ? (
+          <Empty
+            title="Nenhum horário disponível"
+            hint="Não há horários agendáveis para este item nos próximos dias."
+          />
+        ) : (
+          data &&
+          slots.length > 0 && (
+            <>
+              {passo === 1 && (
+                <ProfessionalStep
+                  profissionais={profissionais}
+                  onEscolher={escolherProfissional}
+                  colunaUnica
+                />
+              )}
+
+              {passo === 2 && profEscolhido && (
+                <div className="flex flex-col gap-3.5">
+                  <ResumoBar nome={profEscolhido.full_name} onTrocar={() => irParaPasso(1)} />
+                  <CalendarGrid dias={dias} selecionado={diaKey} onEscolher={escolherDia} />
+                </div>
+              )}
+
+              {passo === 3 && profEscolhido && (
+                <div className="flex flex-col gap-3.5">
+                  <ResumoBar
+                    nome={profEscolhido.full_name}
+                    dia={captionDia(dias, diaKey)}
+                    onTrocar={() => irParaPasso(2)}
+                  />
+                  <TimeStep
+                    slots={slotsDoDia}
+                    intencaoSlotId={intencao?.slotId ?? null}
+                    emVoo={agendar.isPending}
+                    onEscolher={escolherHorario}
+                  />
+                  <div className="flex flex-col gap-3">
+                    {slotEscolhido && (
+                      <ConfirmCard
+                        label={label}
+                        slot={slotEscolhido}
+                        profissional={profEscolhido}
+                        loading={agendar.isPending}
+                        onConfirmar={confirmar}
+                      />
+                    )}
+                    {agendar.isPending && <AvisoEspera />}
+                    {agendar.isError && (
+                      <FeedbackErro
+                        error={agendar.error}
+                        timeZone={intencao?.timeZone ?? FUSO_PADRAO}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -268,6 +382,69 @@ function SucessoCard({ consulta }: { consulta: CareAppointment }) {
   );
 }
 
+/**
+ * O sucesso MOBILE (mock `Agendar`, linhas 132–156): confirmação centrada + a
+ * oferta de já marcar a próxima. A cópia da oferta vem SÓ de dados reais — a
+ * recorrência da API, verbatim; nada de "você ainda tem N consultas" calculado.
+ * "Agendar a próxima" reusa `escolherProfissional` (mesmo profissional → passo 2,
+ * dia/intenção limpos, mutação resetada) — a disponibilidade já se refez no
+ * `onSettled`. Sem os dots do mock (decisão herdada).
+ */
+function MobileSuccess({
+  consulta,
+  profNome,
+  recurrence,
+  onAgendarProxima,
+}: {
+  consulta: CareAppointment;
+  profNome: string;
+  recurrence: string | null;
+  onAgendarProxima: () => void;
+}) {
+  const dia = formatDateLong(consulta.scheduled_at, consulta.time_zone);
+  const hora = formatTime(consulta.scheduled_at, consulta.time_zone);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col items-center gap-3 px-3 pb-2 pt-6 text-center">
+        {/* Tinte suave por rgba literal do DS (NÃO `/alpha` sobre token) — mesmo
+            padrão já mergeado em consultations/HistorySection.tsx e documentado em
+            DESIGN-SYSTEM.md §7 (Badge: "fundos rgba literais do DS"). */}
+        <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(41,176,29,0.12)] text-success">
+          <IconCheck size={26} />
+        </span>
+        {/* h2, não h1: o FlowHeader ("Tudo certo") já é o h1 da tela de sucesso —
+            esta é a seção abaixo dele (mesma hierarquia do SucessoCard no desktop,
+            que fica sob o h1 "Agendar consulta"). Um h1 por branch de viewport. */}
+        <h2 className="text-[22px] font-bold text-primary-300">Consulta marcada</h2>
+        <p className="text-sm leading-relaxed text-ink">
+          {consulta.label} com {profNome}
+          <br />
+          <strong className="text-primary-300 first-letter:uppercase">
+            {dia} · {hora}
+          </strong>{' '}
+          · por vídeo
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-lg border border-primary-100 bg-white p-4">
+        <span className="text-[15px] font-bold text-primary-300">
+          Quer deixar a próxima marcada?
+        </span>
+        {recurrence && <p className="text-sm text-ink">{recurrence}</p>}
+        <Button color="primary" size="md" fullWidth onClick={onAgendarProxima}>
+          Agendar a próxima
+        </Button>
+        <Link
+          to="/jornada"
+          className="rounded-sm p-1 text-center text-sm font-bold text-primary-300 transition hover:text-accent-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300"
+        >
+          Agora não — voltar à jornada
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 // --- derivações client-side (exibição) -------------------------------------
 
 function estado(n: number, atual: number): PassoEstado {
@@ -291,6 +468,19 @@ function rotuloDoItem(
     }
   }
   return 'Consulta';
+}
+
+/** A recorrência (texto livre) do item, se a jornada a trouxer — exibida verbatim. */
+function recorrenciaDoItem(
+  journey: { enrollments: { items: { item: { id: string; recurrence?: string | null } }[] }[] } | undefined,
+  itemId: string | undefined,
+): string | null {
+  for (const e of journey?.enrollments ?? []) {
+    for (const it of e.items) {
+      if (it.item.id === itemId) return it.item.recurrence ?? null;
+    }
+  }
+  return null;
 }
 
 /** Profissionais únicos dos slots, cada um com seu primeiro horário livre. */

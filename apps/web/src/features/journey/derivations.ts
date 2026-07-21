@@ -1,4 +1,11 @@
-import type { AssessmentCode, CareLineItemInfo, CareAppointment, MoodToday } from '../../shared/api';
+import type {
+  AssessmentCode,
+  CareLineItemInfo,
+  CareAppointment,
+  JourneyEnrollment,
+  JourneyItem,
+  MoodToday,
+} from '../../shared/api';
 
 /**
  * Derivações de EXIBIÇÃO da Jornada — puras e sem regra de negócio. O servidor
@@ -70,6 +77,15 @@ const REF_CHECKIN_HUMOR_DIARIO = 'checkin-humor-diario';
 const REF_WHO5_SEMANAL = 'who5-semanal';
 const REF_PHQ4_GATILHADO = 'phq4-gatilhado';
 
+/**
+ * `care_line_code` da linha de cuidado ABERTA de saúde mental (Degrau 1, ADR-040) —
+ * a MESMA constante do backend, espelhada aqui no mesmo padrão dos refs acima:
+ *   - `saude-mental-aberta` → apps/api/internal/models/universal_enrollment.go, `UniversalMentalHealthCode`
+ * É a única linha onde o front SINTETIZA o nó de check-in de humor na timeline (a
+ * linha aberta não materializa o check-in como item de template).
+ */
+const CARE_LINE_CODE_SAUDE_MENTAL_ABERTA = 'saude-mental-aberta';
+
 const OFERTA_POR_REF: Record<string, AssessmentCode> = {
   [REF_WHO5_SEMANAL]: 'WHO5',
   [REF_PHQ4_GATILHADO]: 'PHQ4',
@@ -109,4 +125,53 @@ export function estadoAtividade(ref: string, mood: MoodToday | undefined): Estad
       : { tipo: 'ofertado_quando_fizer_sentido' };
   }
   return { tipo: 'sem_acao' };
+}
+
+/**
+ * A lista de itens da linha ATIVA com um nó SINTÉTICO de check-in de humor
+ * PREPOSTO — decisão de produto aprovada. A linha aberta de saúde mental não
+ * traz o check-in como item de template, mas ele deve aparecer na jornada. O
+ * pseudo-item é adicionado só quando TODAS valem:
+ *  (a) há matrícula no humor (`mood` carregado e `reason !== 'not_enrolled'` —
+ *      `consent_required` ainda conta como matriculado);
+ *  (b) a linha ativa é a universal de saúde mental (`care_line_code` espelhado do
+ *      backend em `CARE_LINE_CODE_SAUDE_MENTAL_ABERTA`);
+ *  (c) a linha AINDA NÃO traz um item com o ref do check-in (dedupe — algumas
+ *      linhas já o materializam).
+ *
+ * O nó flui pelo caminho EXISTENTE de ATIVIDADE (`ehAtividade`/`estadoAtividade`/
+ * `AtividadeCard`): zero estado novo, mesma DOM nos dois viewports. Quando não
+ * sintetiza, devolve o MESMO array (referência intacta).
+ */
+export function itensComCheckinSintetico(
+  enrollment: JourneyEnrollment,
+  mood: MoodToday | undefined,
+): JourneyItem[] {
+  const itens = enrollment.items;
+  const matriculadoNoHumor = mood != null && mood.reason !== 'not_enrolled';
+  const ehLinhaMental =
+    enrollment.enrollment.care_line_code === CARE_LINE_CODE_SAUDE_MENTAL_ABERTA;
+  const jaTemCheckin = itens.some((it) => it.item.ref === REF_CHECKIN_HUMOR_DIARIO);
+  if (!matriculadoNoHumor || !ehLinhaMental || jaTemCheckin) return itens;
+
+  // sort_order abaixo do menor item real → o nó abre a timeline (que reordena por
+  // sort_order). Sem itens reais, um valor neutro basta.
+  const menorSort = itens.length ? Math.min(...itens.map((it) => it.item.sort_order)) : 1;
+  const sintetico: JourneyItem = {
+    item: {
+      id: `sintetico:${REF_CHECKIN_HUMOR_DIARIO}`,
+      ref: REF_CHECKIN_HUMOR_DIARIO,
+      kind: 'ATIVIDADE',
+      // Sem especialidade nem slots — não é agendável (Anexo C).
+      specialty_code: '',
+      label: 'Check-in de humor',
+      // Caption neutro e honesto, igual ao mock ("Diário · opcional").
+      recurrence: 'Diário · opcional',
+      sort_order: menorSort - 1,
+    },
+    // ATIVIDADE não usa elegibilidade para agir (o estado vem do check-in do dia);
+    // `allowed` fica neutro só para satisfazer o shape de JourneyItem.
+    eligibility: { allowed: true, blocks: [] },
+  };
+  return [sintetico, ...itens];
 }

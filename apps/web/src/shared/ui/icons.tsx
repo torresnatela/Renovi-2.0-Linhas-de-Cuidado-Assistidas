@@ -127,3 +127,99 @@ export function IconBack({ size }: IconProps) {
     </Icon>
   );
 }
+
+/**
+ * Ícones *filled* (fill em `currentColor`, sem stroke no contorno externo):
+ * exceção documentada do DS, usada só no estado ATIVO da tab bar mobile
+ * (Etapa 1) — o par outline/filled sinaliza a aba selecionada sem depender
+ * só de cor.
+ *
+ * Paths transcritos verbatim do handoff de design (`design_files/assets/
+ * icons/{home,appointment,avatar}-active-icon.svg`) — viewBox nativo do
+ * handoff (21×21 para os três), sem reescalar para o grid 24 dos ícones
+ * outline. Mapeamento de cor: o preenchimento navy do handoff vira
+ * `currentColor` (herdado do svg); o detalhe branco desenhado por cima
+ * (linhas/pontos) vira o token `var(--color-white)` — nunca o hex `#fff` do
+ * arquivo original.
+ */
+function IconFilled({ size = 20, children }: { size?: number; children: ReactNode }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 21 21" fill="currentColor" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+
+export function IconHomeFilled({ size }: IconProps) {
+  return (
+    <IconFilled size={size}>
+      <path
+        d="M1.5 10.5L10.5 1.5L19.5 10.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3.5 8.5V15.5C3.5 16.6046 4.39543 17.5 5.5 17.5H15.5C16.6046 17.5 17.5 16.6046 17.5 15.5V8.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFilled>
+  );
+}
+
+export function IconAppointmentsFilled({ size }: IconProps) {
+  return (
+    <IconFilled size={size}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M4.5 2.5H16.5C17.6046 2.5 18.5 3.39543 18.5 4.5V16.5C18.5 17.6046 17.6046 18.5 16.5 18.5H4.5C3.39543 18.5 2.5 17.6046 2.5 16.5V4.5C2.5 3.39543 3.39543 2.5 4.5 2.5Z"
+        stroke="var(--color-white)"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M2.5 6.5H18.5" stroke="var(--color-white)" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M10.5 11.5C11.0523 11.5 11.5 11.0523 11.5 10.5C11.5 9.94772 11.0523 9.5 10.5 9.5C9.94772 9.5 9.5 9.94772 9.5 10.5C9.5 11.0523 9.94772 11.5 10.5 11.5Z"
+        fill="var(--color-white)"
+      />
+      <path
+        d="M6.5 11.5C7.05228 11.5 7.5 11.0523 7.5 10.5C7.5 9.94772 7.05228 9.5 6.5 9.5C5.94772 9.5 5.5 9.94772 5.5 10.5C5.5 11.0523 5.94772 11.5 6.5 11.5Z"
+        fill="var(--color-white)"
+      />
+      <path
+        d="M6.5 15.5C7.05228 15.5 7.5 15.0523 7.5 14.5C7.5 13.9477 7.05228 13.5 6.5 13.5C5.94772 13.5 5.5 13.9477 5.5 14.5C5.5 15.0523 5.94772 15.5 6.5 15.5Z"
+        fill="var(--color-white)"
+      />
+    </IconFilled>
+  );
+}
+
+export function IconProfileFilled({ size }: IconProps) {
+  return (
+    <IconFilled size={size}>
+      <path
+        d="M10.5 18.5C14.9183 18.5 18.5 14.9183 18.5 10.5C18.5 6.08172 14.9183 2.5 10.5 2.5C6.08172 2.5 2.5 6.08172 2.5 10.5C2.5 14.9183 6.08172 18.5 10.5 18.5Z"
+        stroke="var(--color-white)"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M16.5 15.5002C15.8385 13.2267 13.3004 12.4751 10.5 12.4751C7.77251 12.4751 5.22927 13.3439 4.5 15.5002"
+        stroke="var(--color-white)"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M10.5 4.5C12.1569 4.5 13.5 5.84315 13.5 7.5V9.5C13.5 11.1569 12.1569 12.5 10.5 12.5C8.84315 12.5 7.5 11.1569 7.5 9.5V7.5C7.5 5.84315 8.84315 4.5 10.5 4.5Z"
+        stroke="var(--color-white)"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFilled>
+  );
+}

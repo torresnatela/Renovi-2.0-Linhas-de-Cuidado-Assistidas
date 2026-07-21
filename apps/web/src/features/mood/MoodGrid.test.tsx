@@ -60,6 +60,15 @@ describe('MoodGrid', () => {
     );
   });
 
+  // Etapa 2 — mobile: a grade encolhe para 190px (mock) e volta a 210px no
+  // desktop via `lg:` (CSS-only; sem depender do hook de viewport).
+  it('mobile: 190px de altura, desktop 210px (lg:)', () => {
+    render(<Harness />);
+    const grade = screen.getByRole('button', { name: GRID_LABEL });
+    expect(grade.className).toContain('h-[190px]');
+    expect(grade.className).toContain('lg:h-[210px]');
+  });
+
   it('encerra o arraste no onPointerCancel (não segue movendo o ponto)', () => {
     const onValue = vi.fn();
     render(<Harness onValue={onValue} />);

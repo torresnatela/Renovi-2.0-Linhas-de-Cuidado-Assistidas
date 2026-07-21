@@ -2,9 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MoodCheckin } from '../../shared/api';
+import { mockViewport } from '../../shared/viewport.testkit';
 import { MoodCheckinCard } from './MoodCheckinCard';
 
 vi.mock('../../shared/api', async () => {
@@ -208,5 +209,59 @@ describe('MoodCheckinCard', () => {
 
     const link = await screen.findByRole('link', { name: /responder agora/i });
     expect(link).toHaveAttribute('href', '/avaliacoes/WHO5');
+  });
+
+  /**
+   * Etapa 2 — mobile: o card "Atividade do dia" do mock é o MESMO no mobile e no
+   * desktop (uma máquina de estados só). Estes casos travam a forma sob
+   * `mockViewport('mobile')` — a mesma que o desktop já exibe.
+   */
+  describe('mobile (Etapa 2)', () => {
+    let vp: ReturnType<typeof mockViewport> | null = null;
+    afterEach(() => {
+      vp?.restore();
+      vp = null;
+    });
+
+    it('pendente: badge "Atividade do dia", pergunta, grade e "Registrar"', async () => {
+      vp = mockViewport('mobile');
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: true,
+        checkin: null,
+      });
+
+      renderCard();
+
+      expect(await screen.findByText('Atividade do dia')).toBeInTheDocument();
+      expect(screen.getByText('Como você está agora?')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Grade de humor: valência por energia' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Registrar' })).toBeInTheDocument();
+    });
+
+    it('salvo: card colapsado com check, rótulo e "Refazer"', async () => {
+      vp = mockViewport('mobile');
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: true,
+        checkin: {
+          valencia: 80,
+          energia: 20,
+          quadrante: 'agradavel_calmo',
+          emotion_label: 'Tranquilo(a)',
+          respondido_em: '2026-07-20T09:00:00-03:00',
+        },
+      });
+
+      renderCard();
+
+      expect(
+        await screen.findByText(/Check-in de hoje feito: Tranquilo\(a\)/),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Amanhã a gente se fala de novo.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /refazer/i })).toBeInTheDocument();
+    });
   });
 });

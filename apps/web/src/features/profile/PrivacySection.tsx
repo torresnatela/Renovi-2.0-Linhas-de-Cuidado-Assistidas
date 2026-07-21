@@ -19,7 +19,9 @@ export function PrivacySection() {
   const consent = useConsent();
 
   return (
-    <section id="privacidade" className="scroll-mt-24">
+    // Ver PersonalDataSection: o scroll-mt maior é só para compensar o header
+    // sticky do desktop; no mobile não há sticky, então reduz.
+    <section id="privacidade" className="scroll-mt-6 lg:scroll-mt-24">
       <Card padding="lg">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-bold text-primary-300">Privacidade e segurança</h2>

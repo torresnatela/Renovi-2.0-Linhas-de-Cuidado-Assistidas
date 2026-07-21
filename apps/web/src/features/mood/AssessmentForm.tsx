@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { ApiError, type AssessmentCode } from '../../shared/api';
+import { useIsDesktop } from '../../shared/viewport';
 import { Button } from '../../shared/ui/Button';
 import { useAssessmentAvailability, useSubmitAssessment } from './useMood';
 
@@ -72,6 +73,7 @@ export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onD
   const inst = INSTRUMENTOS[codigo];
   const availability = useAssessmentAvailability(codigo);
   const submit = useSubmitAssessment();
+  const isDesktop = useIsDesktop();
   const [answers, setAnswers] = useState<(number | null)[]>(() => inst.itens.map(() => null));
 
   const bloqueio =
@@ -139,7 +141,11 @@ export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onD
                 <p className="text-sm text-ink">
                   {i + 1}. {texto}
                 </p>
-                <div className="flex flex-wrap gap-2">
+                {/* Desktop: pills lado a lado (como sempre foi). Mobile: alvo de
+                    toque ≥44px (regra do DS) e largura cheia, empilhados — pill
+                    pequena é fácil de errar o dedo, e "44px" não é estética, é
+                    acessibilidade motora. */}
+                <div className={isDesktop ? 'flex flex-wrap gap-2' : 'flex flex-col gap-2'}>
                   {inst.escala.map((rotulo, v) => {
                     const on = answers[i] === v;
                     return (
@@ -149,11 +155,14 @@ export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onD
                         aria-pressed={on}
                         onClick={() => setAnswers((prev) => prev.map((a, k) => (k === i ? v : a)))}
                         className={cx(
-                          'rounded-pill border px-3 py-1 text-xs font-semibold transition',
+                          'rounded-pill border font-semibold transition',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300',
                           on
                             ? 'border-primary-300 bg-primary-300 text-white'
                             : 'border-primary-200 text-muted hover:border-primary-300 hover:text-primary-300',
+                          isDesktop
+                            ? 'px-3 py-1 text-xs'
+                            : 'min-h-[44px] w-full px-4 py-3 text-left text-sm',
                         )}
                       >
                         {v} · {rotulo}

@@ -42,20 +42,25 @@ export function AddressStep({ form, onChange, onContinue, onCepComplete, cepLoad
         value={form.rua}
         onChange={(e) => onChange({ rua: e.target.value })}
       />
+      {/* min-w-0: sem isso, o <input> nativo impõe seu min-width intrínseco
+          (~size 20) ao item flex, e o par estoura a largura em telas estreitas
+          (o mobile Chrome chega a alargar o viewport todo para caber). */}
       <div className="flex gap-3">
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <Input
             label="Número"
             placeholder="123"
             inputMode="numeric"
+            className="w-full min-w-0"
             value={form.numero}
             onChange={(e) => onChange({ numero: e.target.value })}
           />
         </div>
-        <div className="flex-[1.6]">
+        <div className="min-w-0 flex-[1.6]">
           <Input
             label="Complemento"
             placeholder="Opcional"
+            className="w-full min-w-0"
             value={form.compl}
             onChange={(e) => onChange({ compl: e.target.value })}
           />
@@ -68,18 +73,20 @@ export function AddressStep({ form, onChange, onContinue, onCepComplete, cepLoad
         onChange={(e) => onChange({ bairro: e.target.value })}
       />
       <div className="flex gap-3">
-        <div className="flex-[2]">
+        <div className="min-w-0 flex-[2]">
           <Input
             label="Cidade"
             placeholder="Sua cidade"
+            className="w-full min-w-0"
             value={form.cidade}
             onChange={(e) => onChange({ cidade: e.target.value })}
           />
         </div>
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <Input
             label="UF"
             placeholder="SP"
+            className="w-full min-w-0"
             value={form.uf}
             onChange={(e) => onChange({ uf: maskUf(e.target.value) })}
           />

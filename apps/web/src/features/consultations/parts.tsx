@@ -14,10 +14,16 @@ export function tituloConsulta(label: string, nomeProfissional?: string): string
   return nomeProfissional ? `${label} · ${nomeProfissional}` : label;
 }
 
-/** Rótulo de seção do design: 12px, bold, caixa-alta, tracking largo, muted. */
+/**
+ * Rótulo de seção do design: bold, caixa-alta, tracking largo, muted. 11px no
+ * mobile (mock `Consultas.dc.html`, todo `SectionLabel` do arquivo); `lg:text-xs`
+ * preserva o 12px do desktop atual — só ESTILO muda por breakpoint (ADR-041).
+ */
 export function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{children}</span>
+    <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted lg:text-xs">
+      {children}
+    </span>
   );
 }
 

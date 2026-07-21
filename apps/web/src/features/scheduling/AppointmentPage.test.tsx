@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, type Appointment, type MoodToday } from '../../shared/api';
+import { mockViewport } from '../../shared/viewport.testkit';
 import { moodKeys } from '../mood/useMood';
 import { AppointmentPage } from './AppointmentPage';
 
@@ -309,5 +310,81 @@ describe('AppointmentPage', () => {
     // "Fechar" ainda dispara onDone → concluirGate → join, mesmo com o instrumento em erro.
     await user.click(screen.getByRole('button', { name: /Fechar/i }));
     await waitFor(() => expect(nav.openExternal).toHaveBeenCalledWith(LINK));
+  });
+
+  // --- Mobile: fluxo empilhado (Etapa 5) ---
+
+  describe('no mobile (fluxo empilhado)', () => {
+    let viewport: ReturnType<typeof mockViewport>;
+
+    beforeEach(() => {
+      viewport = mockViewport('mobile');
+    });
+
+    afterEach(() => {
+      viewport.restore();
+    });
+
+    /**
+     * O breadcrumb "Minhas consultas" do desktop dá lugar ao FlowHeader — mesmo
+     * destino (/consultas), mesma afordância de ajuda de sempre.
+     */
+    it('troca o breadcrumb pelo FlowHeader, com voltar para /consultas e Pedir ajuda', async () => {
+      vi.mocked(api.getAppointment).mockResolvedValue(consulta());
+      renderPage();
+
+      expect(await screen.findByRole('link', { name: 'Voltar' })).toHaveAttribute(
+        'href',
+        '/consultas',
+      );
+      // "Psicologia" aparece tanto no FlowHeader (título = specialty.name, uma
+      // vez que a consulta carregou) quanto no card de detalhe — duplicidade
+      // intencional, não regressão. Espera a consulta carregar antes de checar
+      // o eyebrow sozinho, senão o título ainda está no fallback "Consulta".
+      expect((await screen.findAllByText('Psicologia')).length).toBeGreaterThan(0);
+      expect(screen.getByText('Consulta')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Pedir ajuda/i })).toBeInTheDocument();
+      expect(screen.queryByText('Minhas consultas')).not.toBeInTheDocument();
+    });
+
+    /**
+     * O gate de pré-consulta é intocável (contrato {codigo, onDone}): com oferta
+     * ativa, "Entrar" ainda mostra o instrumento antes do join — igual ao
+     * desktop, só que dentro do fluxo empilhado do mobile.
+     */
+    it('com oferta, "Entrar" mostra o instrumento antes e só entra após concluir', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.getAppointment).mockResolvedValue(consulta());
+      vi.mocked(api.getMoodToday).mockResolvedValue(today({ offer: 'WHO5' }));
+      vi.mocked(api.getAssessmentAvailability).mockResolvedValue({
+        codigo: 'WHO5',
+        eligibility: { allowed: true, blocks: [] },
+        item_count: 5,
+        value_min: 0,
+        value_max: 5,
+      });
+      vi.mocked(api.submitAssessment).mockResolvedValue({
+        codigo: 'WHO5',
+        index_score: 80,
+        faixa: 'normal',
+        flag_encaminhar: false,
+        respondido_em: '2026-07-20T08:40:00-03:00',
+      });
+      vi.mocked(api.joinAppointment).mockResolvedValue({ url: LINK });
+      renderPage({ today: today({ offer: 'WHO5' }) });
+
+      await user.click(await screen.findByRole('button', { name: /Entrar na consulta/i }));
+
+      expect(await screen.findByText(/Antes da consulta/i)).toBeInTheDocument();
+      expect(api.joinAppointment).not.toHaveBeenCalled();
+
+      for (const botao of screen.getAllByRole('button', { name: /Em nenhum momento/i })) {
+        await user.click(botao);
+      }
+      await user.click(screen.getByRole('button', { name: /Enviar respostas/i }));
+
+      await user.click(await screen.findByRole('button', { name: /Concluir/i }));
+      await waitFor(() => expect(nav.openExternal).toHaveBeenCalledWith(LINK));
+    });
   });
 });

@@ -19,7 +19,9 @@ export function PersonalDataSection() {
   ];
 
   return (
-    <section id="dados" className="scroll-mt-24">
+    // O scroll-mt compensa o header STICKY do desktop (70px); no mobile não há
+    // sticky (ADR-041 · AppShell), então uma folga menor já basta.
+    <section id="dados" className="scroll-mt-6 lg:scroll-mt-24">
       <Card padding="lg">
         <h2 className="text-lg font-bold text-primary-300">Dados pessoais</h2>
 

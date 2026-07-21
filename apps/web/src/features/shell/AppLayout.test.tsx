@@ -2,9 +2,10 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppLayout } from './AppLayout';
+import { mockViewport } from '../../shared/viewport.testkit';
 
 vi.mock('../../shared/api', async () => {
   const actual = await vi.importActual<typeof import('../../shared/api')>('../../shared/api');
@@ -78,5 +79,60 @@ describe('AppLayout', () => {
     // O avatar só ganha nome quando a sessão resolve (fallback vazio antes disso).
     const avatar = await screen.findByRole('img', { name: 'Ana' });
     expect(avatar.closest('a')).toHaveAttribute('href', '/perfil');
+  });
+
+  // No mobile (< lg) a AppLayout escolhe o chrome pela rota: telas raiz têm a
+  // TabBar; fluxos empilhados (Agendar/detalhe/avaliação) não (DS §4).
+  describe('mobile: tab bar só nas telas raiz', () => {
+    let viewport: ReturnType<typeof mockViewport>;
+
+    beforeEach(() => {
+      viewport = mockViewport('mobile');
+    });
+    afterEach(() => {
+      viewport.restore();
+    });
+
+    function renderMobileAt(path: string) {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route element={<AppLayout />}>
+                <Route path="/jornada" element={<p>tela jornada</p>} />
+                <Route path="/jornada/agendar/:itemId" element={<p>tela agendar</p>} />
+                <Route path="/consultas" element={<p>tela consultas</p>} />
+                <Route path="/consultas/:appointmentId" element={<p>tela detalhe</p>} />
+                <Route path="/avaliacoes/:codigo" element={<p>tela avaliacao</p>} />
+                <Route path="/perfil" element={<p>tela perfil</p>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    }
+
+    it('mostra a TabBar em /jornada (tela raiz)', async () => {
+      renderMobileAt('/jornada');
+      expect(await screen.findByText('tela jornada')).toBeInTheDocument();
+      expect(screen.getByRole('navigation', { name: 'Principal' })).toBeInTheDocument();
+    });
+
+    it('mostra a TabBar em /consultas (raiz, sem id)', async () => {
+      renderMobileAt('/consultas');
+      expect(await screen.findByText('tela consultas')).toBeInTheDocument();
+      expect(screen.getByRole('navigation', { name: 'Principal' })).toBeInTheDocument();
+    });
+
+    it.each([
+      ['/jornada/agendar/abc', 'tela agendar'],
+      ['/consultas/abc', 'tela detalhe'],
+      ['/avaliacoes/WHO5', 'tela avaliacao'],
+    ])('esconde a TabBar no fluxo %s', async (path, texto) => {
+      renderMobileAt(path);
+      expect(await screen.findByText(texto)).toBeInTheDocument();
+      expect(screen.queryByRole('navigation', { name: 'Principal' })).not.toBeInTheDocument();
+    });
   });
 });

@@ -1,15 +1,21 @@
 # Design System — Front (apps/web)
 
-> Documento vivo do design system do app do paciente (Renovi 2.0), versão **web desktop**.
+> Documento vivo do design system do app do paciente (Renovi 2.0) — **desktop e
+> mobile responsivo, mesma base de código (same-codebase)**.
 > Fonte visual: handoff do designer (tokens + telas de referência). Fonte de verdade
 > técnica dos valores: `apps/web/src/styles/tokens.css` (CSS custom properties).
 > **Idioma:** código/classes em inglês; este doc em PT-BR.
 
 O redesign desktop foi concluído nas **Etapas 0–8** (2026-07-20): a fundação
-(tokens, fontes, theme, diretrizes), a biblioteca de 17 componentes em
+(tokens, fontes, theme, diretrizes), a biblioteca de componentes em
 `src/shared/ui/` (§7, inventário REAL) e as telas do produto. Decisões em
 **ADR-038** (design system) e **ADR-039** (produto). Este doc é a referência
 antes de estilizar qualquer tela nova.
+
+O mobile responsivo chegou por cima do MESMO design system (Etapas 0–8,
+2026-07-21, branch `feat/mobile-ui`) — nenhum token novo, mesma paleta/tipografia/
+raios. Só o **layout** muda por viewport (container, chrome, headers — §9).
+Decisões em **ADR-041** (hook de viewport) e **ADR-042** (produto mobile).
 
 ---
 
@@ -175,8 +181,8 @@ Logos disponíveis em `src/assets/logos/`: `logo-blue.svg` (marca completa) e
 
 ## 7. Inventário de componentes (`src/shared/ui/`) — REAL
 
-Construídos nas Etapas 1a/1b e usados pelas telas. Cada um tem teste colocalizado
-(`*.test.tsx`).
+**19 componentes.** Os 17 originais das Etapas 1a/1b (desktop) + `FlowHeader` e
+`TabBar` (chrome mobile, §9). Cada um tem teste colocalizado (`*.test.tsx`).
 
 ### Primitivos
 
@@ -203,7 +209,9 @@ Construídos nas Etapas 1a/1b e usados pelas telas. Cada um tem teste colocaliza
 | `HelpPill` | Pill "Pedir ajuda" do header (branca, borda `primary-200`, texto navy bold). O popover e a lógica são do `HelpNowMenu` (feature). |
 | `LineChips` | Chips de alternância de linha de cuidado (ativa: navy sólido; inativa: branca com borda `primary-200`). |
 | `DateBadge` | Selo de data curto (mês + dia) para consultas. `timeZone` **obrigatório** (lê o dia no fuso da agenda). **Zero-pad:** o dia usa `day: '2-digit'` (single-digit vira `05`, alinhando o selo); o mês abrevia com `month: 'short'` e tira o ponto final do pt-BR (`jul.` → `jul`). |
-| `AppShell` | Chrome desktop: **skip-to-content** ("Pular para o conteúdo", visually-hidden até o foco, alvo `<main id="conteudo">`) + header sticky 70px + container `max-w-shell`. Presentacional puro (o wiring é do `AppLayout`). |
+| `AppShell` | Chrome do app (desktop E mobile — ADR-041): **skip-to-content** ("Pular para o conteúdo", visually-hidden até o foco, alvo `<main id="conteudo">`) + no desktop header sticky 70px/`max-w-shell`, no mobile container `max-w-[430px]` + `mobileVariant` (`tabs`\|`flow`, §9.2). Presentacional puro (o wiring é do `AppLayout`). |
+| `TabBar` | Tab bar fixa das telas raiz no mobile (§9.3): 3 abas, ícone outline→filled no ativo, `z-30`, `safe-area-inset-bottom`. |
+| `FlowHeader` | Header dos fluxos empilhados no mobile (§9.4): voltar 36px + logo-icon + eyebrow + título + slot de ajuda + progresso opcional (`{ pct, caption }`). |
 
 ### Superfícies de DS que vivem na feature (não em `shared/ui/`)
 
@@ -224,3 +232,103 @@ Ficam em `features/` por acoplamento a hooks/domínio, mas seguem o DS:
 - Convenções do front: `apps/web/CLAUDE.md`
 - Handoff do designer (fora do repo): `design_handoff_webapp_desktop/` — `README.md`
   (tokens) e `design_files/Renovi 2.0 - Design System do App do Paciente.md` (princípios).
+
+---
+
+## 9. Layout mobile
+
+O breakpoint estrutural é `lg` (**1024px**, `DESKTOP_QUERY` em `shared/viewport.ts`):
+abaixo dele o app troca de CHROME (tab bar em vez de header+nav), não só de
+espaçamento. Ver ADR-041.
+
+### 9.1 Regra: hook vs. classes `lg:`
+
+- **Estrutura muda → hook.** Quando o mobile precisa de um elemento a MAIS/A MENOS,
+  ou de um COMPONENTE diferente (tab bar em vez de nav, `FlowHeader` em vez de
+  header sticky), a decisão vem de `useIsDesktop()` (`shared/viewport.ts`) — nunca
+  de duas árvores JSX condicionadas só por classe.
+- **Só estilo muda → classes `lg:`.** Espaçamento, tamanho de fonte, ordem visual
+  dentro do MESMO elemento seguem os utilitários responsivos do Tailwind.
+- **Proibido dual-render do mesmo accessible name.** Renderizar o MESMO elemento
+  (ex.: um botão "Agendar") duas vezes — uma escondida em mobile, outra em
+  desktop, só com `hidden lg:block` — quebra `getByRole` nos testes: o jsdom não
+  computa CSS, então as duas cópias "aparecem" simultaneamente e colidem. Um
+  componente com estado (inputs, toggles) duplicaria a fonte da verdade. É por
+  isso que o chrome é decidido no `AppShell`/`AppLayout`, uma única árvore.
+- `useIsDesktop()` usa `useSyncExternalStore` sobre `window.matchMedia`; o jsdom
+  do projeto **não implementa** `matchMedia` — o default quando ele não existe é
+  `true` (DESKTOP), o que preserva os ~200 testes escritos antes do mobile sem
+  editar nenhum. Telas que chamam o hook diretamente simulam o viewport via
+  `shared/viewport.testkit.ts` (`mockViewport('mobile' | 'desktop')` →
+  `{ set, restore }`).
+
+### 9.2 Chrome: `tabs` × `flow`
+
+`AppShell` recebe `mobileVariant: 'tabs' | 'flow'` (ignorado no desktop). Quem
+decide é o `AppLayout`, por `matchPath` contra as rotas de fluxo:
+
+```
+'/jornada/agendar/:itemId'
+'/consultas/:appointmentId'
+'/avaliacoes/:codigo'
+```
+
+- **`tabs`** (telas raiz — Jornada/Consultas/Perfil): `main` em
+  `max-w-[430px] px-5` (container 430px, gutter 20px) com `pb-[110px]` de
+  clearance para a `TabBar`; faixa de logo **não-sticky** no topo (rola com o
+  conteúdo, ao contrário do header desktop); `TabBar` fixa no rodapé.
+- **`flow`** (fluxos empilhados — Agendar, detalhe da consulta, avaliação): sem
+  faixa de logo, sem `TabBar` (`pb-10` de respiro); a própria página renderiza um
+  `FlowHeader`.
+
+### 9.3 `TabBar`
+
+Fixa (`fixed bottom-0`), largura `max-w-[430px]` centralizada, `z-30` (mesma
+camada do header sticky do desktop — nunca coexistem). Três abas (Jornada,
+Consultas, Perfil); o item ativo troca o ícone outline pelo par **filled** (não
+só cor) e ganha `font-bold`; o inativo fica com `opacity-55`. Padding inferior
+`pb-[calc(18px+env(safe-area-inset-bottom))]` — respeita a home indicator do
+iOS sem inflar demais o espaço em telas sem notch.
+
+### 9.4 `FlowHeader`
+
+Header dos fluxos empilhados: botão voltar circular de **36px**
+(`backTo` via `Link` OU `onBack` via `button` — exatamente um) + `logo-icon` +
+`eyebrow` (rótulo UPPERCASE acima do título) + `title` (20px bold navy) + slot
+`help` opcional à direita + barra de progresso opcional
+(`progress: { pct, caption }`, ex.: "Passo 2 de 3"). Presentacional puro — a
+página decide o conteúdo.
+
+### 9.5 Exceção: ícones filled do tab bar
+
+`IconHomeFilled` / `IconAppointmentsFilled` / `IconProfileFilled` (`shared/ui/icons.tsx`)
+são transcritos **verbatim** do handoff, não redesenhados a partir do outline. Duas
+exceções documentadas às regras de §2 ("SVG de linha", grid 24):
+- **`viewBox` nativo `0 0 21 21`** (não o grid 24 dos demais ícones), nos três.
+- O detalhe interno **não é uniforme entre os três** — cada um segue o que o
+  handoff desenhou: `IconAppointmentsFilled` e `IconProfileFilled` têm um
+  preenchimento sólido navy (`fill="currentColor"` herdado do `<svg>`) com o
+  contorno/pontos internos por cima em `var(--color-white)` (`icons.tsx:179–220`)
+  — é literalmente branco sobre o preenchimento, não uma cor de tema.
+  `IconHomeFilled` **não** tem essa camada: não há preenchimento sólido por trás
+  (só os dois traços do teto/parede), então os dois `<path>` internos ficam em
+  `stroke="currentColor"` mesmo (`icons.tsx:156–167`) — não há contraste de
+  branco-sobre-navy para resolver ali.
+
+### 9.6 Escala de z-index
+
+| Camada | z-index | Onde |
+|---|---|---|
+| Header sticky desktop | `z-30` | `AppShell` |
+| `TabBar` mobile | `z-30` | `shared/ui/TabBar.tsx` (mesma camada do header — nunca ambos montados) |
+| Popover "Pedir ajuda" (`HelpNowMenu`) | `z-40` | `features/mood/HelpNowMenu.tsx` — sempre por cima do chrome |
+
+### 9.7 Tints translúcidos: rgba literal é o padrão sancionado
+
+Vários blocos "de sucesso" no mobile (ex.: badge de "Feito" na jornada, resumo do
+perfil, histórico de consultas) usam `bg-[rgba(41,176,29,0.12)]` — o MESMO valor
+do tone `success` do `Badge` (§7). Não é gambiarra: é o padrão já sancionado no
+ADR-038 (rgba literal, nunca `/alpha` sobre token) repetido onde o `Badge` em si
+não serve (o bloco não é uma pill de status). **Melhoria futura:** extrair um
+token `--surface-success-subtle` (ou classe utilitária) para não repetir o
+literal em múltiplos arquivos — não bloqueia nada hoje.

@@ -56,10 +56,12 @@ export function AppointmentCard({
       <div className="flex items-center gap-3">
         <DateBadge iso={consulta.scheduled_at} timeZone={tz} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="font-bold text-primary-300">
+          {/* 15px/12.5px no mock mobile (Consultas.dc.html:61-62); `lg:` devolve
+              o tamanho de sempre do desktop (base/13px). */}
+          <span className="text-[15px] font-bold text-primary-300 lg:text-base">
             {tituloConsulta(consulta.label, nomeProfissional)}
           </span>
-          <span className="text-[13px] text-muted">{caption}</span>
+          <span className="text-[12.5px] text-muted lg:text-[13px]">{caption}</span>
         </div>
         {hoje && <Badge tone="success">Hoje</Badge>}
       </div>
