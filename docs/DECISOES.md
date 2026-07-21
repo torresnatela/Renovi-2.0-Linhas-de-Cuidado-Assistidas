@@ -959,3 +959,8 @@ matrícula em linha real. O ramo `not_enrolled`/`NotEnrolledCard` do front fica 
 fallback defensivo (raro: seed ausente). A reversão da `0015` é **forward-only** após
 o primeiro check-in (FKs `ON DELETE RESTRICT` protegem o dado de saúde). Migration
 validada contra Postgres 16 (seed, backfill idempotente, cadeia de FKs e down).
+A auto-matrícula emite um `matricula_criada` (actor=`sistema`) no `journey_event`, que
+aparece em `/me/audit` como o evento **mais antigo** da conta — consistente com os
+eventos de humor (`checkin_humor_registrado`/`assessment_respondido`), que também são
+gravados na matrícula universal. Os E2E de auditoria (`scenario_a` A22, `scenario_c`
+C10) contam esse evento no total.
