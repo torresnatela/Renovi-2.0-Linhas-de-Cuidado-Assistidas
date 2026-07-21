@@ -1,8 +1,12 @@
-import type { CareAppointment, JourneyEnrollment } from '../../shared/api';
+import type { ReactNode } from 'react';
+
+import type { CareAppointment, CareLineItemInfo, JourneyEnrollment, MoodToday } from '../../shared/api';
+import { Card } from '../../shared/ui/Card';
 import { CareItemCard } from '../../shared/ui/CareItemCard';
 import { IconCheck } from '../../shared/ui/icons';
 import { PlanValidityBanner } from '../../shared/ui/PlanValidityBanner';
 import { CtaLink } from './CtaLink';
+import { ehAtividade, estadoAtividade, type EstadoAtividade } from './derivations';
 import { SectionLabel } from './JourneyHero';
 
 const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(' ');
@@ -10,16 +14,24 @@ const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean)
 /**
  * "Sua jornada nesta linha": a faixa de vigência no topo e, abaixo, o fluxo da linha
  * como uma timeline — um nó numerado (ou check quando feito) ligado por conectores,
- * ao lado do CareItemCard de cada passo. O card já sabe exibir o veredito do motor
- * (ação quando liberado, EligibilityNotice quando bloqueado); aqui só ordenamos os
- * itens e desenhamos os nós.
+ * ao lado do card de cada passo.
+ *
+ * Dois eixos de estado bem diferentes, por `kind`:
+ *  - CONSULTA usa o `CareItemCard`, que já sabe exibir o veredito do motor (ação
+ *    quando liberado, EligibilityNotice quando bloqueado).
+ *  - ATIVIDADE (check-in de humor, WHO-5/PHQ-4) NÃO tem especialidade nem slots —
+ *    nunca é agendável, mesmo quando o motor a avalia como "liberada" (ela só não
+ *    tem regras). Por isso usa `AtividadeCard`, cujo estado vem do check-in do dia
+ *    (`useMoodToday`), não da elegibilidade.
  */
 export function JourneyTimeline({
   enrollment,
   appointments,
+  mood,
 }: {
   enrollment: JourneyEnrollment;
   appointments: CareAppointment[];
+  mood?: MoodToday;
 }) {
   const items = [...enrollment.items].sort((a, b) => a.item.sort_order - b.item.sort_order);
 
@@ -40,11 +52,30 @@ export function JourneyTimeline({
 
       <ol className="mt-1.5 flex flex-col">
         {items.map((it, i) => {
+          const isLast = i === items.length - 1;
+
+          if (ehAtividade(it.item)) {
+            const estado = estadoAtividade(it.item.ref, mood);
+            const done = estado.tipo === 'feito_hoje';
+            // Nó "aceso" (mesma cor de um item liberado) só quando ESTE card tem
+            // uma ação de verdade (Responder agora) — nunca por a atividade estar
+            // "liberada" no motor.
+            const hasAction = estado.tipo === 'responder_agora';
+            return (
+              <li key={it.item.id} className="flex gap-4">
+                <TimelineNode step={i + 1} isLast={isLast} done={done} allowed={hasAction} />
+                <div className="min-w-0 flex-1 pb-4">
+                  <AtividadeCard item={it.item} estado={estado} />
+                </div>
+              </li>
+            );
+          }
+
           const done = realizados.has(it.item.ref);
           const allowed = it.eligibility.allowed;
           return (
             <li key={it.item.id} className="flex gap-4">
-              <TimelineNode step={i + 1} isLast={i === items.length - 1} done={done} allowed={allowed} />
+              <TimelineNode step={i + 1} isLast={isLast} done={done} allowed={allowed} />
               <div className="min-w-0 flex-1 pb-4">
                 <CareItemCard
                   item={it.item}
@@ -62,6 +93,59 @@ export function JourneyTimeline({
         })}
       </ol>
     </section>
+  );
+}
+
+// O card de um passo ATIVIDADE. Mesmo cabeçalho do CareItemCard (título +
+// legenda) — mas o corpo NUNCA é um link de agendar: uma atividade não tem
+// especialidade nem slots (SPEC Anexo C).
+function AtividadeCard({ item, estado }: { item: CareLineItemInfo; estado: EstadoAtividade }) {
+  return (
+    <Card className="flex flex-col gap-[11px]">
+      <div className="flex flex-col gap-px">
+        <span className="text-base font-bold text-primary-300">{item.label}</span>
+        <span className="text-[13px] text-muted">{item.recurrence ?? 'Atividade'}</span>
+      </div>
+      <AtividadeCorpo estado={estado} />
+    </Card>
+  );
+}
+
+function AtividadeCorpo({ estado }: { estado: EstadoAtividade }) {
+  switch (estado.tipo) {
+    case 'feito_hoje':
+      return (
+        <div className="flex items-center gap-2 text-[13px] font-bold text-success">
+          <IconCheck size={15} />
+          Feito hoje
+        </div>
+      );
+    case 'checkin_pendente':
+      return (
+        <BlocoNeutro>
+          Ainda não feito hoje — <strong>registre no painel ao lado.</strong>
+        </BlocoNeutro>
+      );
+    case 'responder_agora':
+      return <CtaLink to={`/avaliacoes/${estado.codigo}`}>Responder agora</CtaLink>;
+    case 'ofertado_quando_fizer_sentido':
+      return (
+        <BlocoNeutro>
+          Oferecido pela equipe <strong>quando fizer sentido na sua jornada.</strong>
+        </BlocoNeutro>
+      );
+    case 'sem_acao':
+      return null;
+  }
+}
+
+// Mesmo tom do EligibilityNotice (bloqueio de regra é estado do plano, não
+// falha): fundo primary-100, texto navy — nunca vermelho, nunca tom de erro.
+function BlocoNeutro({ children }: { children: ReactNode }) {
+  return (
+    <p className="rounded-md bg-primary-100 px-[13px] py-[11px] text-[13px] leading-[19px] text-primary-300">
+      {children}
+    </p>
   );
 }
 

@@ -10,7 +10,7 @@ import { ListRow } from '../../shared/ui/ListRow';
 import { PlanValidityBanner } from '../../shared/ui/PlanValidityBanner';
 import { useSession } from '../auth/useSession';
 import { MoodCheckinCard } from '../mood/MoodCheckinCard';
-import { proximaConsulta, resumoDoDia, vigenciaPertoDoFim } from './derivations';
+import { ehAtividade, proximaConsulta, resumoDoDia, vigenciaPertoDoFim } from './derivations';
 import { JourneyHero, SectionLabel } from './JourneyHero';
 import { JourneyTimeline } from './JourneyTimeline';
 import { MostImportantNow } from './MostImportantNow';
@@ -79,7 +79,11 @@ export function JourneyPage() {
   const checkinPendente = mood.data
     ? Boolean(mood.data.can_checkin && !mood.data.checkin)
     : false;
-  const temItemLiberado = active.items.some((it) => it.eligibility.allowed);
+  // ATIVIDADE nunca é "para agendar" (sem especialidade/slots) — o motor a avalia
+  // como liberada só por não ter regras, o que não conta aqui.
+  const temItemLiberado = active.items.some(
+    (it) => !ehAtividade(it.item) && it.eligibility.allowed,
+  );
   const resumo = resumoDoDia(temItemLiberado, checkinPendente);
 
   return (
@@ -96,7 +100,7 @@ export function JourneyPage() {
         {/* Coluna principal */}
         <div className="flex min-w-0 flex-col gap-8">
           <MostImportantNow enrollment={active} appointments={appointments} />
-          <JourneyTimeline enrollment={active} appointments={appointments} />
+          <JourneyTimeline enrollment={active} appointments={appointments} mood={mood.data} />
           {active.recent_events.length > 0 && <EventosRecentes eventos={active.recent_events} />}
         </div>
 

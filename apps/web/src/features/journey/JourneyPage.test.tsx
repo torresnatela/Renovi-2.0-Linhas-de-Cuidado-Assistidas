@@ -369,4 +369,124 @@ describe('JourneyPage', () => {
 
     consoleErrorSpy.mockRestore();
   });
+
+  /**
+   * Bug ao vivo: itens `kind: 'ATIVIDADE'` (check-in de humor, WHO-5, PHQ-4) não
+   * têm especialidade nem slots — o motor os avalia como liberados por não terem
+   * regras, mas isso NUNCA deve virar um botão "Agendar" (levaria a uma agenda
+   * vazia). O estado de cada ATIVIDADE vem do check-in do dia (`useMoodToday`),
+   * não da elegibilidade.
+   */
+  describe('itens ATIVIDADE na timeline (nunca agendáveis)', () => {
+    function jornadaComItem(item: Journey['enrollments'][number]['items'][number]): Journey {
+      return {
+        enrollments: [
+          {
+            enrollment: jornada.enrollments[0].enrollment,
+            care_line_name: 'Saúde Mental',
+            items: [item],
+            recent_events: [],
+          },
+        ],
+      };
+    }
+
+    const itemCheckin = {
+      item: {
+        id: 'item-checkin',
+        ref: 'checkin-humor-diario',
+        kind: 'ATIVIDADE' as const,
+        specialty_code: '',
+        label: 'Check-in de humor',
+        sort_order: 1,
+      },
+      eligibility: { allowed: true, blocks: [] },
+    };
+
+    const itemWho5 = {
+      item: {
+        id: 'item-who5',
+        ref: 'who5-semanal',
+        kind: 'ATIVIDADE' as const,
+        specialty_code: '',
+        label: 'Questionário semanal (WHO-5)',
+        sort_order: 1,
+      },
+      eligibility: { allowed: true, blocks: [] },
+    };
+
+    it('check-in SEM check-in hoje: sem link/botão "Agendar" e com o aviso de registrar no painel', async () => {
+      vi.mocked(api.getJourney).mockResolvedValue(jornadaComItem(itemCheckin));
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: true,
+        checkin: null,
+      });
+
+      renderPage();
+
+      expect(await screen.findByText('Check-in de humor')).toBeInTheDocument();
+      expect(screen.getByText(/registre no painel ao lado/i)).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /agendar/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /agendar/i })).not.toBeInTheDocument();
+    });
+
+    it('check-in feito hoje: mostra "Feito hoje"', async () => {
+      vi.mocked(api.getJourney).mockResolvedValue(jornadaComItem(itemCheckin));
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: false,
+        checkin: {
+          valencia: 60,
+          energia: 60,
+          quadrante: 'agradavel_media',
+          respondido_em: '2026-07-20T09:00:00-03:00',
+        },
+      });
+
+      renderPage();
+
+      expect(await screen.findByText('Feito hoje')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /agendar/i })).not.toBeInTheDocument();
+    });
+
+    it('WHO-5: sem oferta do gatilho, sem o link "Responder agora"', async () => {
+      vi.mocked(api.getJourney).mockResolvedValue(jornadaComItem(itemWho5));
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: true,
+        checkin: null,
+        offer: null,
+      });
+
+      renderPage();
+
+      expect(await screen.findByText('Questionário semanal (WHO-5)')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /responder agora/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /agendar/i })).not.toBeInTheDocument();
+      expect(screen.getByText(/quando fizer sentido na sua jornada/i)).toBeInTheDocument();
+    });
+
+    it('WHO-5: com a oferta do gatilho igual ao instrumento, link "Responder agora" para /avaliacoes/WHO5', async () => {
+      vi.mocked(api.getJourney).mockResolvedValue(jornadaComItem(itemWho5));
+      vi.mocked(api.getMoodToday).mockResolvedValue({
+        dia: '2026-07-20',
+        can_checkin: false,
+        checkin: null,
+        offer: 'WHO5',
+      });
+
+      renderPage();
+
+      const link = await screen.findByRole('link', { name: /responder agora/i });
+      expect(link.getAttribute('href')).toBe('/avaliacoes/WHO5');
+    });
+  });
+
+  /** Regressão: item CONSULTA liberado continua oferecendo o link "Agendar" (não regride com a mudança acima). */
+  it('regressão: item CONSULTA liberado continua com o link "Agendar"', async () => {
+    renderPage();
+    const links = await screen.findAllByRole('link', { name: /agendar/i });
+    expect(links.some((l) => l.getAttribute('href') === '/jornada/agendar/item-1')).toBe(true);
+  });
 });

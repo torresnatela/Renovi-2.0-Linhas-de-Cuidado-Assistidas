@@ -1,4 +1,4 @@
-import type { CareAppointment } from '../../shared/api';
+import type { AssessmentCode, CareLineItemInfo, CareAppointment, MoodToday } from '../../shared/api';
 
 /**
  * Derivações de EXIBIÇÃO da Jornada — puras e sem regra de negócio. O servidor
@@ -51,4 +51,62 @@ export function resumoDoDia(temItemLiberado: boolean, checkinPendente: boolean):
     return 'Tudo em dia por hoje. A gente te avisa quando algo precisar de você.';
   }
   return `Você tem ${partes.join(' e ')}.`;
+}
+
+// ---------------------------------------------------------------------------
+// Itens ATIVIDADE (Anexo C) — nunca agendáveis
+// ---------------------------------------------------------------------------
+
+/**
+ * `ref`s de `kind: 'ATIVIDADE'` que o front sabe tratar. Não há endpoint que os
+ * exponha — são as MESMAS constantes do backend, espelhadas aqui (mapear é
+ * legítimo; comentado com a origem de cada uma):
+ *   - `checkin-humor-diario` → apps/api/internal/models/mood_checkin.go, `CheckinHumorDiarioRef`
+ *   - `who5-semanal`         → apps/api/internal/models/assessment.go,  `Who5ItemRef`
+ *   - `phq4-gatilhado`       → apps/api/internal/models/assessment.go,  `Phq4ItemRef`
+ * Um ref fora deste mapa (linha futura) fica sem ação: só título/legenda.
+ */
+const REF_CHECKIN_HUMOR_DIARIO = 'checkin-humor-diario';
+const REF_WHO5_SEMANAL = 'who5-semanal';
+const REF_PHQ4_GATILHADO = 'phq4-gatilhado';
+
+const OFERTA_POR_REF: Record<string, AssessmentCode> = {
+  [REF_WHO5_SEMANAL]: 'WHO5',
+  [REF_PHQ4_GATILHADO]: 'PHQ4',
+};
+
+/**
+ * `kind === 'ATIVIDADE'` nomeado — um só lugar decide o que é agendável
+ * (CONSULTA) vs. o que nunca é (ATIVIDADE: sem especialidade/slots), reusado
+ * pela JourneyPage (resumo do dia) e pela JourneyTimeline (qual card montar).
+ */
+export function ehAtividade(item: Pick<CareLineItemInfo, 'kind'>): boolean {
+  return item.kind === 'ATIVIDADE';
+}
+
+/** O estado de exibição de um passo ATIVIDADE na timeline. */
+export type EstadoAtividade =
+  | { tipo: 'feito_hoje' }
+  | { tipo: 'checkin_pendente' }
+  | { tipo: 'responder_agora'; codigo: AssessmentCode }
+  | { tipo: 'ofertado_quando_fizer_sentido' }
+  | { tipo: 'sem_acao' };
+
+/**
+ * Que estado uma ATIVIDADE está: deriva do check-in de hoje (`useMoodToday`,
+ * já carregado pela página) — NUNCA da elegibilidade do motor. O motor avalia
+ * a atividade como liberada por não ter regras de agendamento (ela não tem
+ * especialidade nem slots) — "liberada" aqui não quer dizer "agendável".
+ */
+export function estadoAtividade(ref: string, mood: MoodToday | undefined): EstadoAtividade {
+  if (ref === REF_CHECKIN_HUMOR_DIARIO) {
+    return mood?.checkin ? { tipo: 'feito_hoje' } : { tipo: 'checkin_pendente' };
+  }
+  const codigo = OFERTA_POR_REF[ref];
+  if (codigo) {
+    return mood?.offer === codigo
+      ? { tipo: 'responder_agora', codigo }
+      : { tipo: 'ofertado_quando_fizer_sentido' };
+  }
+  return { tipo: 'sem_acao' };
 }

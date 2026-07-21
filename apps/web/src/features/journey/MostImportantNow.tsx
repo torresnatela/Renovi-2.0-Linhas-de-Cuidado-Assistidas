@@ -4,7 +4,7 @@ import type { CareAppointment, CareLineItemInfo, JourneyEnrollment } from '../..
 import { formatDateTimeShort } from '../../shared/datetime';
 import { IconCheck } from '../../shared/ui/icons';
 import { CtaLink } from './CtaLink';
-import { proximaConsulta } from './derivations';
+import { ehAtividade, proximaConsulta } from './derivations';
 import { SectionLabel } from './JourneyHero';
 
 /**
@@ -29,7 +29,10 @@ export function MostImportantNow({
   const refsDaLinha = new Set(enrollment.items.map((it) => it.item.ref));
   const consultasDaLinha = appointments.filter((a) => refsDaLinha.has(a.item_ref));
   const proxima = proximaConsulta(consultasDaLinha);
-  const liberado = enrollment.items.find((it) => it.eligibility.allowed);
+  // ATIVIDADE nunca é "para agendar" (sem especialidade/slots) — mesmo quando o
+  // motor a avalia como liberada (ela só não tem regras). Este card só existe
+  // para convidar a agendar uma CONSULTA de verdade.
+  const liberado = enrollment.items.find((it) => !ehAtividade(it.item) && it.eligibility.allowed);
 
   let card: ReactNode;
   if (proxima) {
