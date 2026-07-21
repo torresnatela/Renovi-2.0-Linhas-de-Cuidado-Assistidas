@@ -12,16 +12,33 @@ jornada e elegibilidade) · Vitest + Testing Library. Consumo da API via proxy
 
 ```
 src/
-  main.tsx           # bootstrap + QueryClientProvider
-  App.tsx            # shell
-  features/<feat>/   # cada tela/feature (auth/, home/, health/, scheduling/, journey/)
-  shared/            # api client, helpers
-  shared/ui/         # biblioteca de componentes do design system (Etapas 1a/1b)
+  main.tsx           # bootstrap + QueryClientProvider (<StrictMode>)
+  App.tsx            # tabela de rotas do paciente
+  features/<feat>/   # cada tela/feature (colocation: componente + hooks + teste)
+  shared/            # api client (shared/api.ts), helpers (datetime, masks, navigate)
+  shared/ui/         # 17 componentes do design system (ver docs/DESIGN-SYSTEM.md §7)
   styles/            # tokens.css + fonts.css (fonte de verdade do DS)
   assets/            # fonts/ (Nunito .ttf) + logos/ (logo-blue, logo-icon)
   index.css          # imports de fonts/tokens ANTES do @tailwind + @layer base
   setupTests.ts      # matchers do Testing Library
 ```
+
+**Features VIVAS após o redesign desktop (Etapas 0–8):**
+
+| Feature | Tela / papel |
+|---|---|
+| `auth/` | Acesso: login por CPF + cadastro 3 passos (ViaCEP); `useSession`, `ProtectedRoute` |
+| `journey/` | Minha Jornada (hero, timeline, aside) + Agendar por item (stepper, motor) |
+| `consultations/` | Consultas: abas Próximas/Histórico (+ CTA de agendar do aside) |
+| `scheduling/` | Só o **detalhe** da consulta (`AppointmentPage`) com o **gate de pré-consulta**; hooks `useAppointment`/`useJoinAppointment`/`proximoPoll` |
+| `mood/` | Check-in no aside da Jornada (`MoodCheckinCard`/`MoodGrid`), instrumentos (`AssessmentForm`/`AssessmentPage`), `HelpNowMenu` |
+| `profile/` | Perfil reduzido: conta + plano + privacidade (revogar consentimento) |
+| `shell/` | `AppLayout` — liga sessão + "Pedir ajuda" ao `AppShell` |
+
+**Aposentadas no redesign (removidas — ADR-039):** `home/` (HomePage) e
+`health/` (HealthBadge); o wizard de especialidade (`SchedulingPages`,
+`SlotPickerPage`) e a **lista** `AppointmentsPage`; `journey/CareAppointmentsPage`
+(virou `ConsultationsPage`); a `MoodPage` (a `/humor` redireciona para `/jornada`).
 
 ## Convenções
 
@@ -32,8 +49,16 @@ src/
   está **adiada** (decisão de 2026-07-20); não é a fonte atual. Ao trocar, migrar de uma vez.
 - **Estilo:** Tailwind com o **design system** — tokens em `src/styles/tokens.css`,
   theme em `tailwind.config.js`. Regras completas em **`docs/DESIGN-SYSTEM.md`**
-  (leia antes de estilizar tela nova). Sem hex hardcoded, sem `emerald`/`slate` em tela
-  nova, sem `/alpha` sobre cores de token; sem CSS solto salvo necessidade.
+  (leia antes de estilizar tela nova) e ADR-038. Sem hex hardcoded, sem
+  `emerald`/`slate`/`rose` em código vivo, sem `/alpha` sobre cores de token
+  (use tints `100/200`); sem CSS solto salvo necessidade. O gate é o sweep
+  `grep -rn "emerald\|slate\|rose-" apps/web/src` **zerado** (fora comentários e o
+  falso-positivo `translate`).
+- **Gate de pré-consulta (ADR-039):** em `scheduling/AppointmentPage`, ao clicar
+  "Entrar" com uma oferta ativa (`today.offer` = WHO-5/PHQ-4), o `AssessmentForm`
+  aparece ANTES de abrir a sala. Ele **nunca prende** o paciente: avaliado só no
+  clique; trava após a 1ª vez; erro/"Fechar" liberam a entrada. As props do
+  `AssessmentForm` (`{ codigo, onDone }`) são contrato — a página e o gate dependem.
 - **Sessão:** cookie `httpOnly` — o JS NÃO o lê. Todo fetch usa `credentials: 'include'`;
   nunca guarde token em `localStorage`. Saber quem está logado = perguntar ao servidor (`useSession`).
 - **O cadastro demora de verdade** (é síncrono contra a Doutor ao Vivo, que já levou dezenas

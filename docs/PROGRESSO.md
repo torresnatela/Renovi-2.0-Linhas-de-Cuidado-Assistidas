@@ -3,9 +3,57 @@
 > **Todo agente atualiza este arquivo ao avançar.** É a fonte da verdade de "onde
 > estamos". Marque `[x]` o que concluiu e ajuste "Próximo passo".
 
-_Última atualização: 2026-07-20 — **Revisão do CodeRabbit na PR #13** endereçada (ADR-037, 2ª rodada): cortes na conexão da tx, streak recente, locks de consentimento (Grant/Revoke/Record), a11y (aria-live + aria-pressed), clamp de limit, `maxItems: 120` no contrato, e fix de teste flaky (meia-noite BR). Não aplicado: `NOT VALID` nas migrations (golang-migrate roda em tx única; desproporcional no piloto). `make ci` + integração completa (incl. e2e) + front verdes.
+_Última atualização: 2026-07-20 — **Redesign desktop do front concluído (Etapas 0–8)**: design system (tokens Nunito/navy/laranja), 17 componentes em `shared/ui/`, AppShell + rotas finais, telas novas (Acesso, Jornada com check-in, Agendar por item, Consultas com gate de pré-consulta, Perfil reduzido) e instrumentos WHO-5/PHQ-4 restilizados. Telas emerald/slate e rotas mortas aposentadas; sweep emerald/slate zerado. ADR-038 (design system) + ADR-039 (decisões de produto). Gate `typecheck && test && build` verde. Ver a seção "Redesign desktop" abaixo.
+Antes: 2026-07-20 — **Revisão do CodeRabbit na PR #13** endereçada (ADR-037, 2ª rodada): cortes na conexão da tx, streak recente, locks de consentimento (Grant/Revoke/Record), a11y (aria-live + aria-pressed), clamp de limit, `maxItems: 120` no contrato, e fix de teste flaky (meia-noite BR). Não aplicado: `NOT VALID` nas migrations (golang-migrate roda em tx única; desproporcional no piloto). `make ci` + integração completa (incl. e2e) + front verdes.
 Antes: 2026-07-19 — **Correções pós-review (PR #13)** do Verificador de Humor: streak = dias consecutivos de calendário (gatilho), guard de concorrência (advisory lock + rechecagem na tx) no Submit do assessment, e nits (teto do History em 120, `limit` no `getMoodHistory`, grade operável por teclado). `make ci` + integração verdes. Ver ADR-037.
 Antes: 2026-07-19 — **Verificador Diário de Humor (Anexo C): completo (Módulos 0–6 + telas de WHO-5/PHQ-4)**, pronto para merge na main, sobre o Slice 1 concluído._
+
+## 🎨 Redesign desktop do front — Etapas 0–8 (CONCLUÍDO, branch `feat/desktop-ui`)
+
+As telas cruas ("estilo mínimo, o design vem depois") viraram produto desktop
+sobre um design system. Nada de novo no backend — só o front (`apps/web`).
+
+- [x] **Etapa 0 — Design system (fundação)** (ADR-038): tokens CSS como fonte da
+  verdade (`styles/tokens.css`), theme Tailwind via `var()`, Nunito local, paleta
+  navy/laranja, raios/sombra únicos. `docs/DESIGN-SYSTEM.md`.
+- [x] **Etapas 1a/1b — `shared/ui/` (17 componentes)**: Button, Card, Badge,
+  Input, Avatar, ListRow, SegmentedControl, Toggle, `icons`, `feedback`
+  (Loading/Empty/ErrorNotice) + os proprietários EligibilityNotice, CareItemCard,
+  PlanValidityBanner, HelpPill, LineChips, DateBadge, AppShell. Todos com teste.
+- [x] **Etapa 2 — AppShell + rotas finais**: header sticky (Jornada/Consultas/
+  Perfil), "Pedir ajuda" (`HelpNowMenu`), skip-to-content, tabela de rotas do
+  paciente. Guarda de sessão e shell num só lugar (`AppLayout`).
+- [x] **Etapa 3 — Acesso**: login por **CPF** (sem reset de senha — ADR-039) +
+  cadastro em 3 passos com ViaCEP; foco por passo à prova de StrictMode.
+- [x] **Etapa 4 — Jornada**: hero, timeline e **check-in de humor no aside**
+  (`MoodCheckinCard` + `MoodGrid`) — a antiga `/humor` foi aposentada (ADR-039).
+- [x] **Etapa 5 — Agendar**: stepper por **item da linha** (motor de
+  elegibilidade), `Idempotency-Key` nascida com a intenção (ADR-025). Wizard por
+  especialidade aposentado.
+- [x] **Etapa 6 — Consultas**: abas Próximas/Histórico, e o **gate de
+  pré-consulta** (WHO-5/PHQ-4 ofertado antes de abrir a sala — ADR-039), que nunca
+  prende o paciente.
+- [x] **Etapa 7 — Perfil reduzido**: conta + plano + privacidade (revogar
+  consentimento, com erro visível). Sem edição de dados (não há endpoint — ADR-039).
+- [x] **Etapa 8 — Fechamento**: instrumentos WHO-5/PHQ-4 restilizados no DS;
+  aposentadoria das telas emerald/slate e rotas mortas (home, wizard de
+  especialidade, MoodPage, lista de consultas antiga), com **migração das
+  intenções de teste** antes de remover; batch de polish (revogação com erro,
+  foco StrictMode, `onPointerCancel` na grade, skip-link + Escape/troca-de-rota no
+  "Pedir ajuda", sweep emerald/slate); docs vivos (ADR-038/039, este arquivo,
+  DESIGN-SYSTEM, `apps/web/CLAUDE.md`).
+
+**Estado:** gate `npm --prefix apps/web run typecheck && test && build` **verde**;
+`grep emerald|slate|rose-` zerado em código vivo; nenhuma rota morta.
+
+**Próximo passo:**
+- **Verificação visual no browser** (o stack de dev exige credenciais DAV; rotas
+  `/me/*` só montam com Auth) e **responsivo** (colapso do grid 2-colunas abaixo de
+  ~960px) — em sessão futura.
+- **Remarcação de consulta (issue #17)** — hoje o produto cancela + agenda de
+  novo; a remarcação de verdade fica para a issue.
+- **orval** (cliente TS gerado do OpenAPI) segue adiado (ADR-039) — o
+  `shared/api.ts` manual continua a camada de API.
 
 ## 🌡️ Verificador Diário de Humor — Anexo C (em andamento, branch `feat/verificador-humor`)
 

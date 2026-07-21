@@ -5,8 +5,11 @@
 > técnica dos valores: `apps/web/src/styles/tokens.css` (CSS custom properties).
 > **Idioma:** código/classes em inglês; este doc em PT-BR.
 
-Esta é a **fundação** (Etapa 0): tokens, fontes, theme do Tailwind e diretrizes. A
-biblioteca de componentes (`src/shared/ui/`) e as telas vêm nas etapas seguintes.
+O redesign desktop foi concluído nas **Etapas 0–8** (2026-07-20): a fundação
+(tokens, fontes, theme, diretrizes), a biblioteca de 17 componentes em
+`src/shared/ui/` (§7, inventário REAL) e as telas do produto. Decisões em
+**ADR-038** (design system) e **ADR-039** (produto). Este doc é a referência
+antes de estilizar qualquer tela nova.
 
 ---
 
@@ -64,6 +67,11 @@ para as escalas quando precisar de um tom específico.
 | `--color-primary-300` | `#0E1955` | `--text-strong`, `--surface-brand`, `--border-strong` | `text-primary-300` / `bg-primary-300` / `border-primary-300` | Navy da marca — ações primárias, títulos, estados ativos |
 | `--color-primary-200` | `#C0CDDE` | `--border-input` | `border-primary-200` / `bg-primary-200` | Bordas de input, chips inativos, disabled |
 | `--color-primary-100` | `#E9EDF1` | `--border-default`, `--surface-subtle` | `border-primary-100` / `bg-primary-100` | Bordas de card, fills leves, **bloco de bloqueio** |
+
+> **Equivalência `--surface-subtle` ≡ `bg-primary-100`** (o MESMO `#E9EDF1`): é ao
+> mesmo tempo a **borda leve de card** e o **fill do bloqueio explicável** (estado
+> do plano, nunca vermelho — §4.1). São o mesmo token de propósito — não crie um
+> segundo para "fundo de aviso" (ADR-038).
 | `--color-accent-300` | `#FA8F1B` | `--surface-accent`, `--focus-ring` | `text-accent-300` / `bg-accent-300` | Laranja — ênfase, CTA de destaque (com parcimônia) |
 | `--color-accent-200` | `#FFC88E` | — | `bg-accent-200` / `border-accent-200` | Laranja suave — accent disabled, borda de alerta |
 | `--color-accent-100` | `#FEDDBC` | — | `bg-accent-100` | Laranja pálido — fills de destaque |
@@ -165,37 +173,47 @@ Logos disponíveis em `src/assets/logos/`: `logo-blue.svg` (marca completa) e
 
 ---
 
-## 7. Inventário de componentes planejados (`src/shared/ui/`)
+## 7. Inventário de componentes (`src/shared/ui/`) — REAL
 
-A construir nas **Etapas 1a/1b**. Nenhum existe ainda; a lista abaixo é o contrato
-pretendido (props/uso resumidos) para orientar as próximas etapas.
+Construídos nas Etapas 1a/1b e usados pelas telas. Cada um tem teste colocalizado
+(`*.test.tsx`).
 
 ### Primitivos
 
 | Componente | Uso / props resumidos |
 |---|---|
-| `Button` | `color` (`primary`\|`accent`\|`ghost`), `size` (`sm`\|`md`\|`lg`), `disabled`, `onClick`. Rótulo UPPERCASE via classe `uppercase`; full-width em formulários. |
-| `Card` | Superfície branca padrão: `rounded-lg`, borda `primary-100`, `shadow-card`, padding interno. Slots de título/ação. |
-| `Badge` | `tone` (`success`\|`neutral`\|`alert`), texto curto (ex.: "Plano ativo", "Hoje"). |
-| `Input` | `label` (acima do campo), `type`, `placeholder`, `value`, `onChange`, `error`, `inputMode`. Altura ~80px com label. |
-| `Avatar` | Iniciais ou imagem; tamanhos; usado no header e no Perfil. |
+| `Button` | `color` (`primary`\|`accent`\|`ghost`), `size` (`sm`\|`md`\|`lg`), `loading`, `fullWidth`, `disabled`. Rótulo UPPERCASE via classe `uppercase` (nome acessível preservado). Disabled = tint `-200` da própria cor, nunca cinza. |
+| `Card` | Superfície branca padrão: `rounded-lg`, borda `primary-100`, `shadow-card`, `padding` (`md`\|`lg`), `as` (tag). |
+| `Badge` | `tone` (`success`\|`neutral`\|`accent`\|`alert`); fundos rgba literais do DS (não `/alpha`). NUNCA sinaliza bloqueio de regra — isso é `EligibilityNotice`. |
+| `Input` | `label` acima do campo, `error`, `inputMode`, etc. |
+| `Avatar` | Iniciais a partir do nome; usado no header e no Perfil. |
 | `ListRow` | Linha clicável (ícone + título + caption + caret); hover = tint claro. |
-| `SegmentedControl` | Alternador (ex.: Entrar/Criar conta; Próximas/Histórico); teclado + `aria`. |
-| `Toggle` | Switch on/off com `role="switch"` + `aria-checked` (Notificações). |
+| `SegmentedControl` | Alternador (Entrar/Criar conta; Próximas/Histórico); teclado + `aria`. |
+| `Toggle` | Switch on/off com `role="switch"` + `aria-checked`. |
 | `icons` | Set de ícones de linha `currentColor` (grid 24). Sem emoji/icon font. |
-| feedback: `Loading` / `Empty` / `ErrorNotice` | Estados transversais de carregamento, vazio e erro real. |
+| `feedback`: `Loading` / `Empty` / `ErrorNotice` | Estados transversais. `ErrorNotice`: indisponibilidade (503/`LEGACY_UNAVAILABLE`) é informativa (âmbar, `role=status`); erro real é `error` (`role=alert`). |
 
 ### Padrões proprietários (vocabulário do app)
 
 | Componente | Uso resumido |
 |---|---|
-| `EligibilityNotice` | Bloco de bloqueio explicável (§4.1): fundo `surface-subtle`, ícone de linha, frase + data/ação em bold. Reutilizável em cards, horários e botões. |
-| `CareItemCard` | Card de item de linha de cuidado: ícone + título + quota dots + slot de ação (LIBERADO/BLOQUEADO/PRÉ-REQ/FEITO). |
-| `PlanValidityBanner` | Faixa de vigência do plano (Badge + barra de progresso + caption); vira alerta laranja perto de expirar, com CTA "RENOVAR PLANO". |
-| `HelpPill` | Pill "Pedir ajuda" do header (branca, borda `primary-200`, texto navy bold, ícone de linha). |
-| `LineChips` | Chips de alternância de linha de cuidado (ativa: navy sólido/texto branco; inativa: branca com borda `primary-200`). |
-| `DateBadge` | Selo de data curto (ex.: "Hoje", dia/mês) para consultas. |
-| `AppShell` | Layout desktop: header sticky 70px + container `max-w-shell` + grid 2 colunas com aside sticky. |
+| `EligibilityNotice` | Bloco de bloqueio explicável (§4.1): fundo `surface-subtle` (= `bg-primary-100`), ícone de linha por `rule_type`, frase + data/ação em bold. NUNCA vermelho. |
+| `CareItemCard` | Card de item de linha de cuidado: ícone + título + slot de ação (LIBERADO/BLOQUEADO/PRÉ-REQ/FEITO). |
+| `PlanValidityBanner` | Faixa de vigência do plano (Badge + progresso + caption); vira alerta laranja perto de expirar. |
+| `HelpPill` | Pill "Pedir ajuda" do header (branca, borda `primary-200`, texto navy bold). O popover e a lógica são do `HelpNowMenu` (feature). |
+| `LineChips` | Chips de alternância de linha de cuidado (ativa: navy sólido; inativa: branca com borda `primary-200`). |
+| `DateBadge` | Selo de data curto (mês + dia) para consultas. `timeZone` **obrigatório** (lê o dia no fuso da agenda). **Zero-pad:** o dia usa `day: '2-digit'` (single-digit vira `05`, alinhando o selo); o mês abrevia com `month: 'short'` e tira o ponto final do pt-BR (`jul.` → `jul`). |
+| `AppShell` | Chrome desktop: **skip-to-content** ("Pular para o conteúdo", visually-hidden até o foco, alvo `<main id="conteudo">`) + header sticky 70px + container `max-w-shell`. Presentacional puro (o wiring é do `AppLayout`). |
+
+### Superfícies de DS que vivem na feature (não em `shared/ui/`)
+
+Ficam em `features/` por acoplamento a hooks/domínio, mas seguem o DS:
+
+| Componente | Onde | Uso |
+|---|---|---|
+| `MoodGrid` | `features/mood/` | Grade valência×energia (gradientes oklch): clique/arraste por Pointer Events (com `onPointerCancel`), teclado (setas, passo 5) e o ponto anunciado por `aria-live`. Controlado (`value`/`onChange`). |
+| `MoodCheckinCard` | `features/mood/` | O check-in de humor do aside da Jornada — máquina de estados (consentimento/elegibilidade/feito/aprofundamento). ÚNICA superfície do check-in diário (a `/humor` foi aposentada — ADR-039). |
+| `HelpNowMenu` | `features/mood/` | O popover do "Pedir ajuda": um clique dispara a API; fecha com **Escape** e ao **trocar de rota**. |
 
 ---
 

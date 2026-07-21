@@ -909,3 +909,83 @@ implícita, então `ADD ... NOT VALID` + `VALIDATE` no mesmo arquivo mantêm o
 exigiria dividir cada extensão de `event_type` em duas migrations (add / validate),
 desproporcional para o piloto (tabela `journey_event` minúscula). Registrado como
 follow-up se/quando a tabela crescer.
+
+---
+
+> **Nota de numeração — Redesign desktop.** O redesign do front (Etapas 0–8,
+> 2026-07-20) veio depois do Verificador de Humor (ADR-030..037). Os ADRs do
+> redesign começam em **ADR-038**.
+
+## ADR-038 — Design system desktop: tokens CSS como fonte de verdade, Tailwind via `var()`
+
+**Contexto:** o redesign desktop (Etapas 0–8) trocou as telas cruas
+emerald/slate por um design system. Precisava de uma fonte da verdade única
+para cores/raios/sombras — sem hex espalhado nem divergência entre a classe
+Tailwind e o token.
+
+**Decisão:**
+- **CSS custom properties em `apps/web/src/styles/tokens.css` são a fonte da
+  verdade**; `tailwind.config.js` **estende** o theme referenciando `var(--…)`,
+  então classe e token nunca divergem. `src/index.css` importa fontes+tokens
+  ANTES das diretivas `@tailwind`.
+- **Proibido `/alpha` sobre cor de token** (`bg-primary-300/50` não funciona com
+  `var()` simples): use os **tints** `100/200` ou a opacidade do elemento
+  (`--opacity-pressed: .7` / `--opacity-disabled: .5`). Quando um translúcido
+  específico é inevitável (badges, notices, marcador da grade), usa-se **rgba
+  literal do DS**, nunca `/alpha`.
+- **`--surface-subtle` ≡ `bg-primary-100`** (o mesmo `#E9EDF1`): é ao mesmo tempo
+  o **fill do bloqueio explicável** (estado do plano, NUNCA vermelho — ADR-017/020)
+  e a **borda leve de card**. Registrado para que "bloco de bloqueio" e "borda de
+  card" não virem dois tokens que divergem.
+- **Sem emerald/slate/rose em código VIVO.** O theme estende (não substitui) as
+  escalas default do Tailwind — elas existem, mas não são para as telas do
+  produto. O gate é o sweep `grep -rn "emerald\|slate\|rose-" apps/web/src`
+  zerado (fora comentários e o falso-positivo `translate`, que contém "slate").
+
+**Consequência:** 17 componentes em `shared/ui/` (AppShell, Avatar, Badge,
+Button, Card, CareItemCard, DateBadge, EligibilityNotice, HelpPill, Input,
+LineChips, ListRow, PlanValidityBanner, SegmentedControl, Toggle, `feedback`,
+`icons`) + as superfícies de feature (`MoodGrid`, `MoodCheckinCard`) usam só
+tokens. A varredura final da Etapa 8 migrou os últimos resíduos da fundação
+(`ProtectedRoute`, `ErrorBoundary`). Mudar uma cor = editar `tokens.css`, um
+diff. Inventário completo em `docs/DESIGN-SYSTEM.md`.
+
+## ADR-039 — Decisões de produto do redesign desktop (2026-07-20)
+
+**Contexto:** consolidar telas cruas em produto martelou decisões de produto que
+estavam implícitas. Registradas juntas para não se perderem.
+
+**Decisão (todas de 2026-07-20):**
+- **Perfil reduzido.** O Perfil mostra conta, plano e privacidade (revogar o
+  consentimento do check-in), **sem edição de dados pessoais** — não há endpoint
+  de edição, e um botão que não faz nada é pior que sua ausência.
+- **Pré-consulta via WHO-5/PHQ-4 OFERTADOS.** Ao entrar na sala, se o gatilho de
+  humor ofertou um instrumento (`today.offer`), o gate mostra o `AssessmentForm`
+  ANTES de abrir a sala. Três invariantes garantem que o gate **nunca prende** o
+  paciente: avaliado só no clique; trava após a 1ª vez (`gateFeito`); erro ou
+  "Fechar" liberam a entrada. Vive em `scheduling/AppointmentPage`.
+- **Wizard por especialidade APOSENTADO.** Agendar é por **item** da linha de
+  cuidado (passa pelo motor), stepper em `journey/ScheduleCarePage`. Saíram
+  `SchedulingPages`, `SlotPickerPage` e a **lista** `AppointmentsPage`; sobrou só
+  o **detalhe** (`scheduling/AppointmentPage`) e os hooks `useAppointment`/
+  `useJoinAppointment`/`proximoPoll`.
+- **`/humor` APOSENTADA.** O check-in diário virou o **card da Jornada**
+  (`MoodCheckinCard`); `/humor` redireciona para `/jornada`. A `MoodPage` saiu —
+  as 5 intenções de teste dela migraram para `MoodCheckinCard`/`MoodGrid`/
+  `AssessmentPage`.
+- **Remarcar ADIADO (issue #17).** O produto não remarca hoje (cancela + agenda
+  de novo); a remarcação de verdade fica para a **issue #17**.
+- **Cotas sem contagem de uso no front.** O front exibe o veredito/`reason` do
+  motor, nunca "X de N usados" — a contagem é do servidor (ADR-017/020).
+- **Login por CPF + "pedir ajuda" em vez de reset de senha.** A tela de acesso é
+  login por CPF; **não há fluxo de reset de senha** no piloto — quem não consegue
+  entrar usa a afordância de ajuda.
+- **orval segue ADIADO.** O cliente manual `shared/api.ts` continua a camada de
+  API do front; a geração via orval (do OpenAPI) fica adiada — trocar de uma vez
+  quando for a hora.
+
+**Consequência:** as telas VIVAS são Acesso, Jornada (+agendar), Consultas
+(+detalhe com o gate de pré-consulta), Perfil e os instrumentos por link direto
+(`/avaliacoes/:codigo`). Nenhuma rota morta, nenhuma tela emerald/slate viva. A
+suite do front segue verde e cada decisão adiada tem dono nomeado (issue #17,
+orval).
