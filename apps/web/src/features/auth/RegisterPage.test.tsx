@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -210,6 +211,24 @@ describe('RegisterPage', () => {
     await user.clear(rua);
     await user.type(rua, 'Rua das Flores');
     expect(rua).toHaveValue('Rua das Flores');
+  });
+
+  // Regressão StrictMode (main.tsx usa <StrictMode>): o double-invoke do efeito em
+  // dev NÃO pode roubar o foco no mount. O guard por comparação de passo anterior
+  // (em vez de um boolean de primeiro-render) sobrevive ao double-invoke.
+  it('não rouba o foco no mount sob StrictMode', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <RegisterPage />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </StrictMode>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Sobre você' })).not.toHaveFocus();
   });
 
   // Foco: avançar/voltar de passo desmonta o botão focado (Continuar/Voltar) e o

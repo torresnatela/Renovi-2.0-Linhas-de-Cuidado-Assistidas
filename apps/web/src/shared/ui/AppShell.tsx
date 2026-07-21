@@ -22,6 +22,14 @@ interface AppShellProps {
 export function AppShell({ userName, help, children }: AppShellProps) {
   return (
     <div className="min-h-screen bg-page">
+      {/* Primeiro foco tabulável da página: salta a navegação repetida do topo e
+          leva direto ao <main>. Visually-hidden até receber foco pelo teclado. */}
+      <a
+        href="#conteudo"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary-300 focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-white focus:shadow-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300 focus-visible:ring-offset-2"
+      >
+        Pular para o conteúdo
+      </a>
       <header className="sticky top-0 z-30 border-b border-primary-100 bg-white">
         <div className="mx-auto flex h-[70px] max-w-shell items-center gap-9 px-10">
           <Link
@@ -56,7 +64,9 @@ export function AppShell({ userName, help, children }: AppShellProps) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-shell px-10 pb-16 pt-9">{children}</main>
+      <main id="conteudo" className="mx-auto max-w-shell px-10 pb-16 pt-9">
+        {children}
+      </main>
     </div>
   );
 }

@@ -86,7 +86,10 @@ export function MoodGrid({ value, onChange, disabled = false }: MoodGridProps) {
     if (disabled || !dragging.current) return;
     fromPointer(e.clientX, e.clientY);
   }
-  function onPointerUp() {
+  // `up` e `cancel` encerram o arraste. Sem o `cancel`, um gesto que o sistema
+  // sequestra (scroll, toque de outro dedo) deixaria `dragging` preso em true, e
+  // o próximo move — já sem o dedo na tela — arrastaria o ponto sozinho.
+  function endDrag() {
     dragging.current = false;
   }
 
@@ -102,7 +105,8 @@ export function MoodGrid({ value, onChange, disabled = false }: MoodGridProps) {
         onKeyDown={onKeyDown}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
         className="relative h-[210px] cursor-crosshair overflow-hidden rounded-md border border-primary-100 [touch-action:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300"
         style={{
           // Um gradiente radial por canto (energia/valência), sobre branco.

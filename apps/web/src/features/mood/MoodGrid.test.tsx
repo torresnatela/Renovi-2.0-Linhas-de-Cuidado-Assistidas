@@ -59,4 +59,22 @@ describe('MoodGrid', () => {
       'valência 55 de 100, energia 55 de 100',
     );
   });
+
+  it('encerra o arraste no onPointerCancel (não segue movendo o ponto)', () => {
+    const onValue = vi.fn();
+    render(<Harness onValue={onValue} />);
+    const grade = screen.getByRole('button', { name: GRID_LABEL });
+    stub200(grade);
+
+    // Começa o arraste (dragging=true) → uma mudança no ponto.
+    fireEvent.pointerDown(grade, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(onValue).toHaveBeenCalledTimes(1);
+
+    // O sistema assume o ponteiro (scroll, gesto): o arraste é cancelado.
+    fireEvent.pointerCancel(grade, { pointerId: 1 });
+
+    // Um move posterior NÃO deve mais mover o ponto — o arraste acabou.
+    fireEvent.pointerMove(grade, { clientX: 150, clientY: 50 });
+    expect(onValue).toHaveBeenCalledTimes(1);
+  });
 });

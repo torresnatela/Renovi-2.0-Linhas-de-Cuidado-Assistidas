@@ -165,6 +165,21 @@ describe('ProfilePage', () => {
     );
   });
 
+  // Falha silenciosa numa ação LGPD é inaceitável: se a revogação falha, o
+  // paciente precisa ver que NÃO foi revogado (senão pode achar que saiu do
+  // registro sem ter saído).
+  it('mostra erro visível quando a revogação falha', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(api.revokeConsent).mockRejectedValue(new Error('rede caiu'));
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /revogar consentimento/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/não foi possível revogar/i);
+  });
+
   it('não revoga quando o usuário cancela o confirm', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 

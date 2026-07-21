@@ -59,24 +59,34 @@ function ConsentRow({ status }: { status: ConsentStatus }) {
     : 'Consentimento revogado · o check-in fica bloqueado até um novo aceite.';
 
   return (
-    <div className="flex items-center gap-3.5 rounded-md border border-primary-100 p-4">
-      <span
-        aria-hidden="true"
-        className={`h-2 w-2 shrink-0 rounded-full ${status.active ? 'bg-success' : 'bg-primary-200'}`}
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-[15px] font-bold text-primary-300">Check-in de humor</span>
-        <span className="text-[13px] text-muted">{detalhe}</span>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-3.5 rounded-md border border-primary-100 p-4">
+        <span
+          aria-hidden="true"
+          className={`h-2 w-2 shrink-0 rounded-full ${status.active ? 'bg-success' : 'bg-primary-200'}`}
+        />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-[15px] font-bold text-primary-300">Check-in de humor</span>
+          <span className="text-[13px] text-muted">{detalhe}</span>
+        </div>
+        {status.active && (
+          <button
+            type="button"
+            onClick={handleRevoke}
+            disabled={revoke.isPending}
+            className="shrink-0 rounded-sm px-2 py-1 text-[13px] font-bold text-error transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {revoke.isPending ? 'Revogando…' : 'Revogar consentimento do check-in'}
+          </button>
+        )}
       </div>
-      {status.active && (
-        <button
-          type="button"
-          onClick={handleRevoke}
-          disabled={revoke.isPending}
-          className="shrink-0 rounded-sm px-2 py-1 text-[13px] font-bold text-error transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {revoke.isPending ? 'Revogando…' : 'Revogar consentimento do check-in'}
-        </button>
+
+      {/* Ação LGPD não pode falhar em silêncio: se a revogação erra, o paciente
+          precisa ver que NÃO saiu do registro (senão acha que revogou sem ter). */}
+      {revoke.isError && (
+        <p role="alert" className="rounded-md bg-[rgba(205,25,25,0.08)] p-3 text-[13px] text-error">
+          Não foi possível revogar agora. Tente de novo em instantes.
+        </p>
       )}
     </div>
   );

@@ -38,4 +38,14 @@ describe('AppShell', () => {
     const avatar = screen.getByRole('img', { name: 'Ana' });
     expect(avatar.closest('a')).toHaveAttribute('href', '/perfil');
   });
+
+  // Acessibilidade de teclado: um "pular para o conteúdo" salta a navegação
+  // repetida do topo e leva direto ao <main>.
+  it('oferece um link "Pular para o conteúdo" que aponta para o main', () => {
+    renderShell('/jornada');
+    const skip = screen.getByRole('link', { name: /pular para o conteúdo/i });
+    expect(skip).toHaveAttribute('href', '#conteudo');
+    // O alvo existe e é o <main>.
+    expect(screen.getByRole('main')).toHaveAttribute('id', 'conteudo');
+  });
 });

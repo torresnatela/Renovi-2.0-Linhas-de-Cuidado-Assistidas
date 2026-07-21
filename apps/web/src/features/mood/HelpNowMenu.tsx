@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
 import { Card } from '../../shared/ui/Card';
 import { HelpPill } from '../../shared/ui/HelpPill';
@@ -14,6 +15,22 @@ import { useHelpNow } from './useMood';
 export function HelpNowMenu() {
   const help = useHelpNow();
   const [open, setOpen] = useState(false);
+  const location = useLocation();
+
+  // Um popover aberto não sobrevive à navegação: trocar de rota fecha.
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
+  // Escape fecha (padrão de popover): quem abriu por engano sai sem o mouse.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
   function pedirAjuda() {
     setOpen(true);

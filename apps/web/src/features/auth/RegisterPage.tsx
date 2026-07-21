@@ -64,7 +64,7 @@ export function RegisterPage() {
   const [cepLoading, setCepLoading] = useState(false);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const isFirstRenderRef = useRef(true);
+  const prevStepRef = useRef(step);
   // Último CEP (8 dígitos) já consultado — evita repetir o lookup a cada tecla
   // depois que o CEP já está completo, e permite descartar resposta obsoleta.
   const lastCepRef = useRef<string | null>(null);
@@ -72,14 +72,17 @@ export function RegisterPage() {
   // Avançar/voltar de passo desmonta o botão focado (Continuar/Voltar do passo
   // anterior) e o foco cai no <body>: usuário de leitor de tela perde o contexto
   // e o "Passo N de 3" nunca é anunciado. Movemos o foco para o heading do passo
-  // recém-exibido — mas só em TRANSIÇÕES, nunca no primeiro render (não queremos
-  // roubar o foco da página ao abrir /cadastro).
+  // recém-exibido — mas só em TRANSIÇÕES de passo, nunca no mount.
+  //
+  // O guard compara o PASSO ANTERIOR (não um boolean de primeiro-render): sob o
+  // <StrictMode> do main.tsx, o React reexecuta o efeito em dev (mount → cleanup
+  // → mount). Com o boolean, o segundo invoke via o flag já "false" e roubava o
+  // foco no mount; com prevStep === step, o segundo invoke não faz nada.
   useEffect(() => {
-    if (isFirstRenderRef.current) {
-      isFirstRenderRef.current = false;
-      return;
+    if (prevStepRef.current !== step) {
+      headingRef.current?.focus();
     }
-    headingRef.current?.focus();
+    prevStepRef.current = step;
   }, [step]);
 
   // Só barra a entrada de quem JÁ estava logado. Depois de um cadastro bem-sucedido
