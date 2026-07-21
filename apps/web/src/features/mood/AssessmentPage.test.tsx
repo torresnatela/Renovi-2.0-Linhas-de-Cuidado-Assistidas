@@ -78,4 +78,24 @@ describe('AssessmentPage', () => {
     // Encaminhamento é informativo, não erro: nenhum role=alert.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
+
+  // Regra de ouro de UX do repo: nunca mostrar botão só desabilitado sem dizer
+  // o motivo. Enquanto faltar responder algo, uma microcopy discreta explica —
+  // ela some assim que o formulário fica completo.
+  it('mostra a dica de formulário incompleto e a esconde quando todas as perguntas são respondidas', async () => {
+    const user = userEvent.setup();
+    renderAt('/avaliacoes/WHO5');
+
+    await screen.findByText(/Nas últimas duas semanas/);
+    const botaoEnviar = screen.getByRole('button', { name: /Enviar respostas/i });
+    expect(botaoEnviar).toBeDisabled();
+    expect(screen.getByText('Responda todas as perguntas para enviar.')).toBeInTheDocument();
+
+    for (const botao of screen.getAllByRole('button', { name: /Em nenhum momento/i })) {
+      await user.click(botao);
+    }
+
+    expect(botaoEnviar).toBeEnabled();
+    expect(screen.queryByText('Responda todas as perguntas para enviar.')).not.toBeInTheDocument();
+  });
 });

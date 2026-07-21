@@ -12,12 +12,20 @@ import { LinkButton, SectionLabel } from './parts';
  * e A PARTIR DE QUANDO em tom neutro, nunca vermelho.
  */
 export function ToScheduleAside({ journey }: { journey: Journey | undefined }) {
+  // `GET /me/journey` devolve TODO o histórico de matrículas (inclusive
+  // encerrada/expirada/concluída). "Para agendar" é o PRESENTE — igual à
+  // Jornada (`JourneyPage.tsx`) e ao Perfil (`PlanSection.tsx`), só matrículas
+  // `ativa` entram aqui. Sem este filtro, itens de matrícula encerrada
+  // apareciam duplicados/mortos no funil de agendamento.
+  const enrollmentsAtivas = (journey?.enrollments ?? []).filter(
+    (e) => e.enrollment.status === 'ativa',
+  );
   // Só CONSULTA é agendável (tem especialidade + slots no legado). ATIVIDADE
   // (check-in de humor, WHO-5, PHQ-4) vive na Jornada — aqui o clique em
   // "Agendar" levaria a uma agenda vazia, então o item nem aparece no funil.
-  const itens = (journey?.enrollments.flatMap((e) => e.items) ?? []).filter(
-    ({ item }) => item.kind === 'CONSULTA',
-  );
+  const itens = enrollmentsAtivas
+    .flatMap((e) => e.items)
+    .filter(({ item }) => item.kind === 'CONSULTA');
   if (itens.length === 0) return null;
 
   return (

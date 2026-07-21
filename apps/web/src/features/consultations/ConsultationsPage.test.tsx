@@ -302,6 +302,54 @@ describe('ConsultationsPage', () => {
     expect(screen.getByText('Você já agendou sua consulta deste mês.')).toBeInTheDocument();
   });
 
+  /**
+   * Regressão (achado real na conta de teste): `GET /me/journey` devolve TODO o
+   * histórico de matrículas (inclusive encerrada/expirada/concluída), e o aside
+   * fazia `flatMap` de TODAS sem filtrar por `enrollment.status`. Mesma regra já
+   * aplicada em `JourneyPage.tsx` e `PlanSection.tsx`: "Para agendar" é o
+   * PRESENTE — só itens de matrícula `ativa` aparecem aqui.
+   */
+  it('mostra no aside só itens de matrícula ativa; a encerrada não aparece', async () => {
+    vi.mocked(api.listCareAppointments).mockResolvedValue([]);
+    vi.mocked(api.getJourney).mockResolvedValue({
+      enrollments: [
+        {
+          enrollment: {
+            id: 'enr-ativa',
+            care_line_code: 'saude-mental',
+            care_line_version: 1,
+            status: 'ativa',
+            valid_from: '2026-01-01T00:00:00-03:00',
+            valid_until: '2026-12-31T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Saúde mental',
+          items: [journeyItem({ id: 'i1', label: 'Psicologia' }, true)],
+          recent_events: [],
+        },
+        {
+          enrollment: {
+            id: 'enr-encerrada',
+            care_line_code: 'ortopedia',
+            care_line_version: 1,
+            status: 'encerrada',
+            valid_from: '2025-01-01T00:00:00-03:00',
+            valid_until: '2025-06-30T00:00:00-03:00',
+            periods: [],
+          },
+          care_line_name: 'Ortopedia (encerrada)',
+          items: [journeyItem({ id: 'i2', label: 'Ortopedia' }, true)],
+          recent_events: [],
+        },
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Psicologia')).toBeInTheDocument();
+    expect(screen.queryByText('Ortopedia')).not.toBeInTheDocument();
+  });
+
   // Atividades (check-in de humor, WHO-5, PHQ-4) não têm especialidade nem
   // slots no legado — não são agendáveis. O aside "Para agendar" existe para
   // o funil de CONSULTA; atividade vive na Jornada, não aqui.

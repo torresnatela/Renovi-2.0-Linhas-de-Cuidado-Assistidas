@@ -178,6 +178,11 @@ export function AssessmentForm({ codigo, onDone }: { codigo: AssessmentCode; onD
             >
               {submit.isPending ? 'Enviando…' : 'Enviar respostas'}
             </Button>
+            {!completo && (
+              // Regra de ouro de UX: nunca um botão só desabilitado, sem dizer o
+              // motivo — some assim que a última pergunta é respondida.
+              <p className="text-xs text-muted">Responda todas as perguntas para enviar.</p>
+            )}
             {submit.isError && (
               // Falha do ENVIO é erro real: tom de erro (o único vermelho aqui).
               <p role="alert" className="rounded-md bg-[rgba(205,25,25,0.08)] p-3 text-sm text-error">
