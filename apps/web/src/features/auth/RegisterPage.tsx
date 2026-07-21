@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
 import type { RegisterRequest } from '../../shared/api';
@@ -63,6 +63,25 @@ export function RegisterPage() {
   const [consent, setConsent] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
 
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const isFirstRenderRef = useRef(true);
+  // Último CEP (8 dígitos) já consultado — evita repetir o lookup a cada tecla
+  // depois que o CEP já está completo, e permite descartar resposta obsoleta.
+  const lastCepRef = useRef<string | null>(null);
+
+  // Avançar/voltar de passo desmonta o botão focado (Continuar/Voltar do passo
+  // anterior) e o foco cai no <body>: usuário de leitor de tela perde o contexto
+  // e o "Passo N de 3" nunca é anunciado. Movemos o foco para o heading do passo
+  // recém-exibido — mas só em TRANSIÇÕES, nunca no primeiro render (não queremos
+  // roubar o foco da página ao abrir /cadastro).
+  useEffect(() => {
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
+      return;
+    }
+    headingRef.current?.focus();
+  }, [step]);
+
   // Só barra a entrada de quem JÁ estava logado. Depois de um cadastro bem-sucedido
   // a sessão também existe, mas aí queremos a tela de sucesso, não o redirect.
   if (session.data && !register.isSuccess) return <Navigate to="/" replace />;
@@ -115,10 +134,19 @@ export function RegisterPage() {
   }
 
   async function onCepComplete(cep: string) {
+    const digits = digitsOnly(cep);
+    // O input dispara onCepComplete a cada tecla enquanto o CEP tiver 8 dígitos
+    // (a máscara já satura em 8 — continuar digitando não muda o valor). Sem essa
+    // guarda, cada keystroke extra refaria a consulta à ViaCEP.
+    if (digits === lastCepRef.current) return;
+    lastCepRef.current = digits;
+
     setCepLoading(true);
     const addr = await lookupCep(cep);
     setCepLoading(false);
     if (!addr) return; // falha/ inexistente: silêncio, preenche à mão
+    // Resposta obsoleta: o usuário já mudou o CEP de novo antes desta resolver.
+    if (lastCepRef.current !== digits) return;
     setForm((f) => ({
       ...f,
       rua: addr.street || f.rua,
@@ -177,10 +205,19 @@ export function RegisterPage() {
               </button>
             )}
             <div className="flex flex-col">
-              <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
+              <span
+                aria-live="polite"
+                className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted"
+              >
                 Passo {step} de 3
               </span>
-              <span className="text-[22px] font-bold text-primary-300">{STEP_TITLES[step]}</span>
+              <h1
+                ref={headingRef}
+                tabIndex={-1}
+                className="text-[22px] font-bold text-primary-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-300 focus-visible:ring-offset-2"
+              >
+                {STEP_TITLES[step]}
+              </h1>
             </div>
           </div>
           <div className="h-1.5 overflow-hidden rounded-pill bg-primary-100">

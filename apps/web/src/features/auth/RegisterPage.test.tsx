@@ -211,4 +211,40 @@ describe('RegisterPage', () => {
     await user.type(rua, 'Rua das Flores');
     expect(rua).toHaveValue('Rua das Flores');
   });
+
+  // Foco: avançar/voltar de passo desmonta o botão focado (Continuar/Voltar) e o
+  // foco cai no <body>, deixando quem usa leitor de tela sem contexto do passo novo.
+  it('move o foco para o heading do passo ao avançar no wizard', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await fillStep1(user);
+
+    expect(await screen.findByRole('heading', { name: 'Seu endereço' })).toHaveFocus();
+  });
+
+  // Guard: a máscara do CEP satura em 8 dígitos — continuar digitando não muda o
+  // valor exibido, mas o onChange do input ainda dispara. Sem a guarda, cada
+  // keystroke extra repetiria a consulta à ViaCEP.
+  it('não repete a consulta à ViaCEP quando o CEP de 8 dígitos não muda', async () => {
+    const user = userEvent.setup();
+    vi.mocked(viaCep.lookupCep).mockResolvedValue({
+      street: 'Avenida Copacabana',
+      neighborhood: 'Dezoito do Forte',
+      city: 'Barueri',
+      state: 'SP',
+    });
+    renderPage();
+
+    await fillStep1(user);
+    const cepInput = screen.getByLabelText(/CEP/i);
+    await user.type(cepInput, '06472000');
+    await screen.findByDisplayValue('Avenida Copacabana');
+
+    // keystroke extra: 9 dígitos digitados, mas a máscara continua devolvendo os
+    // mesmos 8 — antes do fix, isso disparava uma segunda consulta.
+    await user.type(cepInput, '9');
+
+    await waitFor(() => expect(viaCep.lookupCep).toHaveBeenCalledTimes(1));
+  });
 });
