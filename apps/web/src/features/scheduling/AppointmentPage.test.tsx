@@ -269,4 +269,45 @@ describe('AppointmentPage', () => {
     await waitFor(() => expect(nav.openExternal).toHaveBeenCalledWith(LINK));
     expect(screen.queryByText(/Antes da consulta/i)).not.toBeInTheDocument();
   });
+
+  /**
+   * Regra de produto: falha no SUBMIT do instrumento (já respondido, rede, etc.)
+   * também não pode prender o paciente. O AssessmentForm mostra o erro inline —
+   * sem trocar de tela — e o "Fechar" (não há "Concluir" nesse estado, pois não
+   * houve `resultado`) chama `onDone` → `concluirGate` → a sala abre normal.
+   */
+  it('se o submit do instrumento falha, "Fechar" ainda abre a sala', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getAppointment).mockResolvedValue(consulta());
+    vi.mocked(api.getMoodToday).mockResolvedValue(today({ offer: 'WHO5' }));
+    vi.mocked(api.getAssessmentAvailability).mockResolvedValue({
+      codigo: 'WHO5',
+      eligibility: { allowed: true, blocks: [] },
+      item_count: 5,
+      value_min: 0,
+      value_max: 5,
+    });
+    vi.mocked(api.submitAssessment).mockRejectedValue(
+      new ApiError(409, 'Conflito', 'Você já respondeu esse instrumento hoje.'),
+    );
+    vi.mocked(api.joinAppointment).mockResolvedValue({ url: LINK });
+    renderPage({ today: today({ offer: 'WHO5' }) });
+
+    await user.click(await screen.findByRole('button', { name: /Entrar na consulta/i }));
+    expect(await screen.findByText(/Antes da consulta/i)).toBeInTheDocument();
+
+    // Responde os 5 itens do WHO-5 e envia — o submit vai rejeitar com 409.
+    for (const botao of screen.getAllByRole('button', { name: /Em nenhum momento/i })) {
+      await user.click(botao);
+    }
+    await user.click(screen.getByRole('button', { name: /Enviar respostas/i }));
+
+    // O erro aparece inline; a sala ainda NÃO abriu.
+    expect(await screen.findByText(/Você já respondeu esse instrumento hoje/i)).toBeInTheDocument();
+    expect(api.joinAppointment).not.toHaveBeenCalled();
+
+    // "Fechar" ainda dispara onDone → concluirGate → join, mesmo com o instrumento em erro.
+    await user.click(screen.getByRole('button', { name: /Fechar/i }));
+    await waitFor(() => expect(nav.openExternal).toHaveBeenCalledWith(LINK));
+  });
 });
