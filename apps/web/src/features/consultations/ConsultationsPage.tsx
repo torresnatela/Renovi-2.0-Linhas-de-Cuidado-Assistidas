@@ -3,7 +3,9 @@ import { useState } from 'react';
 import { ApiError, type CareAppointment, type CareAppointmentStatus } from '../../shared/api';
 import { Empty, ErrorNotice, Loading } from '../../shared/ui/feedback';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
+import { useIsDesktop } from '../../shared/viewport';
 import { useCancelCare, useCareAppointments, useJourney } from '../journey/useJourney';
+import { HelpNowMenu } from '../mood/HelpNowMenu';
 import { reasonText } from '../scheduling/reasons';
 import { AppointmentCard } from './AppointmentCard';
 import { HistorySection } from './HistorySection';
@@ -36,6 +38,7 @@ const porDataDesc = (a: CareAppointment, b: CareAppointment) =>
  * Ambas as abas leem da MESMA query (`useCareAppointments`) e filtram no cliente.
  */
 export function ConsultationsPage({ now = new Date() }: { now?: Date } = {}) {
+  const isDesktop = useIsDesktop();
   const { data: consultas, isLoading, error } = useCareAppointments();
   const { data: journey } = useJourney();
   const cancelar = useCancelCare();
@@ -59,12 +62,26 @@ export function ConsultationsPage({ now = new Date() }: { now?: Date } = {}) {
 
   return (
     <div className="flex flex-col gap-7">
-      <div className="flex flex-wrap items-end justify-between gap-8">
+      {/*
+        Mobile (mock Consultas.dc.html linhas 28–44): eyebrow + título (26px) +
+        HelpNowMenu numa linha; abas full-width na linha de baixo — o próprio
+        flex-wrap resolve a quebra (o wrapper w-full da SegmentedControl nunca
+        cabe ao lado de outra coisa, então cai pra linha 2 sozinho). No
+        desktop, `!isDesktop` não renderiza nada (HelpNowMenu já vive no header
+        do AppShell) e as classes `lg:` devolvem o layout de sempre — mesma
+        linha, mesmo tamanho, byte a byte.
+      */}
+      <div className="flex flex-wrap items-start justify-between gap-8 lg:items-end">
         <div className="flex flex-col gap-1">
           <SectionLabel>Suas consultas</SectionLabel>
-          <h1 className="text-[38px] font-bold leading-[44px] text-primary-300">Consultas</h1>
+          <h1 className="text-[26px] font-bold leading-8 text-primary-300 lg:text-[38px] lg:leading-[44px]">
+            Consultas
+          </h1>
         </div>
-        <div className="w-[300px] max-w-full">
+
+        {!isDesktop && <HelpNowMenu />}
+
+        <div className="w-full lg:w-[300px] lg:max-w-full">
           <SegmentedControl
             options={[
               { value: 'proximas', label: 'Próximas' },
