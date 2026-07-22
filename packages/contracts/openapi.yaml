@@ -1318,6 +1318,81 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+
+  # --- Integração Gestão -> renovi-care (push, ADR-043) ---
+  /integration/gestao/contracts:
+    post:
+      operationId: recordGestaoContract
+      summary: Recebe (push) um contrato da Renovi Gestão.
+      description: >
+        Idempotente por `contract_id`: faz upsert de empresa, colaborador e
+        contrato e, para colaborador novo sem conta, cunha o convite de onboarding
+        e o devolve em `invite_url` (o gestor repassa por WhatsApp). O CPF nunca
+        trafega — a chave da pessoa é `cpf_hmac` (HMAC-SHA256 do CPF com o pepper
+        compartilhado). Nunca escrevemos no banco da Gestão.
+      security:
+        - integrationToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GestaoContractPush"
+      responses:
+        "200":
+          description: Contrato registrado (upsert idempotente).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GestaoContractPushResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /integration/gestao/employees/{cpf_hmac}/resend-invite:
+    post:
+      operationId: resendGestaoInvite
+      summary: Reenvia o convite de onboarding de um colaborador.
+      description: >
+        Revoga o convite vivo e cunha outro, devolvendo o novo `invite_url` — útil
+        quando o colaborador não tem e-mail (o gestor manda por WhatsApp). Recusa
+        quem já tem conta (409): esse caso segue pelo fluxo de consentimento
+        (cpf_match), não por um novo convite.
+      security:
+        - integrationToken: []
+      parameters:
+        - name: cpf_hmac
+          in: path
+          required: true
+          description: HMAC-SHA256 do CPF em hex minúsculo (64 caracteres).
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{64}$"
+      responses:
+        "200":
+          description: Convite reenviado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResendInviteResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Colaborador desconhecido (cpf_hmac sem vínculo).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: >
+            O colaborador já tem conta (`reason.code`: ALREADY_HAS_ACCOUNT) — o
+            vínculo de quem já é paciente passa pelo consentimento, não por convite.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   securitySchemes:
     # Sessão opaca em cookie httpOnly, não JWT (ver ADR-010 em docs/DECISOES.md).
@@ -1339,6 +1414,16 @@ components:
         tela de admin nem gestão de credencial no Slice 1. NUNCA é o cookie de
         sessão do paciente: as rotas /admin exigem este header e recusam a sessão,
         e as de paciente fazem o inverso.
+    # Token estático da integração Gestão->API (push, ADR-043). A MÁQUINA da Gestão
+    # que chama, nunca o cookie do paciente. Vazio desliga as rotas de integração.
+    integrationToken:
+      type: apiKey
+      in: header
+      name: X-Integration-Token
+      description: >
+        Token estático da integração Gestão->renovi-care (push). Vive numa variável
+        de ambiente do servidor e a rotação é MANUAL. NUNCA é a sessão do paciente:
+        as rotas /integration exigem este header e recusam a sessão.
   headers:
     SessionCookie:
       description: >
@@ -2709,5 +2794,95 @@ components:
             os problemas do template de uma vez.
           items:
             type: string
+
+    # --- Ingestão da Gestão (push, ADR-043) ---
+    GestaoContractPush:
+      type: object
+      required: [contract_id, status, employee, company]
+      properties:
+        contract_id:
+          type: string
+          description: Id do contrato no Gestão (employment_contracts.id). Chave de idempotência.
+          example: "ec_9f8c"
+        status:
+          type: string
+          enum: [ativo, afastado, desligado]
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Consentimento do titular para ESTA empresa (não usado nesta fatia).
+        employee:
+          $ref: "#/components/schemas/GestaoEmployeePush"
+        company:
+          $ref: "#/components/schemas/GestaoCompanyPush"
+    GestaoEmployeePush:
+      type: object
+      required: [id, cpf_hmac, name]
+      properties:
+        id:
+          type: string
+          description: Id do colaborador no Gestão (por tenant).
+        cpf_hmac:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: >
+            HMAC-SHA256 do CPF (pepper compartilhado), hex minúsculo de 64 chars. O
+            CPF em claro nunca trafega.
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+    GestaoCompanyPush:
+      type: object
+      required: [id, display_name]
+      properties:
+        id:
+          type: string
+        display_name:
+          type: string
+    GestaoContractPushResult:
+      type: object
+      required: [person_status, contract_status, invite_sent]
+      properties:
+        person_status:
+          type: string
+          enum: [pendente, vinculado]
+        contract_status:
+          type: string
+          enum: [ativo, afastado, desligado]
+        invite_sent:
+          type: boolean
+          description: Se um convite foi cunhado e "enviado" nesta chamada.
+        invite_url:
+          type: string
+          nullable: true
+          description: >
+            URL de onboarding (presente só quando invite_sent=true). Contém o token
+            — trate como segredo.
+        invite_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    ResendInviteResult:
+      type: object
+      required: [invite_url, expires_at]
+      properties:
+        invite_url:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
 security:
   - cookieAuth: []

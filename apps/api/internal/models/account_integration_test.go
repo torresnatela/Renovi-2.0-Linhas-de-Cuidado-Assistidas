@@ -60,7 +60,8 @@ func newStore(t *testing.T, d models.DAVClient) (*models.AccountStore, *pgxpool.
 	pool, err := pgxpool.New(context.Background(), dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	return models.NewAccountStore(pool, d), pool
+	// Pepper de teste: o cadastro passa a gravar patient_identity.cpf_hmac.
+	return models.NewAccountStore(pool, d, []byte("pepper-de-teste-integracao")), pool
 }
 
 func validInput() models.RegisterInput {

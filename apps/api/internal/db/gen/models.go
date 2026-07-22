@@ -152,6 +152,52 @@ type ExampleWidget struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type GestaoCompanyLink struct {
+	ID              uuid.UUID `json:"id"`
+	GestaoCompanyID string    `json:"gestao_company_id"`
+	DisplayName     string    `json:"display_name"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type GestaoContract struct {
+	ID                   uuid.UUID          `json:"id"`
+	GestaoContractID     string             `json:"gestao_contract_id"`
+	GestaoEmployeeID     string             `json:"gestao_employee_id"`
+	GestaoEmployeeLinkID uuid.UUID          `json:"gestao_employee_link_id"`
+	GestaoCompanyLinkID  uuid.UUID          `json:"gestao_company_link_id"`
+	Status               string             `json:"status"`
+	AcceptedAt           pgtype.Timestamptz `json:"accepted_at"`
+	StartedAt            time.Time          `json:"started_at"`
+	EndedAt              pgtype.Timestamptz `json:"ended_at"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
+}
+
+type GestaoEmployeeLink struct {
+	ID          uuid.UUID          `json:"id"`
+	CpfHmac     []byte             `json:"cpf_hmac"`
+	InviteName  string             `json:"invite_name"`
+	InviteEmail pgtype.Text        `json:"invite_email"`
+	InvitePhone pgtype.Text        `json:"invite_phone"`
+	PatientID   pgtype.UUID        `json:"patient_id"`
+	Status      string             `json:"status"`
+	LinkMethod  pgtype.Text        `json:"link_method"`
+	LinkedAt    pgtype.Timestamptz `json:"linked_at"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+}
+
+type GestaoIngestionEvent struct {
+	ID                   uuid.UUID   `json:"id"`
+	EventType            string      `json:"event_type"`
+	GestaoContractID     pgtype.Text `json:"gestao_contract_id"`
+	GestaoEmployeeLinkID pgtype.UUID `json:"gestao_employee_link_id"`
+	CpfHmac              []byte      `json:"cpf_hmac"`
+	Payload              []byte      `json:"payload"`
+	OccurredAt           time.Time   `json:"occurred_at"`
+}
+
 type Instrument struct {
 	ID        uuid.UUID `json:"id"`
 	Codigo    string    `json:"codigo"`
@@ -212,6 +258,16 @@ type MoodCheckin struct {
 	UpdatedAt      time.Time   `json:"updated_at"`
 }
 
+type OnboardingToken struct {
+	ID                   uuid.UUID          `json:"id"`
+	GestaoEmployeeLinkID uuid.UUID          `json:"gestao_employee_link_id"`
+	TokenHash            []byte             `json:"token_hash"`
+	ExpiresAt            time.Time          `json:"expires_at"`
+	UsedAt               pgtype.Timestamptz `json:"used_at"`
+	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt            time.Time          `json:"created_at"`
+}
+
 type PatientAccount struct {
 	ID               uuid.UUID          `json:"id"`
 	FullName         string             `json:"full_name"`
@@ -248,6 +304,7 @@ type PatientIdentity struct {
 	AccountID uuid.UUID `json:"account_id"`
 	Cpf       string    `json:"cpf"`
 	CreatedAt time.Time `json:"created_at"`
+	CpfHmac   []byte    `json:"cpf_hmac"`
 }
 
 type Session struct {

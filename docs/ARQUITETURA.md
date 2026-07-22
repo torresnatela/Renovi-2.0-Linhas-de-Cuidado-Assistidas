@@ -57,7 +57,14 @@ seeds/care_lines/  # templates versionados (JSON)
 |---|---|---|
 | **Postgres `renovi_care`** (nosso) | Todo o domínio novo (contas, templates, jornada, consultas) | Escrita + leitura. Migrations versionadas. |
 | **MySQL legado** | Verdade da escala/slots + trava de agenda | Leitura de slots + escrita **restrita** à tabela de agendamento, via Adapter Agenda. |
-| **Postgres Gestão 2.0** | Empresa, contrato, colaborador elegível | **Somente leitura**, via Adapter Gestão. Nunca escreve. |
+| **Postgres Gestão 2.0** | Empresa, contrato, colaborador elegível | **Nunca escreve.** (Ver nota: a ativação virou PUSH — a Gestão chama nossa API.) |
+
+> **Nota (ADR-043, 2026-07-22):** a ingestão da Gestão passou de **pull** (nós
+> lermos o banco dela via "Adapter Gestão") para **PUSH**: a Gestão CHAMA
+> `POST /integration/gestao/contracts` e nós persistimos no `renovi_care`. A regra
+> inegociável ("nunca escrever na Gestão") continua valendo — no push, é a Gestão
+> que escreve em nós. O `RENOVI_GESTAO_DATABASE_URL` segue na config, mas não é
+> mais o caminho da ativação.
 
 No dev local, os três sobem via `make up` (os externos como **mocks** — ver
 `deploy/`). Os schemas reais serão mapeados na Sprint 0 (SPEC §9).
@@ -79,7 +86,12 @@ são declarativas (JSONB). Ver SPEC §3 para a gramática completa.
 
 ## 5. Fluxos críticos (referência — implementação no MVP)
 
-- **Ativação** (Gestão → paciente): token por CPF/e-mail → conta ACTIVE → enrollment → cadastro na DAV.
+- **Ativação** (Gestão → paciente, **push** — ADR-043): a Gestão faz `POST` de
+  contratos na nossa API; nós persistimos os vínculos (por `cpf_hmac`, sem CPF em
+  claro) e cunhamos o token de convite. O colaborador conclui o cadastro pelo
+  convite → conta ACTIVE → enrollment → cadastro na DAV. *(A fundação de ingestão
+  está feita; conclusão do onboarding e cpf_match com consentimento são fatias
+  seguintes.)*
 - **Agendamento** (3 sistemas, sem transação global): intenção registrada no
   `renovi_care` (`PENDING_SLOT`) → **CAS** do slot no legado (`booked=0 → 1`) →
   `DAV_PENDING` → `POST /appointment` na DAV, **uma tentativa, sem retry** →

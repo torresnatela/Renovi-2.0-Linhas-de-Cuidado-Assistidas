@@ -233,3 +233,60 @@ func TestRouter_JourneyLigado_MeEJornadaConvivem(t *testing.T) {
 	assert.Equal(t, http.StatusOK, get("/api/v1/me/journey"), "/me/journey (jornada) montado junto")
 	assert.Equal(t, http.StatusOK, get("/api/v1/me/audit"))
 }
+
+// --- Integração da Gestão (push, ADR-043) ---
+
+type fakeIngestion struct{}
+
+func (fakeIngestion) RecordContract(context.Context, models.ContractPush) (models.RecordResult, error) {
+	return models.RecordResult{PersonStatus: "pendente", ContractStatus: "ativo"}, nil
+}
+func (fakeIngestion) ResendInvite(context.Context, []byte) (models.ResendResult, error) {
+	return models.ResendResult{}, nil
+}
+
+func ingestionRouter() *controllers.IngestionController {
+	return &controllers.IngestionController{Ingestion: fakeIngestion{}}
+}
+
+// Sem Ingestion, as rotas /integration nem existem: 404, não 401.
+func TestRouter_IngestionDesligado_404(t *testing.T) {
+	r := NewRouter(Deps{Version: "test"})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/v1/integration/gestao/contracts", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// Com Ingestion mas sem o token, é 401 (o middleware barra antes do handler).
+func TestRouter_IngestionLigado_SemToken_401(t *testing.T) {
+	r := NewRouter(Deps{Version: "test", Ingestion: ingestionRouter(), GestaoIntegrationToken: "int-tok"})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/v1/integration/gestao/contracts", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// Com Ingestion e o token certo, a rota chega ao handler e responde 200.
+func TestRouter_IngestionLigado_ComToken_200(t *testing.T) {
+	r := NewRouter(Deps{Version: "test", Ingestion: ingestionRouter(), GestaoIntegrationToken: "int-tok"})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	body := `{"contract_id":"C-1","status":"ativo","employee":{"id":"E-1","cpf_hmac":"` +
+		strings.Repeat("0", 64) + `","name":"M"},"company":{"id":"CO","display_name":"ACME"}}`
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/integration/gestao/contracts", strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Integration-Token", "int-tok")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}

@@ -179,16 +179,20 @@ func (q *Queries) InsertDavLinkAudit(ctx context.Context, arg InsertDavLinkAudit
 }
 
 const insertIdentity = `-- name: InsertIdentity :exec
-INSERT INTO patient_identity (account_id, cpf) VALUES ($1, $2)
+INSERT INTO patient_identity (account_id, cpf, cpf_hmac) VALUES ($1, $2, $3)
 `
 
 type InsertIdentityParams struct {
 	AccountID uuid.UUID `json:"account_id"`
 	Cpf       string    `json:"cpf"`
+	CpfHmac   []byte    `json:"cpf_hmac"`
 }
 
+// cpf_hmac = HMAC-SHA256(cpf, CPF_PEPPER) grava junto para a integração da Gestão
+// casar a pessoa sem CPF em claro (0016/ADR-043). Nulo quando o pepper não está
+// configurado (dev/local sem a integração).
 func (q *Queries) InsertIdentity(ctx context.Context, arg InsertIdentityParams) error {
-	_, err := q.db.Exec(ctx, insertIdentity, arg.AccountID, arg.Cpf)
+	_, err := q.db.Exec(ctx, insertIdentity, arg.AccountID, arg.Cpf, arg.CpfHmac)
 	return err
 }
 

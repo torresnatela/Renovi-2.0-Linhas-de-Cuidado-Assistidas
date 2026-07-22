@@ -21,6 +21,7 @@ import (
 
 	"github.com/renovisaude/renovi-care/internal/adapters/agenda"
 	"github.com/renovisaude/renovi-care/internal/adapters/dav"
+	"github.com/renovisaude/renovi-care/internal/adapters/notify"
 	"github.com/renovisaude/renovi-care/internal/config"
 	"github.com/renovisaude/renovi-care/internal/controllers"
 	"github.com/renovisaude/renovi-care/internal/db"
@@ -81,6 +82,9 @@ func run() error {
 
 	careAdmin := newCareAdminController(cfg, pool, agendaClient, logger)
 
+	// Ingestão da Gestão (push, ADR-043): só o Postgres próprio + um Notifier stub.
+	ingestion := newIngestionController(cfg, pool, logger)
+
 	// Verificador de Humor (Anexo C): consentimento e instrumentos só precisam do
 	// Postgres próprio. As rotas /me/* só sobem junto com o Auth (ver router).
 	consent := &controllers.ConsentController{Consents: models.NewConsentStore(pool)}
@@ -109,15 +113,17 @@ func run() error {
 			}
 			return nil
 		},
-		Auth:        auth,
-		Scheduling:  scheduling,
-		Consent:     consent,
-		Mood:        mood,
-		Assessments: assessments,
-		CareAdmin:   careAdmin,
-		Journey:     journey,
-		Internal:    internal,
-		AdminToken:  cfg.AdminToken,
+		Auth:                   auth,
+		Scheduling:             scheduling,
+		Consent:                consent,
+		Mood:                   mood,
+		Assessments:            assessments,
+		CareAdmin:              careAdmin,
+		Journey:                journey,
+		Internal:               internal,
+		AdminToken:             cfg.AdminToken,
+		Ingestion:              ingestion,
+		GestaoIntegrationToken: cfg.GestaoIntegrationToken,
 		// O cadastro precisa de um teto maior que o de uma rota normal: ele
 		// espera a DAV de forma síncrona. Derivar do orçamento evita que os dois
 		// números divirjam e a última tentativa seja sempre cortada.
@@ -184,7 +190,7 @@ func newAuthController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logge
 	}
 
 	return &controllers.AuthController{
-		Accounts:     models.NewAccountStore(pool, davClient),
+		Accounts:     models.NewAccountStore(pool, davClient, []byte(cfg.CPFPepper)),
 		Sessions:     models.NewSessionStore(pool, cfg.SessionTTL),
 		CookieSecure: cfg.SessionCookieSecure,
 		SessionTTL:   cfg.SessionTTL,
@@ -320,5 +326,34 @@ func newCareAdminController(cfg config.Config, pool *pgxpool.Pool, agendaClient 
 	return &controllers.CareLineAdminController{
 		Catalog:     models.NewCareLineStore(pool, agendaClient),
 		Enrollments: models.NewEnrollmentStore(pool),
+	}
+}
+
+// newIngestionController monta as rotas /integration/gestao (push da Gestão,
+// ADR-043). Sobe só com as três condições, todas logadas quando faltam:
+//
+//   - RENOVI_GESTAO_INTEGRATION_TOKEN: sem token não há como autenticar a máquina
+//     que chama, e montar sem trava exporia a criação de vínculos.
+//   - RENOVI_CPF_PEPPER: sem o pepper compartilhado não há como casar a pessoa por
+//     cpf_hmac com o que o cadastro grava.
+//   - RENOVI_WEB_BASE_URL: sem ela não há como montar o invite_url do convite.
+//
+// A config já recusa subir com o token setado e a web base url vazia; aqui a
+// checagem é defensiva e desliga a feature em vez de subir meia-boca.
+func newIngestionController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) *controllers.IngestionController {
+	switch {
+	case cfg.GestaoIntegrationToken == "":
+		logger.Warn("rotas de integração DESLIGADAS: RENOVI_GESTAO_INTEGRATION_TOKEN vazio")
+		return nil
+	case cfg.CPFPepper == "":
+		logger.Warn("rotas de integração DESLIGADAS: RENOVI_CPF_PEPPER vazio (sem pepper não há match por cpf_hmac)")
+		return nil
+	case cfg.WebBaseURL == "":
+		logger.Warn("rotas de integração DESLIGADAS: RENOVI_WEB_BASE_URL vazio (sem ela não há invite_url)")
+		return nil
+	}
+	notifier := notify.NewLogNotifier(logger)
+	return &controllers.IngestionController{
+		Ingestion: models.NewGestaoIngestionStore(pool, notifier, cfg.InviteTTL, cfg.WebBaseURL),
 	}
 }

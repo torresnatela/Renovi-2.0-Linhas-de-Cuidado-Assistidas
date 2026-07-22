@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	AdminTokenScopes adminTokenContextKey = "adminToken.Scopes"
-	CookieAuthScopes cookieAuthContextKey = "cookieAuth.Scopes"
+	AdminTokenScopes       adminTokenContextKey       = "adminToken.Scopes"
+	CookieAuthScopes       cookieAuthContextKey       = "cookieAuth.Scopes"
+	IntegrationTokenScopes integrationTokenContextKey = "integrationToken.Scopes"
 )
 
 // Defines values for AppointmentStatus.
@@ -290,6 +291,66 @@ func (e ForceStatusRequestStatus) Valid() bool {
 	case ForceStatusRequestStatusFalta:
 		return true
 	case ForceStatusRequestStatusRealizada:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GestaoContractPushStatus.
+const (
+	GestaoContractPushStatusAfastado  GestaoContractPushStatus = "afastado"
+	GestaoContractPushStatusAtivo     GestaoContractPushStatus = "ativo"
+	GestaoContractPushStatusDesligado GestaoContractPushStatus = "desligado"
+)
+
+// Valid indicates whether the value is a known member of the GestaoContractPushStatus enum.
+func (e GestaoContractPushStatus) Valid() bool {
+	switch e {
+	case GestaoContractPushStatusAfastado:
+		return true
+	case GestaoContractPushStatusAtivo:
+		return true
+	case GestaoContractPushStatusDesligado:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GestaoContractPushResultContractStatus.
+const (
+	GestaoContractPushResultContractStatusAfastado  GestaoContractPushResultContractStatus = "afastado"
+	GestaoContractPushResultContractStatusAtivo     GestaoContractPushResultContractStatus = "ativo"
+	GestaoContractPushResultContractStatusDesligado GestaoContractPushResultContractStatus = "desligado"
+)
+
+// Valid indicates whether the value is a known member of the GestaoContractPushResultContractStatus enum.
+func (e GestaoContractPushResultContractStatus) Valid() bool {
+	switch e {
+	case GestaoContractPushResultContractStatusAfastado:
+		return true
+	case GestaoContractPushResultContractStatusAtivo:
+		return true
+	case GestaoContractPushResultContractStatusDesligado:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GestaoContractPushResultPersonStatus.
+const (
+	Pendente  GestaoContractPushResultPersonStatus = "pendente"
+	Vinculado GestaoContractPushResultPersonStatus = "vinculado"
+)
+
+// Valid indicates whether the value is a known member of the GestaoContractPushResultPersonStatus enum.
+func (e GestaoContractPushResultPersonStatus) Valid() bool {
+	switch e {
+	case Pendente:
+		return true
+	case Vinculado:
 		return true
 	default:
 		return false
@@ -947,6 +1008,60 @@ type ForceStatusRequest struct {
 // ForceStatusRequestStatus O status a forçar na consulta (rota interna de teste).
 type ForceStatusRequestStatus string
 
+// GestaoCompanyPush defines model for GestaoCompanyPush.
+type GestaoCompanyPush struct {
+	DisplayName string `json:"display_name"`
+	Id          string `json:"id"`
+}
+
+// GestaoContractPush defines model for GestaoContractPush.
+type GestaoContractPush struct {
+	// AcceptedAt Consentimento do titular para ESTA empresa (não usado nesta fatia).
+	AcceptedAt *time.Time        `json:"accepted_at,omitempty"`
+	Company    GestaoCompanyPush `json:"company"`
+
+	// ContractId Id do contrato no Gestão (employment_contracts.id). Chave de idempotência.
+	ContractId string                   `json:"contract_id"`
+	Employee   GestaoEmployeePush       `json:"employee"`
+	EndedAt    *time.Time               `json:"ended_at,omitempty"`
+	StartedAt  *time.Time               `json:"started_at,omitempty"`
+	Status     GestaoContractPushStatus `json:"status"`
+}
+
+// GestaoContractPushStatus defines model for GestaoContractPush.Status.
+type GestaoContractPushStatus string
+
+// GestaoContractPushResult defines model for GestaoContractPushResult.
+type GestaoContractPushResult struct {
+	ContractStatus  GestaoContractPushResultContractStatus `json:"contract_status"`
+	InviteExpiresAt *time.Time                             `json:"invite_expires_at,omitempty"`
+
+	// InviteSent Se um convite foi cunhado e "enviado" nesta chamada.
+	InviteSent bool `json:"invite_sent"`
+
+	// InviteUrl URL de onboarding (presente só quando invite_sent=true). Contém o token — trate como segredo.
+	InviteUrl    *string                              `json:"invite_url,omitempty"`
+	PersonStatus GestaoContractPushResultPersonStatus `json:"person_status"`
+}
+
+// GestaoContractPushResultContractStatus defines model for GestaoContractPushResult.ContractStatus.
+type GestaoContractPushResultContractStatus string
+
+// GestaoContractPushResultPersonStatus defines model for GestaoContractPushResult.PersonStatus.
+type GestaoContractPushResultPersonStatus string
+
+// GestaoEmployeePush defines model for GestaoEmployeePush.
+type GestaoEmployeePush struct {
+	// CpfHmac HMAC-SHA256 do CPF (pepper compartilhado), hex minúsculo de 64 chars. O CPF em claro nunca trafega.
+	CpfHmac string  `json:"cpf_hmac"`
+	Email   *string `json:"email,omitempty"`
+
+	// Id Id do colaborador no Gestão (por tenant).
+	Id    string  `json:"id"`
+	Name  string  `json:"name"`
+	Phone *string `json:"phone,omitempty"`
+}
+
 // GrantConsentRequest defines model for GrantConsentRequest.
 type GrantConsentRequest struct {
 	Finalidade  string `json:"finalidade"`
@@ -1194,6 +1309,12 @@ type RenewEnrollmentRequest struct {
 // RenewEnrollmentRequestMonths Meses acrescentados à vigência (novo período, não edita o atual).
 type RenewEnrollmentRequestMonths int
 
+// ResendInviteResult defines model for ResendInviteResult.
+type ResendInviteResult struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	InviteUrl string    `json:"invite_url"`
+}
+
 // RevokeConsentRequest defines model for RevokeConsentRequest.
 type RevokeConsentRequest struct {
 	Finalidade string `json:"finalidade"`
@@ -1304,6 +1425,9 @@ type adminTokenContextKey string
 // cookieAuthContextKey is the context key for cookieAuth security scheme
 type cookieAuthContextKey string
 
+// integrationTokenContextKey is the context key for integrationToken security scheme
+type integrationTokenContextKey string
+
 // ListCareLinesParams defines parameters for ListCareLines.
 type ListCareLinesParams struct {
 	// Code Filtra por uma linha específica (todas as versões desse code).
@@ -1401,6 +1525,9 @@ type LoginJSONRequestBody = LoginRequest
 
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody = RegisterRequest
+
+// RecordGestaoContractJSONRequestBody defines body for RecordGestaoContract for application/json ContentType.
+type RecordGestaoContractJSONRequestBody = GestaoContractPush
 
 // ForceCareAppointmentStatusJSONRequestBody defines body for ForceCareAppointmentStatus for application/json ContentType.
 type ForceCareAppointmentStatusJSONRequestBody = ForceStatusRequest

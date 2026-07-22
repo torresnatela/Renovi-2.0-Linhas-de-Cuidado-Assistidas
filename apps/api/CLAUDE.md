@@ -12,6 +12,8 @@ Contexto local do backend Go. Regras gerais no `CLAUDE.md` da raiz; arquitetura 
 | Decisão pura (linha de cuidado) | `internal/models/careline/` — **sem I/O, nunca** |
 | Decisão pura (humor — Anexo C) | `internal/models/mood/scoring/` (pontuação) e `internal/models/mood/trigger/` (gatilho) — **sem I/O, nunca** |
 | Cliente de sistema externo (DAV, Gestão, legado) | `internal/adapters/<sistema>/` — interface no **consumidor** (ADR-012) |
+| Entrega de convite/notificação | `internal/adapters/notify/` — porta `Notifier` no model, stub `LogNotifier` (ADR-043) |
+| Ingestão push da Gestão | `controllers/ingestion_controller.go` → `models/gestao_ingestion.go`, atrás de `RequireIntegrationToken` (ADR-043) |
 | Um model consumindo outro (booking, storage da jornada) | interface **declarada no consumidor**, não no fornecedor — ex.: `BookingService`/`journeyStorage` em `models/care_journey.go` (ADR-012) |
 | Query SQL | `internal/db/queries/*.sql` → `make generate-sqlc` |
 | Migration | `internal/db/migrations/NNNN_nome.up.sql` + `.down.sql` |

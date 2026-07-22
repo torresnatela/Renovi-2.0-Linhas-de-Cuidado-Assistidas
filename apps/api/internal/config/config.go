@@ -104,6 +104,24 @@ type Config struct {
 	// PROIBIDO em produção (validate falha): são atalhos que não podem existir num
 	// ambiente com paciente real.
 	TestEndpoints bool
+
+	// --- Ingestão da Gestão (push, ADR-043) ---
+
+	// CPFPepper assina o cpf_hmac (HMAC-SHA256 do CPF), a chave pseudônima que a
+	// Gestão e nós compartilhamos para casar a pessoa sem CPF em claro. Segredo:
+	// NUNCA logado (ver LogValue). Vazio DESLIGA a ingestão (o cadastro grava
+	// cpf_hmac NULL e as rotas de integração não sobem).
+	CPFPepper string
+	// GestaoIntegrationToken é o token estático da integração Gestão->API (header
+	// X-Integration-Token). Vazio DESLIGA as rotas de integração. Segredo: só o
+	// fato de estar setado vai para o log.
+	GestaoIntegrationToken string
+	// InviteTTL é a validade do token de onboarding (default 7 dias).
+	InviteTTL time.Duration
+	// WebBaseURL é a base pública do front, usada para montar o invite_url do
+	// convite (ex.: https://app.renovisaude.com.br). Em local cai no dev server do
+	// Vite; com a integração ligada em staging/produção, é obrigatória.
+	WebBaseURL string
 	// CancelCountThreshold é a antecedência mínima de cancelamento para a consulta
 	// NÃO contar na cota do motor de elegibilidade (usado na Fase 6). Default 24h,
 	// nunca negativo.
@@ -137,6 +155,11 @@ func (c Config) LogValue() slog.Value {
 		slog.Bool("admin_token_set", c.AdminToken != ""),
 		slog.Bool("test_endpoints", c.TestEndpoints),
 		slog.Duration("cancel_count_threshold", c.CancelCountThreshold),
+		// Segredos da ingestão da Gestão: só o "está setado" vai para o log.
+		slog.Bool("cpf_pepper_set", c.CPFPepper != ""),
+		slog.Bool("gestao_integration_token_set", c.GestaoIntegrationToken != ""),
+		slog.Duration("invite_ttl", c.InviteTTL),
+		slog.String("web_base_url", c.WebBaseURL),
 	)
 }
 
@@ -196,6 +219,19 @@ func Load() (Config, error) {
 	cfg.AdminToken = env("RENOVI_ADMIN_TOKEN", "")
 	cfg.DAVBaseURL = env("RENOVI_DAV_BASE_URL", "")
 	cfg.DAVAPIKey = env("RENOVI_DAV_API_KEY", "")
+
+	// Ingestão da Gestão (push, ADR-043).
+	cfg.CPFPepper = env("RENOVI_CPF_PEPPER", "")
+	cfg.GestaoIntegrationToken = env("RENOVI_GESTAO_INTEGRATION_TOKEN", "")
+	if cfg.InviteTTL, err = envDuration("RENOVI_INVITE_TTL", 168*time.Hour); err != nil {
+		return Config{}, err
+	}
+	// A URL do front não tem default fora de local: um convite que apontasse para
+	// localhost em produção seria pior que falhar na subida.
+	cfg.WebBaseURL = env("RENOVI_WEB_BASE_URL", "")
+	if cfg.WebBaseURL == "" && cfg.Env == EnvLocal {
+		cfg.WebBaseURL = "http://localhost:5173"
+	}
 
 	// A URL do banco é obrigatória em produção; fora dela, cai no default local.
 	cfg.CareDatabaseURL = env("RENOVI_CARE_DATABASE_URL", "")
@@ -281,6 +317,14 @@ func (c Config) validate() error {
 	}
 	if c.CancelCountThreshold < 0 {
 		return fmt.Errorf("config: RENOVI_CANCEL_COUNT_THRESHOLD não pode ser negativo")
+	}
+	if c.InviteTTL <= 0 {
+		return fmt.Errorf("config: RENOVI_INVITE_TTL deve ser > 0")
+	}
+	// Com a integração da Gestão ligada, o convite precisa de uma base pública para
+	// virar URL. Sem ela, o invite_url apontaria para lugar nenhum.
+	if c.GestaoIntegrationToken != "" && c.WebBaseURL == "" {
+		return fmt.Errorf("config: RENOVI_WEB_BASE_URL é obrigatório quando RENOVI_GESTAO_INTEGRATION_TOKEN está setado")
 	}
 	return nil
 }

@@ -50,6 +50,13 @@ type Deps struct {
 	// AdminToken é o token estático exigido pelas rotas /admin (header
 	// X-Admin-Token). Só é usado quando CareAdmin != nil.
 	AdminToken string
+	// Ingestion monta /integration/gestao/* (push da Gestão, ADR-043). Nil desliga
+	// (sem RENOVI_GESTAO_INTEGRATION_TOKEN/CPF_PEPPER/WEB_BASE_URL). NÃO depende de
+	// Auth: autentica pelo token de integração, nunca pela sessão do paciente.
+	Ingestion *controllers.IngestionController
+	// GestaoIntegrationToken é o token estático exigido pelas rotas /integration
+	// (header X-Integration-Token). Só é usado quando Ingestion != nil.
+	GestaoIntegrationToken string
 	// RegisterTimeout é o teto da rota de cadastro, que fala com a DAV de forma
 	// síncrona. Deve vir de config.DAVBudget() + folga; zero cai num default.
 	RegisterTimeout time.Duration
@@ -135,6 +142,13 @@ func NewRouter(d Deps) *chi.Mux {
 		// presente E agenda disponível — ver cmd/api/main.go).
 		if d.CareAdmin != nil {
 			mountCareAdmin(r, *d.CareAdmin, d.AdminToken)
+		}
+
+		// As rotas de integração da Gestão NÃO dependem de Auth: autenticam pelo
+		// token de integração (push, ADR-043), não pela sessão do paciente. Só
+		// sobem quando o main as montou (token + pepper + web base url presentes).
+		if d.Ingestion != nil {
+			mountIngestion(r, *d.Ingestion, d.GestaoIntegrationToken)
 		}
 
 		// As rotas internas de teste só EXISTEM quando o main as montou
@@ -276,6 +290,21 @@ func mountCareAdmin(r chi.Router, c controllers.CareLineAdminController, adminTo
 			r.Post("/enrollments", c.CreateEnrollment)
 			r.Post("/enrollments/{enrollment_id}/renew", c.RenewEnrollment)
 			r.Post("/enrollments/{enrollment_id}/end", c.EndEnrollment)
+		})
+	})
+}
+
+// mountIngestion monta as rotas /integration/gestao/*, todas atrás do token de
+// integração. Timeout normal: são escritas rápidas no Postgres próprio (o Notifier
+// stub é local; não há saga lenta como a da DAV).
+func mountIngestion(r chi.Router, c controllers.IngestionController, integrationToken string) {
+	r.Group(func(r chi.Router) {
+		r.Use(controllers.RequireIntegrationToken(integrationToken))
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+
+		r.Route("/integration/gestao", func(r chi.Router) {
+			r.Post("/contracts", c.RecordContract)
+			r.Post("/employees/{cpf_hmac}/resend-invite", c.ResendInvite)
 		})
 	})
 }

@@ -1133,3 +1133,57 @@ mesma jornada/motor/gate para um viewport estreito. A única peça de dado NOVA 
 nó sintético de check-in (puramente de apresentação, sem escrita), e a única cópia
 nova (microcopy do cadastro) corrige uma promessa falsa que já existia no mock, em
 vez de introduzir uma.
+
+## ADR-043 — Ingestão da Gestão é PUSH (a Gestão chama nossa API), não pull (2026-07-22)
+
+**Contexto:** o parceiro cadastra empresas/contratos/colaboradores na Renovi
+Gestão. Queríamos que, ao cadastrar um colaborador lá, o Renovi 2.0 **receba** esse
+vínculo, guarde a referência ao contrato e dispare o convite de onboarding. O
+`ARQUITETURA.md §3` e o `ADR-009` previam o inverso: nós **lermos** o banco da
+Gestão (somente leitura, via "Adapter Gestão") e a ativação ser **manual pelo
+admin**. A `Gestão` ainda nem estava conectada; só havia hooks pré-fiados
+(`enrollment.gestao_contract_id`, `enrollment_period.source` reservando `'gestao'`,
+`patient_account.verified_at`, `RENOVI_GESTAO_DATABASE_URL`).
+
+**Decisão:**
+- **Push, não pull.** A Gestão faz `POST /v1/integration/gestao/contracts` (upsert
+  idempotente por `contract_id`) e `POST .../employees/{cpf_hmac}/resend-invite`.
+  Isso **supera** o mecanismo de pull do `ARQUITETURA §3` e o "manual pelo admin"
+  do `ADR-009` — mas **mantém** a regra inegociável: **nunca escrevemos no banco da
+  Gestão**. Push = a Gestão escreve em NÓS; nós só lemos/gravamos no `renovi_care`.
+- **Autenticação máquina-a-máquina por token estático** (`X-Integration-Token`,
+  `RENOVI_GESTAO_INTEGRATION_TOKEN`), espelhando o `RequireAdminToken` (ADR-022):
+  comparação em tempo constante, ausente/errado respondem igual, nunca logado,
+  vazio DESLIGA as rotas.
+- **Chave da pessoa é `cpf_hmac`, não o CPF em claro.** A Gestão envia
+  `HMAC-SHA256(cpf, CPF_PEPPER)` (hex de 64 chars) com **pepper compartilhado**; o
+  CPF nunca trafega. Adicionamos `patient_identity.cpf_hmac` (coluna ao lado do CPF
+  em claro), populada no cadastro e por `cmd/backfill-cpf-hmac`, para casar a pessoa
+  contra um paciente existente. Trade-off aceito: gerir o mesmo pepper em dois
+  sistemas; e como o espaço de CPF é pequeno, um pepper vazado tornaria o hmac
+  reversível — por isso `cpf.HMAC` recusa pepper vazio e a config o exige em prod.
+- **Sem auto-vínculo no ingest.** Ao receber um contrato de um CPF que já tem
+  `patient_account`, apenas **detectamos** (para não convidar quem já tem conta) e
+  registramos o evento; **não** setamos `vinculado`. Fechar o vínculo de um paciente
+  preexistente exige o **consentimento** do titular (cpf_match, fatia futura). O
+  `gestao_employee_link.patient_id` só é preenchido quando o onboarding fecha.
+- **Convite é stub no piloto.** Porta `Notifier` (interface no consumidor, ADR-012)
+  + `adapters/notify.LogNotifier` que não entrega nada e **nunca loga a URL/token**.
+  O `invite_url` volta **na resposta** dos dois endpoints — o gestor o repassa por
+  WhatsApp. SMTP real fica para depois.
+- **Idempotência e travas no banco.** Upserts por chave da Gestão (`ON CONFLICT`);
+  uma trava parcial só por pessoa viva (`ux_gestao_employee_ativo WHERE status <>
+  'cancelado'`, no padrão de `ux_enrollment_viva`); um convite vivo por pessoa
+  (`ux_token_vivo`), com a corrida absorvida por SAVEPOINT + nome de constraint;
+  `desligado_exige_data` (espelha `cancelada_exige_data`, 0007); e um log
+  append-only `gestao_ingestion_event` (por privilégio, ADR-024), sem CPF em claro.
+- **Escopo desta fatia = fundação de ingestão (casos 1–2).** Conclusão do
+  onboarding (token → conta + fecha vínculo), cpf_match com consentimento
+  (casos 4–5), e-mail real e frontend são fatias seguintes.
+
+**Consequência:** a `Gestão` deixa de ser uma dependência de leitura e passa a ser
+um chamador. `ARQUITETURA §3/§5` e `ADR-009` ficam superados no ponto do mecanismo
+de ativação (não na regra "nunca escrever na Gestão"). O `RENOVI_GESTAO_DATABASE_URL`
+continua na config, mas não é mais o caminho da ativação. Migration `0016`
+(5 tabelas + `patient_identity.cpf_hmac`). Novos env: `RENOVI_CPF_PEPPER`,
+`RENOVI_GESTAO_INTEGRATION_TOKEN`, `RENOVI_INVITE_TTL` (7d), `RENOVI_WEB_BASE_URL`.

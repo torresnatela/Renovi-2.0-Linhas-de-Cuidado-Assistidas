@@ -133,7 +133,7 @@ func run(m *testing.M) (int, error) {
 	// ------------------------------------------------------------------
 	const sessionTTL = 12 * time.Hour
 	auth := &controllers.AuthController{
-		Accounts:         models.NewAccountStore(pool, davClient),
+		Accounts:         models.NewAccountStore(pool, davClient, []byte("pepper-de-teste-e2e")),
 		Sessions:         models.NewSessionStore(pool, sessionTTL),
 		CookieSecure:     false,
 		SessionTTL:       sessionTTL,

@@ -70,10 +70,16 @@ type Querier interface {
 	// Como FindActivityEnrollment, mas traz a vigência da matrícula — o motor puro
 	// precisa dela para a regra VIGENCIA ao avaliar a cadência do instrumento.
 	FindActivityEnrollmentDetail(ctx context.Context, arg FindActivityEnrollmentDetailParams) (FindActivityEnrollmentDetailRow, error)
+	// Detecção (sem vincular): existe um paciente para este cpf_hmac? Funciona porque o
+	// cadastro grava patient_identity.cpf_hmac com o MESMO pepper que a Gestão usou.
+	FindIdentityByCPFHmac(ctx context.Context, cpfHmac []byte) (uuid.UUID, error)
 	// "Viva" = não revogada, não expirada E com a conta ainda ACTIVE. O join com o
 	// status é o que faz bloquear uma conta derrubar as sessões dela na hora — o
 	// ganho concreto de sessão opaca sobre JWT (ADR-010).
 	FindLiveSession(ctx context.Context, tokenHash []byte) (FindLiveSessionRow, error)
+	// O convite vivo desta pessoa (usado/revogado não conta). Guardamos só o hash, então
+	// serve para DETECTAR que já há convite — não para reconstruir a URL.
+	FindLiveTokenByLink(ctx context.Context, gestaoEmployeeLinkID uuid.UUID) (OnboardingToken, error)
 	// A correção manual (admin) do status clínico quando o fluxo automático não deu
 	// conta. O $2 é validado no model. Não alcança consulta já em estado terminal
 	// (realizada/falta/cancelada): o guard casa 0 linhas.
@@ -119,6 +125,9 @@ type Querier interface {
 	GetExampleWidget(ctx context.Context, id uuid.UUID) (ExampleWidget, error)
 	// A versão publicada mais recente de um code: é a que rege uma nova matrícula.
 	GetLatestPublishedCareLine(ctx context.Context, code string) (CareLine, error)
+	// A pessoa VIVA (não cancelada) pelo cpf_hmac, travada para o reenvio de convite
+	// (FOR UPDATE serializa reenvios concorrentes, como o Expire da jornada).
+	GetLiveEmployeeLinkByCPFHmacForUpdate(ctx context.Context, cpfHmac []byte) (GestaoEmployeeLink, error)
 	GetMoodCheckinByDay(ctx context.Context, arg GetMoodCheckinByDayParams) (MoodCheckin, error)
 	// Nasce PENDING_DAV: a conta só ativa quando a DAV confirmar o vínculo.
 	InsertAccount(ctx context.Context, arg InsertAccountParams) (PatientAccount, error)
@@ -145,7 +154,12 @@ type Querier interface {
 	InsertEnrollment(ctx context.Context, arg InsertEnrollmentParams) (Enrollment, error)
 	// source usa o default 'admin' (único valor aceito no piloto).
 	InsertEnrollmentPeriod(ctx context.Context, arg InsertEnrollmentPeriodParams) (EnrollmentPeriod, error)
+	// cpf_hmac = HMAC-SHA256(cpf, CPF_PEPPER) grava junto para a integração da Gestão
+	// casar a pessoa sem CPF em claro (0016/ADR-043). Nulo quando o pepper não está
+	// configurado (dev/local sem a integração).
 	InsertIdentity(ctx context.Context, arg InsertIdentityParams) error
+	// Trilha append-only da ingestão. NUNCA recebe CPF em claro — só o cpf_hmac.
+	InsertIngestionEvent(ctx context.Context, arg InsertIngestionEventParams) error
 	// Consultas do log da jornada (tabela journey_event — migration 0007).
 	//
 	// É append-only: só INSERT e SELECT. O role renovi_app (0008) NÃO tem UPDATE/DELETE
@@ -153,6 +167,9 @@ type Querier interface {
 	// O id é UUID v7 gerado na app: ordena junto com occurred_at e é a chave de
 	// desempate do keyset de paginação.
 	InsertJourneyEvent(ctx context.Context, arg InsertJourneyEventParams) (JourneyEvent, error)
+	// Cunha um convite. Guarda o SHA-256 do token (o token cru nunca toca o banco). Uma
+	// corrida no ux_token_vivo devolve 23505, que o model trata relendo o vivo.
+	InsertOnboardingToken(ctx context.Context, arg InsertOnboardingTokenParams) (OnboardingToken, error)
 	// token_hash é o SHA-256 do token opaco. O token em si nunca toca o banco.
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
 	InsertWellbeingAssessment(ctx context.Context, arg InsertWellbeingAssessmentParams) (WellbeingAssessment, error)
@@ -257,8 +274,23 @@ type Querier interface {
 	// são terminais e não voltam por aqui.
 	RenewEnrollment(ctx context.Context, arg RenewEnrollmentParams) (int64, error)
 	RevokeActiveConsent(ctx context.Context, arg RevokeActiveConsentParams) (int64, error)
+	// Revoga o convite vivo antes de cunhar outro (reenvio). Idempotente.
+	RevokeLiveTokensByLink(ctx context.Context, gestaoEmployeeLinkID uuid.UUID) error
 	RevokeSessionByTokenHash(ctx context.Context, tokenHash []byte) error
 	UpsertAddress(ctx context.Context, arg UpsertAddressParams) error
+	// Queries da ingestão de contratos da Gestão (ver migration 0016_gestao_ingestion).
+	// Todos os upserts são idempotentes pela chave do Gestão, para o push poder repetir.
+	// Idempotente por gestao_company_id: o mesmo id do Gestão devolve a mesma empresa.
+	UpsertGestaoCompany(ctx context.Context, arg UpsertGestaoCompanyParams) (GestaoCompanyLink, error)
+	// Idempotente por gestao_contract_id. A transição ativo -> afastado -> desligado é
+	// um simples UPDATE de status; ended_at vem calculado pelo model (não-nulo só em
+	// desligado, senão o CHECK desligado_exige_data recusa). accepted_at e started_at
+	// não são tocados no update (consentimento e início não mudam por re-push).
+	UpsertGestaoContract(ctx context.Context, arg UpsertGestaoContractParams) (GestaoContract, error)
+	// Upsert da PESSOA pelo cpf_hmac, arbitrado pelo índice parcial ux_gestao_employee_ativo
+	// (WHERE status <> 'cancelado'). O DO UPDATE só atualiza o snapshot do convite —
+	// NUNCA mexe em status: um 'vinculado' jamais é rebaixado por um novo push.
+	UpsertGestaoEmployeeLink(ctx context.Context, arg UpsertGestaoEmployeeLinkParams) (GestaoEmployeeLink, error)
 	// Uma resposta por dia local (dia_ref): nova resposta no mesmo dia ATUALIZA a do
 	// dia. O id da linha original é preservado no update.
 	UpsertMoodCheckin(ctx context.Context, arg UpsertMoodCheckinParams) (MoodCheckin, error)
