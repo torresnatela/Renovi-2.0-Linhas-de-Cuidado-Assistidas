@@ -32,7 +32,7 @@ apps/web/        # front React       — ver apps/web/CLAUDE.md
 packages/contracts/   # openapi.yaml (fonte da verdade)
 packages/api-client/  # cliente TS gerado (orval) — placeholder
 deploy/          # docker-compose, Caddyfile, mocks dos bancos
-docs/            # ARQUITETURA, DESENVOLVIMENTO, DECISOES, PROGRESSO, DEPLOY
+docs/            # ARQUITETURA, DESENVOLVIMENTO, DECISOES, PROGRESSO, DEPLOY, LINHA-DE-CUIDADO
 Makefile         # todos os comandos
 ```
 
