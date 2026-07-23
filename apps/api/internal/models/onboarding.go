@@ -318,6 +318,12 @@ func (s *OnboardingStore) closeLink(ctx context.Context, linkID, patientID uuid.
 			}
 			return fmt.Errorf("fechamento do vínculo não afetou linhas")
 		}
+		// Já fechado para ESTA conta (retry após commit ambíguo: a TX anterior de fato
+		// gravou, mas o cliente viu erro). O consentimento, o consumo do token e o evento
+		// vieram JUNTOS naquela TX (o fechamento é atômico); reexecutar reinseriria o
+		// onboarding_concluido — o insert do evento não tem guarda — e quebraria o
+		// append-only "um evento por ocorrência" (ADR-024). Nada a refazer.
+		return tx.Commit(ctx)
 	}
 
 	if _, err := q.SetLiveContractsAcceptedByEmployeeLink(ctx, gen.SetLiveContractsAcceptedByEmployeeLinkParams{

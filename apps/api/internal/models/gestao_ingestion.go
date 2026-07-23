@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -212,10 +213,14 @@ func (s *GestaoIngestionStore) RecordContract(ctx context.Context, in ContractPu
 		result.InviteURL = s.inviteURL(minted.raw)
 		exp := minted.expiresAt
 		result.InviteExpiresAt = &exp
-		_ = s.notifier.SendInvite(ctx, notify.InviteMessage{
+		if serr := s.notifier.SendInvite(ctx, notify.InviteMessage{
 			Name: in.Employee.Name, Email: in.Employee.Email, Phone: in.Employee.Phone,
 			InviteURL: result.InviteURL, ExpiresAt: exp,
-		})
+		}); serr != nil {
+			// Best-effort: o convite já está persistido e a URL volta na resposta. Só
+			// registramos a falha de entrega (nunca a URL/token) para não ficar invisível.
+			slog.ErrorContext(ctx, "falha ao entregar convite de onboarding", "error", serr)
+		}
 	}
 	return result, nil
 }
@@ -273,10 +278,12 @@ func (s *GestaoIngestionStore) ResendInvite(ctx context.Context, cpfHmac []byte)
 	}
 
 	url := s.inviteURL(m.raw)
-	_ = s.notifier.SendInvite(ctx, notify.InviteMessage{
+	if serr := s.notifier.SendInvite(ctx, notify.InviteMessage{
 		Name: emp.InviteName, Email: emp.InviteEmail.String, Phone: emp.InvitePhone.String,
 		InviteURL: url, ExpiresAt: m.expiresAt,
-	})
+	}); serr != nil {
+		slog.ErrorContext(ctx, "falha ao entregar convite de onboarding (reenvio)", "error", serr)
+	}
 	return ResendResult{InviteURL: url, ExpiresAt: m.expiresAt}, nil
 }
 

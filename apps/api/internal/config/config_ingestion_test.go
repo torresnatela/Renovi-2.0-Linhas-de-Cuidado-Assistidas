@@ -94,12 +94,13 @@ func TestLoad_WebBaseURLObrigatorioComIntegracao(t *testing.T) {
 		assert.Contains(t, err.Error(), "RENOVI_WEB_BASE_URL")
 	})
 
-	t.Run("token setado com web base url passa", func(t *testing.T) {
+	t.Run("token setado com web base url e pepper passa", func(t *testing.T) {
 		for k, v := range base {
 			t.Setenv(k, v)
 		}
 		t.Setenv("RENOVI_GESTAO_INTEGRATION_TOKEN", tokenDeTeste)
 		t.Setenv("RENOVI_WEB_BASE_URL", "https://app.renovisaude.com.br")
+		t.Setenv("RENOVI_CPF_PEPPER", pepperDeTeste)
 
 		_, err := Load()
 		require.NoError(t, err)
@@ -114,4 +115,21 @@ func TestLoad_WebBaseURLObrigatorioComIntegracao(t *testing.T) {
 		_, err := Load()
 		require.NoError(t, err)
 	})
+}
+
+// Com a integração ligada (token setado), casar a pessoa por cpf_hmac exige o pepper
+// compartilhado. Sem ele, as rotas de integração subiriam silenciosamente desligadas —
+// falhar na subida é mais seguro que uma ativação meia-boca.
+func TestLoad_CPFPepperObrigatorioComIntegracao(t *testing.T) {
+	t.Setenv("RENOVI_ENV", "staging")
+	t.Setenv("RENOVI_CARE_DATABASE_URL", "postgres://x/y")
+	t.Setenv("RENOVI_DAV_BASE_URL", "https://api.v2.doutoraovivo.com.br")
+	t.Setenv("RENOVI_DAV_API_KEY", chaveDeTeste)
+	t.Setenv("RENOVI_GESTAO_INTEGRATION_TOKEN", tokenDeTeste)
+	t.Setenv("RENOVI_WEB_BASE_URL", "https://app.renovisaude.com.br")
+	t.Setenv("RENOVI_CPF_PEPPER", "")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "RENOVI_CPF_PEPPER")
 }

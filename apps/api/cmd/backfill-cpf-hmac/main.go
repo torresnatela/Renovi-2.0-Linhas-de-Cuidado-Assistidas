@@ -83,12 +83,17 @@ func run() error {
 			return err
 		}
 		// Idempotente até na corrida: só grava se ainda estiver NULL.
-		if _, err := pool.Exec(ctx,
+		tag, err := pool.Exec(ctx,
 			`UPDATE patient_identity SET cpf_hmac = $1 WHERE account_id = $2 AND cpf_hmac IS NULL`,
-			h, p.accountID); err != nil {
+			h, p.accountID)
+		if err != nil {
 			return fmt.Errorf("gravar cpf_hmac de %s: %w", p.accountID, err)
 		}
-		atualizadas++
+		// Uma corrida (ou uma rodada anterior) pode ter preenchido a linha no meio: aí o
+		// UPDATE não afeta nada e não deve contar como escrita.
+		if tag.RowsAffected() > 0 {
+			atualizadas++
+		}
 	}
 
 	fmt.Printf("backfill concluído: %d atualizada(s), %d ignorada(s) por cpf inválido\n", atualizadas, ignoradas)

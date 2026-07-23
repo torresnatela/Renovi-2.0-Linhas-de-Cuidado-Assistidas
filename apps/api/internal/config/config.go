@@ -326,6 +326,12 @@ func (c Config) validate() error {
 	if c.GestaoIntegrationToken != "" && c.WebBaseURL == "" {
 		return fmt.Errorf("config: RENOVI_WEB_BASE_URL é obrigatório quando RENOVI_GESTAO_INTEGRATION_TOKEN está setado")
 	}
+	// A integração casa a pessoa por cpf_hmac; sem o pepper compartilhado não há como
+	// fazê-lo. Token setado sem pepper é config quebrada — falhar na subida é melhor que
+	// subir com as rotas de integração silenciosamente desligadas.
+	if c.GestaoIntegrationToken != "" && c.CPFPepper == "" {
+		return fmt.Errorf("config: RENOVI_CPF_PEPPER é obrigatório quando RENOVI_GESTAO_INTEGRATION_TOKEN está setado")
+	}
 	return nil
 }
 

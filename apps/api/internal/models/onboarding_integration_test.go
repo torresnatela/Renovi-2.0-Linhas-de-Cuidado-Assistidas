@@ -84,10 +84,16 @@ func seedPatientCPF(t *testing.T, ctx context.Context, pool *pgxpool.Pool, cpfSt
 	h, err := c.HMAC([]byte(testPepper))
 	require.NoError(t, err)
 	id := uuid.Must(uuid.NewV7())
+	// Uma conta ACTIVE exige o vínculo DAV (CHECK active_exige_vinculo_dav, 0002); uma
+	// PENDING_DAV não o tem. Espelhamos isso para o seed ser um estado que o banco aceita.
+	var davPersonID, davOrigin any
+	if status == "ACTIVE" {
+		davPersonID, davOrigin = id.String(), "CREATED"
+	}
 	_, err = pool.Exec(ctx, `
-		INSERT INTO patient_account (id, full_name, email, phone, birth_date, password_hash, status)
-		VALUES ($1, 'Paciente', $2, '11999999999', '1990-01-01', 'hash', $3)`,
-		id, id.String()+"@example.test", status)
+		INSERT INTO patient_account (id, full_name, email, phone, birth_date, password_hash, status, dav_person_id, dav_link_origin)
+		VALUES ($1, 'Paciente', $2, '11999999999', '1990-01-01', 'hash', $3, $4, $5)`,
+		id, id.String()+"@example.test", status, davPersonID, davOrigin)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 		INSERT INTO patient_identity (account_id, cpf, cpf_hmac) VALUES ($1, $2, $3)`,
