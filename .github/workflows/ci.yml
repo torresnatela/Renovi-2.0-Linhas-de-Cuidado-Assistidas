@@ -213,6 +213,9 @@ jobs:
           LEGACY_DB_URL: ${{ secrets.RENOVI_LEGACY_DATABASE_URL }}
           DAV_BASE_URL: ${{ secrets.RENOVI_DAV_BASE_URL }}
           DAV_API_KEY: ${{ secrets.RENOVI_DAV_API_KEY }}
+          # Ingestão da Gestão (push, ADR-043). Secrets já existem no environment.
+          CPF_PEPPER: ${{ secrets.RENOVI_CPF_PEPPER }}
+          GESTAO_INTEGRATION_TOKEN: ${{ secrets.RENOVI_GESTAO_INTEGRATION_TOKEN }}
         run: |
           umask 077
           {
@@ -227,6 +230,16 @@ jobs:
             printf 'RENOVI_LEGACY_DATABASE_URL=%s\n' "$LEGACY_DB_URL"
             printf 'RENOVI_DAV_BASE_URL=%s\n' "$DAV_BASE_URL"
             printf 'RENOVI_DAV_API_KEY=%s\n' "$DAV_API_KEY"
+            # Ingestão da Gestão (push, ADR-043). As três variáveis juntas LIGAM as rotas
+            # /integration/gestao e /onboarding; qualquer uma vazia as mantém desligadas.
+            # A config RECUSA subir se o token vier sem CPF_PEPPER ou sem WEB_BASE_URL —
+            # por isso as três vão juntas. WEB_BASE_URL é a base pública do front (monta o
+            # invite_url do convite): mesmo domínio da app (Caddy roteia / -> care-web).
+            # Ativação (docs/DEPLOY.md): pepper + backfill ANTES de a Gestão começar a
+            # empurrar, senão o cpf_match não detecta quem já era paciente.
+            printf 'RENOVI_CPF_PEPPER=%s\n' "$CPF_PEPPER"
+            printf 'RENOVI_GESTAO_INTEGRATION_TOKEN=%s\n' "$GESTAO_INTEGRATION_TOKEN"
+            printf 'RENOVI_WEB_BASE_URL=%s\n' 'https://app.renovisaude.com.br'
           } > deploy/.env.api.render
 
       - name: Enviar arquivos para a VPS

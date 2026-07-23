@@ -63,6 +63,14 @@ make ci                # espelha o pipeline de CI localmente
    principal de testes table-driven.
 3. **Migrations:** toda mudança de schema é uma migration nova em
    `apps/api/internal/db/migrations` (nunca edite uma já aplicada).
+4. **Env nova = fiar no deploy (automático, não manual):** adicionou uma variável de
+   ambiente? Além de `.env.example` e `internal/config/config.go`, **renderize-a no
+   passo "Render .env e .env.api" do `.github/workflows/ci.yml`** (bloco
+   `.env.api.render`). O deploy **sobrescreve** o `.env.api` do container a cada vez —
+   o que não estiver nesse passo NUNCA chega à produção (setar na mão na VPS é apagado
+   no deploy seguinte). Vars cuja ausência derruba o boot (`config.validate()`) ou que
+   ligam uma feature (as `RENOVI_*` da ingestão da Gestão, p. ex.) são as mais
+   críticas: sem esse passo, a feature sobe DESLIGADA em produção sem erro nenhum.
 
 ## Convenções
 
