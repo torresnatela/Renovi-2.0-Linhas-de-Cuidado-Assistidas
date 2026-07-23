@@ -199,7 +199,7 @@ func (s *GestaoIngestionStore) RecordContract(ctx context.Context, in ContractPu
 	result.InviteSent = minted != nil
 
 	// 6. Trilha append-only.
-	if err := s.insertEvent(ctx, q, action.eventType(), text(in.ContractID), emp.ID, in.Employee.CPFHmac); err != nil {
+	if err := insertIngestionEvent(ctx, q, action.eventType(), text(in.ContractID), emp.ID, in.Employee.CPFHmac); err != nil {
 		return RecordResult{}, err
 	}
 
@@ -265,7 +265,7 @@ func (s *GestaoIngestionStore) ResendInvite(ctx context.Context, cpfHmac []byte)
 		// reenvios. Se ocorrer, falhar é melhor que devolver uma URL vazia.
 		return ResendResult{}, fmt.Errorf("corrida inesperada ao reenviar convite")
 	}
-	if err := s.insertEvent(ctx, q, "convite_reenviado", pgtype.Text{}, emp.ID, cpfHmac); err != nil {
+	if err := insertIngestionEvent(ctx, q, "convite_reenviado", pgtype.Text{}, emp.ID, cpfHmac); err != nil {
 		return ResendResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -376,7 +376,7 @@ func (s *GestaoIngestionStore) mintToken(ctx context.Context, tx pgx.Tx, linkID 
 	return &mintedInvite{raw: raw, expiresAt: expiresAt}, false, nil
 }
 
-func (s *GestaoIngestionStore) insertEvent(ctx context.Context, q *gen.Queries, eventType string, contractID pgtype.Text, linkID uuid.UUID, cpfHmac []byte) error {
+func insertIngestionEvent(ctx context.Context, q *gen.Queries, eventType string, contractID pgtype.Text, linkID uuid.UUID, cpfHmac []byte) error {
 	eventID, err := uuid.NewV7()
 	if err != nil {
 		return fmt.Errorf("gerar uuid v7: %w", err)
@@ -405,8 +405,14 @@ func newInviteToken() (string, []byte, error) {
 		return "", nil, fmt.Errorf("gerar token de convite: %w", err)
 	}
 	raw := base64.RawURLEncoding.EncodeToString(b)
+	return raw, hashInviteToken(raw), nil
+}
+
+// hashInviteToken devolve o SHA-256 do token cru — o que o banco guarda. O mesmo
+// digest é usado ao cunhar (newInviteToken) e ao consumir o convite (onboarding).
+func hashInviteToken(raw string) []byte {
 	sum := sha256.Sum256([]byte(raw))
-	return raw, sum[:], nil
+	return sum[:]
 }
 
 // isTokenRace reconhece a violação do ux_token_vivo (dois convites vivos para a

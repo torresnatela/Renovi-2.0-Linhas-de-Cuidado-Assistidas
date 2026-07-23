@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-route
 import { LoginPage } from './features/auth/LoginPage';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { RegisterPage } from './features/auth/RegisterPage';
+import { OnboardingPage } from './features/onboarding/OnboardingPage';
 import { ConsultationsPage } from './features/consultations/ConsultationsPage';
 import { JourneyPage } from './features/journey/JourneyPage';
 import { ScheduleCarePage } from './features/journey/ScheduleCarePage';
@@ -32,6 +33,10 @@ export default function App() {
         <Routes>
           <Route path="/entrar" element={<LoginPage />} />
           <Route path="/cadastro" element={<RegisterPage />} />
+          {/* Onboarding pelo convite da Gestão: público (o token na URL é a
+              credencial), fora do shell — cadastro pré-preenchido + confirmação
+              da empresa (ADR-044). */}
+          <Route path="/onboarding/:token" element={<OnboardingPage />} />
 
           {/* Rota de layout: shell + guarda de sessão em UM lugar. */}
           <Route

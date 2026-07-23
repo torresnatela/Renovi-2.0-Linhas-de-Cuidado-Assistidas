@@ -1393,6 +1393,111 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /onboarding/{token}:
+    get:
+      operationId: getOnboarding
+      summary: Dados do convite de onboarding (pré-preenchimento).
+      description: >
+        Valida o token do convite e devolve o snapshot para pré-preencher o
+        cadastro (nome, e-mail, telefone) e as empresas do convite. O token na URL
+        é a credencial — rota pública. O CPF NÃO vem aqui: só o cpf_hmac existe do
+        lado de cá; o paciente digita o CPF e a conclusão o confere por HMAC.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OnboardingToken"
+      responses:
+        "200":
+          description: Convite válido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingInfo"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            O convite não pode ser concluído (`reason.code`: ONBOARDING_DECLINED,
+            ONBOARDING_ALREADY_DONE).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          $ref: "#/components/responses/Gone"
+  /onboarding/{token}/complete:
+    post:
+      operationId: completeOnboarding
+      summary: Conclui o cadastro pelo convite e fecha o vínculo com a empresa.
+      description: >
+        Cria a conta (mesma saga do /auth/register: valida, vincula à DAV, abre a
+        sessão) e fecha o vínculo da Gestão (vinculado + accepted_at), consumindo o
+        token. O CPF enviado precisa corresponder ao do convite (verificação por
+        HMAC). Quem já tem conta recebe 409 (`reason.code`: ALREADY_HAS_ACCOUNT) e
+        deve entrar para aceitar o vínculo. Síncrona e lenta como o cadastro.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OnboardingToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Conta criada, vínculo fechado e sessão aberta.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            Não foi possível concluir (`reason.code`: ALREADY_HAS_ACCOUNT,
+            ONBOARDING_DECLINED, ONBOARDING_ALREADY_DONE, ou colisão de CPF/e-mail).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          $ref: "#/components/responses/Gone"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/DavUnavailable"
+        "504":
+          $ref: "#/components/responses/DavUnavailable"
+  /onboarding/{token}/decline:
+    post:
+      operationId: declineOnboarding
+      summary: Recusa o vínculo com a empresa do convite.
+      description: >
+        A pessoa abriu o convite e confirmou (dupla confirmação no front) que NÃO
+        faz parte da empresa: registramos a recusa no vínculo (fica 'recusado' e é
+        auditado) e revogamos o token. Não cria conta. Idempotente.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OnboardingToken"
+      responses:
+        "204":
+          description: Recusa registrada.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            O convite já foi concluído (`reason.code`: ONBOARDING_ALREADY_DONE).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          $ref: "#/components/responses/Gone"
 components:
   securitySchemes:
     # Sessão opaca em cookie httpOnly, não JWT (ver ADR-010 em docs/DECISOES.md).
@@ -1432,6 +1537,16 @@ components:
         type: string
         example: renovi_session=<opaco>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=43200
   parameters:
+    OnboardingToken:
+      name: token
+      in: path
+      required: true
+      description: >
+        Token do convite de onboarding — o segredo cru da URL /onboarding/<token>.
+        base64url de 32 bytes (43 chars). É a credencial da rota; trate como segredo.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9_-]{43}$"
     SpecialtyId:
       name: specialty_id
       in: path
@@ -1535,6 +1650,14 @@ components:
         Não existe — ou não é seu. Os dois respondem igual, de propósito:
         distinguir "não existe" de "não é seu" transformaria a rota num oráculo de
         ids válidos. Mesma razão do 409 genérico do cadastro.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Gone:
+      description: >
+        O convite não vale mais: expirado, já usado ou revogado (`reason.code`:
+        TOKEN_EXPIRED, TOKEN_USED, TOKEN_REVOKED). Peça um novo ao RH.
       content:
         application/problem+json:
           schema:
@@ -2884,5 +3007,26 @@ components:
         expires_at:
           type: string
           format: date-time
+    OnboardingInfo:
+      description: >
+        Dados do convite para pré-preencher o cadastro e o passo "você faz parte da
+        empresa X?". O CPF não vem aqui (só o cpf_hmac existe do lado de cá): o
+        paciente digita o CPF e a conclusão o confere por HMAC.
+      type: object
+      required: [invite_name, companies]
+      properties:
+        invite_name:
+          type: string
+        invite_email:
+          type: string
+          nullable: true
+        invite_phone:
+          type: string
+          nullable: true
+        companies:
+          type: array
+          items:
+            type: string
+          description: Nomes das empresas dos contratos vivos do convite.
 security:
   - cookieAuth: []

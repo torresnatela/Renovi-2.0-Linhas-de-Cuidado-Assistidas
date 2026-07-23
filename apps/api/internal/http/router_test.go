@@ -290,3 +290,41 @@ func TestRouter_IngestionLigado_ComToken_200(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
+
+type fakeOnboardingSvc struct{}
+
+func (fakeOnboardingSvc) Info(context.Context, string) (models.OnboardingInfo, error) {
+	return models.OnboardingInfo{InviteName: "Maria", Companies: []string{"ACME"}}, nil
+}
+func (fakeOnboardingSvc) Complete(context.Context, string, models.RegisterInput) (models.Account, error) {
+	return models.Account{}, nil
+}
+func (fakeOnboardingSvc) Decline(context.Context, string) error { return nil }
+
+func onboardingRouter() *controllers.OnboardingController {
+	return &controllers.OnboardingController{Onboarding: fakeOnboardingSvc{}}
+}
+
+// Sem Onboarding, a rota /onboarding nem existe: 404.
+func TestRouter_OnboardingDesligado_404(t *testing.T) {
+	r := NewRouter(Deps{Version: "test"})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/onboarding/tok-123")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// Com Onboarding, a rota é PÚBLICA: sem cookie de sessão chega ao handler (200).
+func TestRouter_OnboardingLigado_Publico_200(t *testing.T) {
+	r := NewRouter(Deps{Version: "test", Onboarding: onboardingRouter()})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/onboarding/tok-123")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}

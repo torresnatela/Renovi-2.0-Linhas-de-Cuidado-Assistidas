@@ -1,0 +1,78 @@
+### Roteiro manual da conclusão do onboarding (convite, ADR-044)
+#
+# Arquivo REST Client (extensão "REST Client" do VS Code, ou o HTTP Client do
+# IntelliJ). Exercita as rotas públicas /onboarding/{token} à mão, espelhando o teste
+# de integração `internal/models/onboarding_integration_test.go`.
+#
+# ---------------------------------------------------------------------------
+# Pré-requisitos
+# ---------------------------------------------------------------------------
+#   1. `make up` && `make migrate-up`   — Postgres renovi_care com as migrations 0016+0017.
+#   2. Suba a API com a integração E o cadastro ligados. A CONCLUSÃO cria a conta pela
+#      saga do cadastro (DAV), então precisa também das credenciais da DAV:
+#
+#        RENOVI_GESTAO_INTEGRATION_TOKEN=dev-integration-token \
+#        RENOVI_CPF_PEPPER=dev-shared-pepper \
+#        RENOVI_WEB_BASE_URL=http://localhost:5173 \
+#        RENOVI_DAV_BASE_URL=... RENOVI_DAV_API_KEY=... \
+#        go -C apps/api run ./cmd/api
+#
+#      (Sem DAV, GET /onboarding e decline funcionam; complete devolve 504/500.)
+#   3. Cunhe um convite pela ingestão (apps/api/docs/ingestion.http #1) e copie o TOKEN
+#      cru do `invite_url` devolvido (a parte depois de "/onboarding/"). Cole em @token.
+#      O cpf_hmac daquele push é HMAC('94819089846', 'dev-shared-pepper'), então o CPF
+#      que confere na conclusão é 948.190.898-46.
+#
+# ---------------------------------------------------------------------------
+@baseUrl = http://localhost:8090/api/v1
+@token = COLE_AQUI_O_TOKEN_CRU_DO_INVITE_URL
+
+### 1. Dados do convite (pré-preenchimento) -> 200 { invite_name, invite_email, invite_phone, companies }
+GET {{baseUrl}}/onboarding/{{token}}
+
+### 2. Concluir o cadastro -> 201 + Set-Cookie: renovi_session. O CPF PRECISA conferir com o convite.
+POST {{baseUrl}}/onboarding/{{token}}/complete
+Content-Type: application/json
+
+{
+  "full_name": "Maria de Teste",
+  "cpf": "948.190.898-46",
+  "birth_date": "1990-01-01",
+  "email": "maria.nova@example.test",
+  "phone": "11999999999",
+  "password": "cavalo-bateria-grampo-correto",
+  "address": {
+    "zip_code": "01311-000", "street": "Av Paulista", "number": "1000",
+    "neighborhood": "Bela Vista", "city": "São Paulo", "state": "SP"
+  }
+}
+
+### 3. Concluir de novo com o MESMO token -> 410 TOKEN_USED (o convite já foi consumido)
+POST {{baseUrl}}/onboarding/{{token}}/complete
+Content-Type: application/json
+
+{
+  "full_name": "Maria de Teste", "cpf": "948.190.898-46", "birth_date": "1990-01-01",
+  "email": "maria.nova@example.test", "phone": "11999999999",
+  "password": "cavalo-bateria-grampo-correto",
+  "address": { "zip_code": "01311-000", "street": "Av Paulista", "number": "1000",
+               "neighborhood": "Bela Vista", "city": "São Paulo", "state": "SP" }
+}
+
+### 4. CPF que NÃO confere com o convite -> 400 CPF_MISMATCH (cunhe um convite novo antes)
+POST {{baseUrl}}/onboarding/{{token}}/complete
+Content-Type: application/json
+
+{
+  "full_name": "Outra Pessoa", "cpf": "529.982.247-25", "birth_date": "1990-01-01",
+  "email": "outra@example.test", "phone": "11988887777",
+  "password": "cavalo-bateria-grampo-correto",
+  "address": { "zip_code": "01311-000", "street": "Av Paulista", "number": "1000",
+               "neighborhood": "Bela Vista", "city": "São Paulo", "state": "SP" }
+}
+
+### 5. Recusar o vínculo (num convite NOVO) -> 204; o vínculo fica 'recusado' e o token é revogado
+POST {{baseUrl}}/onboarding/{{token}}/decline
+
+### 6. Token inexistente -> 404 TOKEN_NOT_FOUND
+GET {{baseUrl}}/onboarding/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

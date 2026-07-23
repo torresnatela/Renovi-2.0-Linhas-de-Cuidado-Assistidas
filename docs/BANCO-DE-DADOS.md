@@ -280,10 +280,11 @@ Resposta item a item do assessment.
 
 ---
 
-## 8. Ingestão da Gestão (push, ADR-043 · migration `0016`)
+## 8. Ingestão da Gestão (push, ADR-043 · migrations `0016`+`0017`)
 
 A Renovi Gestão CHAMA nossa API e nós persistimos aqui (nunca escrevemos no banco
-dela). A chave da pessoa é `cpf_hmac`, não o CPF.
+dela). A chave da pessoa é `cpf_hmac`, não o CPF. A `0017` (conclusão do onboarding,
+ADR-044) só amplia vocabulário: o status `recusado` e dois novos tipos de evento.
 
 ### `gestao_company_link` — PK `id`
 A empresa, espelho mínimo do que a Gestão conta.
@@ -292,14 +293,16 @@ A empresa, espelho mínimo do que a Gestão conta.
 - `display_name`
 
 ### `gestao_employee_link` — PK `id`
-A **pessoa** (1 por CPF, atravessa empresas). `patient_id` só é preenchido quando o
-onboarding fecha (fatia futura) — no ingest, **sem auto-vínculo**.
+A **pessoa** (1 por CPF, atravessa empresas). `patient_id`/`link_method`/`linked_at`
+só são preenchidos quando o onboarding **fecha** (`CloseEmployeeLink`, ADR-044) — no
+ingest, **sem auto-vínculo**.
 
 - `cpf_hmac` — BYTEA(32) · único **parcial** `ux_gestao_employee_ativo WHERE status <> 'cancelado'`
-  (padrão de `ux_enrollment_viva`: cancelar libera re-onboarding)
+  (padrão de `ux_enrollment_viva`: cancelar libera re-onboarding; `recusado` ainda ocupa a trava)
 - `invite_name`, `invite_email`, `invite_phone` — snapshot p/ convite/pré-preenchimento
 - `patient_id` → `patient_account.id` **RESTRICT** · nulo até vincular
-- `status` — CHECK · `pendente`, `vinculado`, `cancelado`
+- `status` — CHECK · `pendente`, `vinculado`, `cancelado`, `recusado` (`recusado` = a pessoa
+  abriu o convite e disse que NÃO faz parte da empresa — `0017`)
 - `link_method` — CHECK · `convite`, `cpf_match` · nulo até vincular
 - CHECK `vinculado_completo`: `vinculado` exige `patient_id`+`link_method`+`linked_at`
   (espelha `active_exige_vinculo_dav`)
@@ -312,23 +315,26 @@ O vínculo pessoa×empresa (N:N no tempo; a linha transita, não morre).
 - `gestao_employee_link_id` → `gestao_employee_link.id` **RESTRICT**
 - `gestao_company_link_id` → `gestao_company_link.id` **RESTRICT**
 - `status` — CHECK · `ativo`, `afastado`, `desligado`
-- `accepted_at` — consentimento do titular p/ ESTA empresa (nulo nesta fatia)
+- `accepted_at` — aceite do titular p/ ESTA empresa · preenchido na conclusão do
+  onboarding (`SetLiveContractsAcceptedByEmployeeLink`, só contratos vivos), ADR-044
 - `started_at`, `ended_at` · CHECK `desligado_exige_data` (espelha `cancelada_exige_data`)
 
 ### `onboarding_token` — PK `id`
 Token do convite (TTL `INVITE_TTL`, 7d). Guarda só o SHA-256, como `session`.
 
 - `gestao_employee_link_id` → `gestao_employee_link.id` **RESTRICT**
-- `token_hash` — BYTEA(32) · único · SHA-256
+- `token_hash` — BYTEA(32) · único · SHA-256 (a conclusão acha o convite por este hash
+  — `FindTokenByHash` — e o consome em `used_at`, ADR-044)
 - `expires_at`, `used_at`, `revoked_at`
 - Único **parcial** `ux_token_vivo WHERE used_at IS NULL AND revoked_at IS NULL` — um
-  convite vivo por pessoa (reenvio revoga + cunha)
+  convite vivo por pessoa (reenvio/recusa revogam; conclusão consome via `used_at`)
 
 ### `gestao_ingestion_event` — PK `id`
 Trilha **append-only** da ingestão (privilégio, como `journey_event`). NUNCA guarda
 CPF em claro — só `cpf_hmac`.
 
-- `event_type` — CHECK · `contrato_recebido`, `convite_emitido`, `convite_reenviado`, `cpf_match_pendente`
+- `event_type` — CHECK · `contrato_recebido`, `convite_emitido`, `convite_reenviado`,
+  `cpf_match_pendente`, `onboarding_concluido`, `onboarding_recusado` (os dois últimos, `0017`)
 - `gestao_contract_id` TEXT, `gestao_employee_link_id` UUID, `cpf_hmac` BYTEA, `payload` JSONB
 - `renovi_app` tem `UPDATE`/`DELETE` revogados nela (`0016`)
 

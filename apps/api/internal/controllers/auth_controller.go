@@ -86,7 +86,7 @@ func (c AuthController) Register(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
-		c.writeRegisterError(w, r, err)
+		writeRegisterError(w, r, err)
 		return
 	}
 
@@ -96,12 +96,13 @@ func (c AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, toAPIAccount(acc))
 }
 
-// writeRegisterError traduz o erro do model em HTTP.
+// writeRegisterError traduz o erro do cadastro em HTTP. Função de pacote (sem estado)
+// para o onboarding reusar a mesma tradução ao concluir o cadastro pelo convite.
 //
 // Regra: o corpo é genérico, o log é específico. A exceção deliberada é o e-mail
 // já usado na DAV — sem uma mensagem acionável, o usuário (tipicamente um casal
 // que compartilha e-mail) fica sem saber o que fazer.
-func (c AuthController) writeRegisterError(w http.ResponseWriter, r *http.Request, err error) {
+func writeRegisterError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, models.ErrInvalidRegistration):
 		WriteProblem(w, http.StatusBadRequest, "dados inválidos",
@@ -216,33 +217,16 @@ func AccountFrom(ctx context.Context) (models.Account, bool) {
 // ---------------------------------------------------------------------------
 
 func (c AuthController) openSession(w http.ResponseWriter, r *http.Request, acc models.Account) bool {
-	token, _, err := c.Sessions.Create(r.Context(), acc.ID)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "sessão: falha ao criar", "error", err)
-		WriteProblem(w, http.StatusInternalServerError, "erro interno", "não foi possível iniciar a sessão")
-		return false
-	}
-	http.SetCookie(w, c.cookie(token, int(c.SessionTTL.Seconds())))
-	return true
+	return issueSession(w, r, c.Sessions, c.sessionCookies(), acc)
 }
 
-// cookie monta o cookie de sessão.
-//
-// HttpOnly é fixo, não configurável: é ele que impede JavaScript (e portanto
-// XSS) de ler o token. Secure é configurável só porque o desenvolvimento local
-// roda sem TLS.
+// cookie monta o cookie de sessão (usado também pelo logout, com maxAge negativo).
 func (c AuthController) cookie(value string, maxAge int) *http.Cookie {
-	return &http.Cookie{
-		Name:     SessionCookieName,
-		Value:    value,
-		Path:     "/",
-		MaxAge:   maxAge,
-		HttpOnly: true,
-		Secure:   c.CookieSecure,
-		// Lax e não Strict: com Strict, quem chega por link externo (e-mail de
-		// convite) apareceria deslogado mesmo tendo sessão válida.
-		SameSite: http.SameSiteLaxMode,
-	}
+	return c.sessionCookies().cookie(value, maxAge)
+}
+
+func (c AuthController) sessionCookies() sessionCookies {
+	return sessionCookies{secure: c.CookieSecure, ttl: c.SessionTTL}
 }
 
 // decodeJSON lê o corpo. Devolve false (e já respondeu 400) se não der.

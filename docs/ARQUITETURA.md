@@ -86,12 +86,14 @@ são declarativas (JSONB). Ver SPEC §3 para a gramática completa.
 
 ## 5. Fluxos críticos (referência — implementação no MVP)
 
-- **Ativação** (Gestão → paciente, **push** — ADR-043): a Gestão faz `POST` de
+- **Ativação** (Gestão → paciente, **push** — ADR-043/044): a Gestão faz `POST` de
   contratos na nossa API; nós persistimos os vínculos (por `cpf_hmac`, sem CPF em
-  claro) e cunhamos o token de convite. O colaborador conclui o cadastro pelo
-  convite → conta ACTIVE → enrollment → cadastro na DAV. *(A fundação de ingestão
-  está feita; conclusão do onboarding e cpf_match com consentimento são fatias
-  seguintes.)*
+  claro) e cunhamos o token de convite. O colaborador abre o link, **conclui o
+  cadastro pelo convite** (rotas públicas `/onboarding/{token}`, reusando a saga do
+  `/auth/register`; CPF conferido por HMAC) → conta ACTIVE → enrollment → cadastro na
+  DAV, e o **vínculo fecha** (`vinculado` + `accepted_at`); recusar registra
+  `recusado`. *(Ingestão + conclusão feitas; cpf_match com consentimento — aceite
+  logado, casos 4/5 — e e-mail SMTP real são fatias seguintes.)*
 - **Agendamento** (3 sistemas, sem transação global): intenção registrada no
   `renovi_care` (`PENDING_SLOT`) → **CAS** do slot no legado (`booked=0 → 1`) →
   `DAV_PENDING` → `POST /appointment` na DAV, **uma tentativa, sem retry** →

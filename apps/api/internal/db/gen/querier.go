@@ -22,6 +22,10 @@ type Querier interface {
 	// 'cancelada' sem cancelled_at). O guard só deixa cancelar o que ainda está por
 	// acontecer; consulta já realizada/faltada/cancelada casa 0 linhas.
 	CancelCareAppointment(ctx context.Context, arg CancelCareAppointmentParams) (int64, error)
+	// Fecha o vínculo pelo convite: seta patient_id, status='vinculado', link_method e
+	// linked_at JUNTOS (o CHECK vinculado_completo exige os três). Guard status='pendente'
+	// torna idempotente e serve de trava contra dupla conclusão.
+	CloseEmployeeLink(ctx context.Context, arg CloseEmployeeLinkParams) (int64, error)
 	// Passo 3: a DAV criou e temos o link. O CHECK confirmed_exige_dav garante que
 	// não dá para chegar em CONFIRMED sem os dois. :execrows para o model não dar
 	// CONFIRMED por bom como sucesso quando o UPDATE não casou nenhuma linha.
@@ -80,6 +84,11 @@ type Querier interface {
 	// O convite vivo desta pessoa (usado/revogado não conta). Guardamos só o hash, então
 	// serve para DETECTAR que já há convite — não para reconstruir a URL.
 	FindLiveTokenByLink(ctx context.Context, gestaoEmployeeLinkID uuid.UUID) (OnboardingToken, error)
+	// Queries da conclusão do onboarding via convite (ver migrations 0016 e 0017).
+	// Consomem o token cunhado na ingestão e fecham (ou recusam) o vínculo.
+	// O convite pelo hash do token (SEM filtro de vivo). Devolve usado/revogado/expira
+	// para o model classificar e dar a mensagem certa (inexistente/expirado/usado/revogado).
+	FindTokenByHash(ctx context.Context, tokenHash []byte) (OnboardingToken, error)
 	// A correção manual (admin) do status clínico quando o fluxo automático não deu
 	// conta. O $2 é validado no model. Não alcança consulta já em estado terminal
 	// (realizada/falta/cancelada): o guard casa 0 linhas.
@@ -112,6 +121,8 @@ type Querier interface {
 	// na MESMA transação; o FOR UPDATE serializa dois publishes concorrentes da mesma
 	// linha — o segundo espera e encontra o status já fora de 'draft'.
 	GetCareLineForUpdate(ctx context.Context, id uuid.UUID) (CareLine, error)
+	// A pessoa por id (status, cpf_hmac e o snapshot invite_* para o pré-preenchimento).
+	GetEmployeeLinkByID(ctx context.Context, id uuid.UUID) (GestaoEmployeeLink, error)
 	GetEnrollment(ctx context.Context, id uuid.UUID) (Enrollment, error)
 	// Sempre por (id, dono). Nunca só por id: evita que a próxima rota devolva a
 	// matrícula de terceiro por esquecer o WHERE do paciente.
@@ -217,6 +228,9 @@ type Querier interface {
 	// idêntica em semântica, mas o sqlc infere o tipo de cada parâmetro corretamente
 	// (o row-value constructor faz o sqlc tipar o id como timestamptz).
 	ListJourneyEventsByPatient(ctx context.Context, arg ListJourneyEventsByPatientParams) ([]JourneyEvent, error)
+	// Nomes distintos das empresas dos contratos VIVOS (ativo/afastado) da pessoa —
+	// o que o passo "Você faz parte da empresa X?" exibe.
+	ListLiveContractCompaniesByEmployeeLink(ctx context.Context, gestaoEmployeeLinkID uuid.UUID) ([]string, error)
 	ListMoodCheckins(ctx context.Context, arg ListMoodCheckinsParams) ([]MoodCheckin, error)
 	// A fila de compensação do worker: falhou, o horário é nosso e ainda não voltou.
 	// É uma consulta ao banco, e não um estado em memória, para sobreviver a um
@@ -250,6 +264,9 @@ type Querier interface {
 	// aceita CANCELLED como estado terminal; o guard aqui garante que só se libera o
 	// horário de uma reserva já cancelada e ainda travada.
 	MarkCancelledSlotReleased(ctx context.Context, id uuid.UUID) (int64, error)
+	// A pessoa abriu o convite e disse que NÃO faz parte da empresa: registra a recusa no
+	// próprio vínculo (visível na tabela). Guard status='pendente' (idempotente).
+	MarkEmployeeLinkDeclined(ctx context.Context, arg MarkEmployeeLinkDeclinedParams) (int64, error)
 	// Registra que o horário voltou ao mercado no legado. Separado do FailAppointment
 	// porque são dois sistemas: entre marcar FAILED aqui e soltar o booked lá pode
 	// haver um crash, e é essa diferença que o worker usa como fila de compensação.
@@ -258,6 +275,9 @@ type Querier interface {
 	// liberação de uma reserva JÁ terminal. Impede, no nível do banco, gravar
 	// slot_released_at numa consulta ainda viva.
 	MarkSlotReleased(ctx context.Context, id uuid.UUID) (int64, error)
+	// Consome o convite. Guard used_at/revoked_at IS NULL: um token já usado/revogado
+	// não é reusado (execrows = 0 sinaliza a corrida ao model).
+	MarkTokenUsed(ctx context.Context, arg MarkTokenUsedParams) (int64, error)
 	// A próxima versão de um code: MAX+1, ou 1 se ainda não existe nenhuma. É o número
 	// que o CreateCareLine grava — calculá-lo aqui evita uma corrida no model.
 	NextCareLineVersion(ctx context.Context, code string) (int32, error)
@@ -277,6 +297,9 @@ type Querier interface {
 	// Revoga o convite vivo antes de cunhar outro (reenvio). Idempotente.
 	RevokeLiveTokensByLink(ctx context.Context, gestaoEmployeeLinkID uuid.UUID) error
 	RevokeSessionByTokenHash(ctx context.Context, tokenHash []byte) error
+	// Marca o consentimento (accepted_at) nos contratos vivos da pessoa. Só os que ainda
+	// não têm accepted_at (idempotente) e só ativo/afastado (desligado não é aceitável).
+	SetLiveContractsAcceptedByEmployeeLink(ctx context.Context, arg SetLiveContractsAcceptedByEmployeeLinkParams) (int64, error)
 	UpsertAddress(ctx context.Context, arg UpsertAddressParams) error
 	// Queries da ingestão de contratos da Gestão (ver migration 0016_gestao_ingestion).
 	// Todos os upserts são idempotentes pela chave do Gestão, para o push poder repetir.

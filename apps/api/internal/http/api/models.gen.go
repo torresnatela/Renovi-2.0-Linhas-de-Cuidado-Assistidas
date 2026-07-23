@@ -1217,6 +1217,15 @@ type MoodTodayOffer string
 // MoodTodayReason Por que não pode registrar, quando `can_checkin` é false.
 type MoodTodayReason string
 
+// OnboardingInfo Dados do convite para pré-preencher o cadastro e o passo "você faz parte da empresa X?". O CPF não vem aqui (só o cpf_hmac existe do lado de cá): o paciente digita o CPF e a conclusão o confere por HMAC.
+type OnboardingInfo struct {
+	// Companies Nomes das empresas dos contratos vivos do convite.
+	Companies   []string `json:"companies"`
+	InviteEmail *string  `json:"invite_email,omitempty"`
+	InviteName  string   `json:"invite_name"`
+	InvitePhone *string  `json:"invite_phone,omitempty"`
+}
+
 // Problem Erro no formato RFC 7807 (problem+json).
 type Problem struct {
 	// Blocks Bloqueios do motor de elegibilidade. Presente no 422 de agendamento barrado; cada item explica UMA regra violada.
@@ -1386,6 +1395,9 @@ type EnrollmentId = openapi_types.UUID
 // ItemRef defines model for ItemRef.
 type ItemRef = string
 
+// OnboardingToken defines model for OnboardingToken.
+type OnboardingToken = string
+
 // ProfessionalId defines model for ProfessionalId.
 type ProfessionalId = string
 
@@ -1403,6 +1415,9 @@ type DavUnavailable = Problem
 
 // EligibilityBlocked Erro no formato RFC 7807 (problem+json).
 type EligibilityBlocked = Problem
+
+// Gone Erro no formato RFC 7807 (problem+json).
+type Gone = Problem
 
 // LegacyUnavailable Erro no formato RFC 7807 (problem+json).
 type LegacyUnavailable = Problem
@@ -1546,3 +1561,6 @@ type RevokeConsentJSONRequestBody = RevokeConsentRequest
 
 // RecordMoodCheckinJSONRequestBody defines body for RecordMoodCheckin for application/json ContentType.
 type RecordMoodCheckinJSONRequestBody = RecordMoodCheckinRequest
+
+// CompleteOnboardingJSONRequestBody defines body for CompleteOnboarding for application/json ContentType.
+type CompleteOnboardingJSONRequestBody = RegisterRequest
