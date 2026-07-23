@@ -45,6 +45,9 @@ CPF isolado da conta — *"CPF só em tabelas de identidade"* (LGPD, `CLAUDE.md`
 
 - `account_id` → `patient_account.id` **CASCADE**
 - `cpf` — CHAR(11) · único
+- `cpf_hmac` — BYTEA(32) · nulo · único parcial (`WHERE NOT NULL`) — HMAC-SHA256 do
+  CPF (pepper compartilhado, `0016`/ADR-043); casa a pessoa com a Gestão sem CPF em
+  claro. Nulo até o cadastro/backfill gravar.
 
 ### `patient_address` — PK/FK `account_id`
 Endereço 1:1 com a conta.
@@ -277,6 +280,64 @@ Resposta item a item do assessment.
 
 ---
 
+## 8. Ingestão da Gestão (push, ADR-043 · migrations `0016`+`0017`)
+
+A Renovi Gestão CHAMA nossa API e nós persistimos aqui (nunca escrevemos no banco
+dela). A chave da pessoa é `cpf_hmac`, não o CPF. A `0017` (conclusão do onboarding,
+ADR-044) só amplia vocabulário: o status `recusado` e dois novos tipos de evento.
+
+### `gestao_company_link` — PK `id`
+A empresa, espelho mínimo do que a Gestão conta.
+
+- `gestao_company_id` — TEXT · único (idempotência do upsert)
+- `display_name`
+
+### `gestao_employee_link` — PK `id`
+A **pessoa** (1 por CPF, atravessa empresas). `patient_id`/`link_method`/`linked_at`
+só são preenchidos quando o onboarding **fecha** (`CloseEmployeeLink`, ADR-044) — no
+ingest, **sem auto-vínculo**.
+
+- `cpf_hmac` — BYTEA(32) · único **parcial** `ux_gestao_employee_ativo WHERE status <> 'cancelado'`
+  (padrão de `ux_enrollment_viva`: cancelar libera re-onboarding; `recusado` ainda ocupa a trava)
+- `invite_name`, `invite_email`, `invite_phone` — snapshot p/ convite/pré-preenchimento
+- `patient_id` → `patient_account.id` **RESTRICT** · nulo até vincular
+- `status` — CHECK · `pendente`, `vinculado`, `cancelado`, `recusado` (`recusado` = a pessoa
+  abriu o convite e disse que NÃO faz parte da empresa — `0017`)
+- `link_method` — CHECK · `convite`, `cpf_match` · nulo até vincular
+- CHECK `vinculado_completo`: `vinculado` exige `patient_id`+`link_method`+`linked_at`
+  (espelha `active_exige_vinculo_dav`)
+
+### `gestao_contract` — PK `id`
+O vínculo pessoa×empresa (N:N no tempo; a linha transita, não morre).
+
+- `gestao_contract_id` — TEXT · único (idempotência)
+- `gestao_employee_id` — TEXT (snapshot, sem FK — id de outro banco)
+- `gestao_employee_link_id` → `gestao_employee_link.id` **RESTRICT**
+- `gestao_company_link_id` → `gestao_company_link.id` **RESTRICT**
+- `status` — CHECK · `ativo`, `afastado`, `desligado`
+- `accepted_at` — aceite do titular p/ ESTA empresa · preenchido na conclusão do
+  onboarding (`SetLiveContractsAcceptedByEmployeeLink`, só contratos vivos), ADR-044
+- `started_at`, `ended_at` · CHECK `desligado_exige_data` (espelha `cancelada_exige_data`)
+
+### `onboarding_token` — PK `id`
+Token do convite (TTL `INVITE_TTL`, 7d). Guarda só o SHA-256, como `session`.
+
+- `gestao_employee_link_id` → `gestao_employee_link.id` **RESTRICT**
+- `token_hash` — BYTEA(32) · único · SHA-256 (a conclusão acha o convite por este hash
+  — `FindTokenByHash` — e o consome em `used_at`, ADR-044)
+- `expires_at`, `used_at`, `revoked_at`
+- Único **parcial** `ux_token_vivo WHERE used_at IS NULL AND revoked_at IS NULL` — um
+  convite vivo por pessoa (reenvio/recusa revogam; conclusão consome via `used_at`)
+
+### `gestao_ingestion_event` — PK `id`
+Trilha **append-only** da ingestão (privilégio, como `journey_event`). NUNCA guarda
+CPF em claro — só `cpf_hmac`.
+
+- `event_type` — CHECK · `contrato_recebido`, `convite_emitido`, `convite_reenviado`,
+  `cpf_match_pendente`, `onboarding_concluido`, `onboarding_recusado` (os dois últimos, `0017`)
+- `gestao_contract_id` TEXT, `gestao_employee_link_id` UUID, `cpf_hmac` BYTEA, `payload` JSONB
+- `renovi_app` tem `UPDATE`/`DELETE` revogados nela (`0016`)
+
 ## Mapa de relações
 
 Todas as chaves estrangeiras do schema. `emotion_label` e `context_tag` ficam de
@@ -338,5 +399,5 @@ Convenções que valem para o schema inteiro (ver também `docs/ARQUITETURA.md`)
 
 ---
 
-*Fonte: `apps/api/internal/db/migrations/0001`–`0014` · `renovi_care`
-(PostgreSQL 17, Neon) · gerado em 2026-07-20.*
+*Fonte: `apps/api/internal/db/migrations/0001`–`0016` · `renovi_care`
+(PostgreSQL 17, Neon) · atualizado em 2026-07-22 (0016: ingestão da Gestão).*

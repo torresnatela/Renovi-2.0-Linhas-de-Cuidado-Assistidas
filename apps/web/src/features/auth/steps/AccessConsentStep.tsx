@@ -12,6 +12,9 @@ interface Props {
   /** Motivo do bloqueio do CTA (null = liberado). Sempre visível ao lado do botão. */
   blockReason: string | null;
   apiError?: string | null;
+  /** Texto do CTA. Default "Criar conta"; o onboarding usa "Continuar" (ainda falta
+   *  confirmar a empresa antes de criar a conta). */
+  submitLabel?: string;
 }
 
 /** Passo 3 do cadastro: acesso + consentimento LGPD, e o disparo do cadastro. */
@@ -24,6 +27,7 @@ export function AccessConsentStep({
   pending,
   blockReason,
   apiError,
+  submitLabel = 'Criar conta',
 }: Props) {
   const senhasConflitam = form.senha2.length > 0 && form.senha !== form.senha2;
 
@@ -101,7 +105,7 @@ export function AccessConsentStep({
         loading={pending}
         onClick={onSubmit}
       >
-        Criar conta
+        {submitLabel}
       </Button>
 
       {/* Regra de ouro: botão desabilitado nunca fica mudo — diz o porquê. */}

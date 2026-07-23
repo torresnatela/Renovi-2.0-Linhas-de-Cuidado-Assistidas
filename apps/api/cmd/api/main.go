@@ -21,6 +21,7 @@ import (
 
 	"github.com/renovisaude/renovi-care/internal/adapters/agenda"
 	"github.com/renovisaude/renovi-care/internal/adapters/dav"
+	"github.com/renovisaude/renovi-care/internal/adapters/notify"
 	"github.com/renovisaude/renovi-care/internal/config"
 	"github.com/renovisaude/renovi-care/internal/controllers"
 	"github.com/renovisaude/renovi-care/internal/db"
@@ -58,7 +59,7 @@ func run() error {
 	}
 	defer pool.Close()
 
-	auth, err := newAuthController(cfg, pool, logger)
+	auth, accountStore, err := newAuthController(cfg, pool, logger)
 	if err != nil {
 		return err
 	}
@@ -80,6 +81,13 @@ func run() error {
 	}
 
 	careAdmin := newCareAdminController(cfg, pool, agendaClient, logger)
+
+	// Ingestão da Gestão (push, ADR-043): só o Postgres próprio + um Notifier stub.
+	ingestion := newIngestionController(cfg, pool, logger)
+
+	// Conclusão do onboarding (público, ADR-044): reusa a saga do cadastro (accountStore)
+	// e as sessões do Auth para criar a conta e fechar o vínculo pelo convite.
+	onboarding := newOnboardingController(cfg, pool, accountStore, auth, logger)
 
 	// Verificador de Humor (Anexo C): consentimento e instrumentos só precisam do
 	// Postgres próprio. As rotas /me/* só sobem junto com o Auth (ver router).
@@ -109,15 +117,18 @@ func run() error {
 			}
 			return nil
 		},
-		Auth:        auth,
-		Scheduling:  scheduling,
-		Consent:     consent,
-		Mood:        mood,
-		Assessments: assessments,
-		CareAdmin:   careAdmin,
-		Journey:     journey,
-		Internal:    internal,
-		AdminToken:  cfg.AdminToken,
+		Auth:                   auth,
+		Scheduling:             scheduling,
+		Consent:                consent,
+		Mood:                   mood,
+		Assessments:            assessments,
+		CareAdmin:              careAdmin,
+		Journey:                journey,
+		Internal:               internal,
+		AdminToken:             cfg.AdminToken,
+		Ingestion:              ingestion,
+		GestaoIntegrationToken: cfg.GestaoIntegrationToken,
+		Onboarding:             onboarding,
 		// O cadastro precisa de um teto maior que o de uma rota normal: ele
 		// espera a DAV de forma síncrona. Derivar do orçamento evita que os dois
 		// números divirjam e a última tentativa seja sempre cortada.
@@ -166,10 +177,12 @@ func run() error {
 // Sem credencial da DAV, devolve nil e as rotas de /auth não sobem. Isso só
 // acontece em `local` — a config exige a credencial em staging/produção, então
 // um deploy sem ela falha antes daqui, na subida.
-func newAuthController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*controllers.AuthController, error) {
+// Devolve TAMBÉM o *AccountStore: a conclusão do onboarding reusa a mesma saga de
+// cadastro (um store só, uma verdade só), então o main o compartilha.
+func newAuthController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*controllers.AuthController, *models.AccountStore, error) {
 	if cfg.DAVBaseURL == "" || cfg.DAVAPIKey == "" {
 		logger.Warn("rotas de autenticação DESLIGADAS: faltam RENOVI_DAV_BASE_URL/RENOVI_DAV_API_KEY")
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	davClient, err := dav.New(dav.Config{
@@ -180,18 +193,47 @@ func newAuthController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logge
 		Logger:      logger,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	accounts := models.NewAccountStore(pool, davClient, []byte(cfg.CPFPepper))
 	return &controllers.AuthController{
-		Accounts:     models.NewAccountStore(pool, davClient),
+		Accounts:     accounts,
 		Sessions:     models.NewSessionStore(pool, cfg.SessionTTL),
 		CookieSecure: cfg.SessionCookieSecure,
 		SessionTTL:   cfg.SessionTTL,
 		// Precisa cobrir o orçamento da DAV com folga, senão o servidor corta a
 		// resposta de um cadastro que deu certo.
 		RegisterDeadline: cfg.DAVBudget() + 30*time.Second,
-	}, nil
+	}, accounts, nil
+}
+
+// newOnboardingController monta as rotas públicas /onboarding/{token} (conclusão do
+// cadastro pelo convite, ADR-044). Reusa o AccountStore (a saga do cadastro) e as
+// sessões do Auth. Sobe só quando:
+//
+//   - o Auth subiu (accounts != nil): a conclusão CRIA a conta pela mesma saga e
+//     abre a sessão; sem o cadastro montado não há como concluir.
+//   - RENOVI_CPF_PEPPER presente: sem o pepper não há como verificar, por HMAC, que
+//     o CPF digitado é o do convite.
+func newOnboardingController(cfg config.Config, pool *pgxpool.Pool, accounts *models.AccountStore, auth *controllers.AuthController, logger *slog.Logger) *controllers.OnboardingController {
+	switch {
+	case auth == nil || accounts == nil:
+		logger.Warn("rotas de onboarding DESLIGADAS: cadastro não montado (a conclusão cria a conta pela saga)")
+		return nil
+	case cfg.CPFPepper == "":
+		logger.Warn("rotas de onboarding DESLIGADAS: RENOVI_CPF_PEPPER vazio (sem pepper não há verificação do CPF)")
+		return nil
+	}
+	return &controllers.OnboardingController{
+		Onboarding:   models.NewOnboardingStore(pool, accounts, []byte(cfg.CPFPepper)),
+		Sessions:     auth.Sessions,
+		CookieSecure: cfg.SessionCookieSecure,
+		SessionTTL:   cfg.SessionTTL,
+		// Mesma derivação do RegisterDeadline: a conclusão fala com a DAV de forma
+		// síncrona e precisa cobrir o orçamento com folga.
+		CompleteDeadline: cfg.DAVBudget() + 30*time.Second,
+	}
 }
 
 func newLogger(cfg config.Config) *slog.Logger {
@@ -320,5 +362,34 @@ func newCareAdminController(cfg config.Config, pool *pgxpool.Pool, agendaClient 
 	return &controllers.CareLineAdminController{
 		Catalog:     models.NewCareLineStore(pool, agendaClient),
 		Enrollments: models.NewEnrollmentStore(pool),
+	}
+}
+
+// newIngestionController monta as rotas /integration/gestao (push da Gestão,
+// ADR-043). Sobe só com as três condições, todas logadas quando faltam:
+//
+//   - RENOVI_GESTAO_INTEGRATION_TOKEN: sem token não há como autenticar a máquina
+//     que chama, e montar sem trava exporia a criação de vínculos.
+//   - RENOVI_CPF_PEPPER: sem o pepper compartilhado não há como casar a pessoa por
+//     cpf_hmac com o que o cadastro grava.
+//   - RENOVI_WEB_BASE_URL: sem ela não há como montar o invite_url do convite.
+//
+// A config já recusa subir com o token setado e a web base url vazia; aqui a
+// checagem é defensiva e desliga a feature em vez de subir meia-boca.
+func newIngestionController(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) *controllers.IngestionController {
+	switch {
+	case cfg.GestaoIntegrationToken == "":
+		logger.Warn("rotas de integração DESLIGADAS: RENOVI_GESTAO_INTEGRATION_TOKEN vazio")
+		return nil
+	case cfg.CPFPepper == "":
+		logger.Warn("rotas de integração DESLIGADAS: RENOVI_CPF_PEPPER vazio (sem pepper não há match por cpf_hmac)")
+		return nil
+	case cfg.WebBaseURL == "":
+		logger.Warn("rotas de integração DESLIGADAS: RENOVI_WEB_BASE_URL vazio (sem ela não há invite_url)")
+		return nil
+	}
+	notifier := notify.NewLogNotifier(logger)
+	return &controllers.IngestionController{
+		Ingestion: models.NewGestaoIngestionStore(pool, notifier, cfg.InviteTTL, cfg.WebBaseURL),
 	}
 }

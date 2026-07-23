@@ -106,11 +106,26 @@ type AccountStore struct {
 	pool *pgxpool.Pool
 	q    *gen.Queries
 	dav  DAVClient
+	// pepper assina o cpf_hmac gravado em patient_identity (ADR-043), a chave que a
+	// integração da Gestão usa para casar a pessoa sem CPF em claro. Vazio fora da
+	// integração (dev/local): aí o cpf_hmac nasce NULL e o backfill preenche depois.
+	pepper []byte
 }
 
 // NewAccountStore monta o store.
-func NewAccountStore(pool *pgxpool.Pool, davClient DAVClient) *AccountStore {
-	return &AccountStore{pool: pool, q: gen.New(pool), dav: davClient}
+func NewAccountStore(pool *pgxpool.Pool, davClient DAVClient, pepper []byte) *AccountStore {
+	return &AccountStore{pool: pool, q: gen.New(pool), dav: davClient, pepper: pepper}
+}
+
+// cpfHMAC devolve o HMAC do CPF sob o pepper configurado, ou nil quando não há
+// pepper. Pepper vazio é esperado (dev sem a integração) e vira "sem hmac", não
+// erro do cadastro — a coluna aceita NULL e o backfill cobre o histórico.
+func (s *AccountStore) cpfHMAC(c cpf.CPF) []byte {
+	h, err := c.HMAC(s.pepper)
+	if err != nil {
+		return nil
+	}
+	return h
 }
 
 // Register cadastra o paciente e o vincula à DAV, de forma síncrona.
@@ -197,7 +212,7 @@ func (s *AccountStore) reserve(ctx context.Context, v validated) (gen.PatientAcc
 			return zero, mapWriteErr(err)
 		}
 		if err := q.InsertIdentity(ctx, gen.InsertIdentityParams{
-			AccountID: row.ID, Cpf: v.cpf.String(),
+			AccountID: row.ID, Cpf: v.cpf.String(), CpfHmac: s.cpfHMAC(v.cpf),
 		}); err != nil {
 			return zero, mapWriteErr(err)
 		}

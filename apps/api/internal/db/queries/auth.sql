@@ -14,7 +14,10 @@ VALUES ($1, $2, $3, $4, $5, $6, 'PENDING_DAV')
 RETURNING *;
 
 -- name: InsertIdentity :exec
-INSERT INTO patient_identity (account_id, cpf) VALUES ($1, $2);
+-- cpf_hmac = HMAC-SHA256(cpf, CPF_PEPPER) grava junto para a integração da Gestão
+-- casar a pessoa sem CPF em claro (0016/ADR-043). Nulo quando o pepper não está
+-- configurado (dev/local sem a integração).
+INSERT INTO patient_identity (account_id, cpf, cpf_hmac) VALUES ($1, $2, $3);
 
 -- name: RefreshPendingAccount :one
 -- Reaproveita a linha de uma tentativa que morreu antes da DAV confirmar.

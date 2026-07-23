@@ -29,6 +29,7 @@ src/
 | Feature | Tela / papel |
 |---|---|
 | `auth/` | Acesso: login por CPF + cadastro 3 passos (ViaCEP); `useSession`, `ProtectedRoute` |
+| `onboarding/` | Convite da Gestão: rota PÚBLICA `/onboarding/:token` (fora do shell) — reusa o wizard do `/cadastro` (semeado do convite; CPF digitado) + passo de confirmação da empresa (SIM fácil, NÃO com dupla confirmação); `useOnboarding`, ADR-044 |
 | `journey/` | Minha Jornada (hero, timeline, aside) + Agendar por item (stepper, motor) |
 | `consultations/` | Consultas: abas Próximas/Histórico (+ CTA de agendar do aside) |
 | `scheduling/` | Só o **detalhe** da consulta (`AppointmentPage`) com o **gate de pré-consulta**; hooks `useAppointment`/`useJoinAppointment`/`proximoPoll` |

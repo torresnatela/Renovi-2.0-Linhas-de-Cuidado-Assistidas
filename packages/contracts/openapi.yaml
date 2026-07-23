@@ -1318,6 +1318,186 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+
+  # --- Integração Gestão -> renovi-care (push, ADR-043) ---
+  /integration/gestao/contracts:
+    post:
+      operationId: recordGestaoContract
+      summary: Recebe (push) um contrato da Renovi Gestão.
+      description: >
+        Idempotente por `contract_id`: faz upsert de empresa, colaborador e
+        contrato e, para colaborador novo sem conta, cunha o convite de onboarding
+        e o devolve em `invite_url` (o gestor repassa por WhatsApp). O CPF nunca
+        trafega — a chave da pessoa é `cpf_hmac` (HMAC-SHA256 do CPF com o pepper
+        compartilhado). Nunca escrevemos no banco da Gestão.
+      security:
+        - integrationToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GestaoContractPush"
+      responses:
+        "200":
+          description: Contrato registrado (upsert idempotente).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GestaoContractPushResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /integration/gestao/employees/{cpf_hmac}/resend-invite:
+    post:
+      operationId: resendGestaoInvite
+      summary: Reenvia o convite de onboarding de um colaborador.
+      description: >
+        Revoga o convite vivo e cunha outro, devolvendo o novo `invite_url` — útil
+        quando o colaborador não tem e-mail (o gestor manda por WhatsApp). Recusa
+        quem já tem conta (409): esse caso segue pelo fluxo de consentimento
+        (cpf_match), não por um novo convite.
+      security:
+        - integrationToken: []
+      parameters:
+        - name: cpf_hmac
+          in: path
+          required: true
+          description: HMAC-SHA256 do CPF em hex minúsculo (64 caracteres).
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{64}$"
+      responses:
+        "200":
+          description: Convite reenviado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResendInviteResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Colaborador desconhecido (cpf_hmac sem vínculo).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: >
+            O colaborador já tem conta (`reason.code`: ALREADY_HAS_ACCOUNT) — o
+            vínculo de quem já é paciente passa pelo consentimento, não por convite.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /onboarding/{token}:
+    get:
+      operationId: getOnboarding
+      summary: Dados do convite de onboarding (pré-preenchimento).
+      description: >
+        Valida o token do convite e devolve o snapshot para pré-preencher o
+        cadastro (nome, e-mail, telefone) e as empresas do convite. O token na URL
+        é a credencial — rota pública. O CPF NÃO vem aqui: só o cpf_hmac existe do
+        lado de cá; o paciente digita o CPF e a conclusão o confere por HMAC.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OnboardingToken"
+      responses:
+        "200":
+          description: Convite válido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingInfo"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            O convite não pode ser concluído (`reason.code`: ONBOARDING_DECLINED,
+            ONBOARDING_ALREADY_DONE).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          $ref: "#/components/responses/Gone"
+  /onboarding/{token}/complete:
+    post:
+      operationId: completeOnboarding
+      summary: Conclui o cadastro pelo convite e fecha o vínculo com a empresa.
+      description: >
+        Cria a conta (mesma saga do /auth/register: valida, vincula à DAV, abre a
+        sessão) e fecha o vínculo da Gestão (vinculado + accepted_at), consumindo o
+        token. O CPF enviado precisa corresponder ao do convite (verificação por
+        HMAC). Quem já tem conta recebe 409 (`reason.code`: ALREADY_HAS_ACCOUNT) e
+        deve entrar para aceitar o vínculo. Síncrona e lenta como o cadastro.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OnboardingToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Conta criada, vínculo fechado e sessão aberta.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            Não foi possível concluir (`reason.code`: ALREADY_HAS_ACCOUNT,
+            ONBOARDING_DECLINED, ONBOARDING_ALREADY_DONE, ou colisão de CPF/e-mail).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          $ref: "#/components/responses/Gone"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/DavUnavailable"
+        "504":
+          $ref: "#/components/responses/DavUnavailable"
+  /onboarding/{token}/decline:
+    post:
+      operationId: declineOnboarding
+      summary: Recusa o vínculo com a empresa do convite.
+      description: >
+        A pessoa abriu o convite e confirmou (dupla confirmação no front) que NÃO
+        faz parte da empresa: registramos a recusa no vínculo (fica 'recusado' e é
+        auditado) e revogamos o token. Não cria conta. Idempotente.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OnboardingToken"
+      responses:
+        "204":
+          description: Recusa registrada.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            O convite já foi concluído (`reason.code`: ONBOARDING_ALREADY_DONE).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          $ref: "#/components/responses/Gone"
 components:
   securitySchemes:
     # Sessão opaca em cookie httpOnly, não JWT (ver ADR-010 em docs/DECISOES.md).
@@ -1339,6 +1519,16 @@ components:
         tela de admin nem gestão de credencial no Slice 1. NUNCA é o cookie de
         sessão do paciente: as rotas /admin exigem este header e recusam a sessão,
         e as de paciente fazem o inverso.
+    # Token estático da integração Gestão->API (push, ADR-043). A MÁQUINA da Gestão
+    # que chama, nunca o cookie do paciente. Vazio desliga as rotas de integração.
+    integrationToken:
+      type: apiKey
+      in: header
+      name: X-Integration-Token
+      description: >
+        Token estático da integração Gestão->renovi-care (push). Vive numa variável
+        de ambiente do servidor e a rotação é MANUAL. NUNCA é a sessão do paciente:
+        as rotas /integration exigem este header e recusam a sessão.
   headers:
     SessionCookie:
       description: >
@@ -1347,6 +1537,16 @@ components:
         type: string
         example: renovi_session=<opaco>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=43200
   parameters:
+    OnboardingToken:
+      name: token
+      in: path
+      required: true
+      description: >
+        Token do convite de onboarding — o segredo cru da URL /onboarding/<token>.
+        base64url de 32 bytes (43 chars). É a credencial da rota; trate como segredo.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9_-]{43}$"
     SpecialtyId:
       name: specialty_id
       in: path
@@ -1450,6 +1650,14 @@ components:
         Não existe — ou não é seu. Os dois respondem igual, de propósito:
         distinguir "não existe" de "não é seu" transformaria a rota num oráculo de
         ids válidos. Mesma razão do 409 genérico do cadastro.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Gone:
+      description: >
+        O convite não vale mais: expirado, já usado ou revogado (`reason.code`:
+        TOKEN_EXPIRED, TOKEN_USED, TOKEN_REVOKED). Peça um novo ao RH.
       content:
         application/problem+json:
           schema:
@@ -2709,5 +2917,116 @@ components:
             os problemas do template de uma vez.
           items:
             type: string
+
+    # --- Ingestão da Gestão (push, ADR-043) ---
+    GestaoContractPush:
+      type: object
+      required: [contract_id, status, employee, company]
+      properties:
+        contract_id:
+          type: string
+          description: Id do contrato no Gestão (employment_contracts.id). Chave de idempotência.
+          example: "ec_9f8c"
+        status:
+          type: string
+          enum: [ativo, afastado, desligado]
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Consentimento do titular para ESTA empresa (não usado nesta fatia).
+        employee:
+          $ref: "#/components/schemas/GestaoEmployeePush"
+        company:
+          $ref: "#/components/schemas/GestaoCompanyPush"
+    GestaoEmployeePush:
+      type: object
+      required: [id, cpf_hmac, name]
+      properties:
+        id:
+          type: string
+          description: Id do colaborador no Gestão (por tenant).
+        cpf_hmac:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: >
+            HMAC-SHA256 do CPF (pepper compartilhado), hex minúsculo de 64 chars. O
+            CPF em claro nunca trafega.
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+    GestaoCompanyPush:
+      type: object
+      required: [id, display_name]
+      properties:
+        id:
+          type: string
+        display_name:
+          type: string
+    GestaoContractPushResult:
+      type: object
+      required: [person_status, contract_status, invite_sent]
+      properties:
+        person_status:
+          type: string
+          enum: [pendente, vinculado]
+        contract_status:
+          type: string
+          enum: [ativo, afastado, desligado]
+        invite_sent:
+          type: boolean
+          description: Se um convite foi cunhado e "enviado" nesta chamada.
+        invite_url:
+          type: string
+          nullable: true
+          description: >
+            URL de onboarding (presente só quando invite_sent=true). Contém o token
+            — trate como segredo.
+        invite_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    ResendInviteResult:
+      type: object
+      required: [invite_url, expires_at]
+      properties:
+        invite_url:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    OnboardingInfo:
+      description: >
+        Dados do convite para pré-preencher o cadastro e o passo "você faz parte da
+        empresa X?". O CPF não vem aqui (só o cpf_hmac existe do lado de cá): o
+        paciente digita o CPF e a conclusão o confere por HMAC.
+      type: object
+      required: [invite_name, companies]
+      properties:
+        invite_name:
+          type: string
+        invite_email:
+          type: string
+          nullable: true
+        invite_phone:
+          type: string
+          nullable: true
+        companies:
+          type: array
+          items:
+            type: string
+          description: Nomes das empresas dos contratos vivos do convite.
 security:
   - cookieAuth: []

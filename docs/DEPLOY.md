@@ -87,11 +87,17 @@ re-executar só o job `deploy` de um run verde.
 | `RENOVI_DAV_BASE_URL` | `https://api.v2.doutoraovivo.com.br` |
 | `RENOVI_DAV_API_KEY` | chave de produção da Doutor ao Vivo |
 | `RENOVI_LEGACY_DATABASE_URL` | `user:pass@tcp(host:3306)/db` — **sem** `parseTime`/`loc` (o adapter os força). ⚠️ Hoje usa o usuário `admin` (pleno); criar um usuário restrito a `SELECT` + `UPDATE(booked, updatedAt)` como no mock de dev (ADR-004) é pendência de hardening |
+| `RENOVI_CPF_PEPPER` | pepper do `cpf_hmac` (HMAC-SHA256 do CPF, ADR-043). **Segredo**; **o MESMO valor** configurado na Renovi Gestão — os dois lados só casam a pessoa se o pepper for idêntico. Vazio DESLIGA a ingestão. Setar **antes** do backfill (ver "Ligar a ingestão da Gestão") |
+| `RENOVI_GESTAO_INTEGRATION_TOKEN` | token estático da integração Gestão→API (header `X-Integration-Token`, ADR-043). **Segredo**; nunca logado. Vazio DESLIGA as rotas `/integration/gestao/*`. **Setar por ÚLTIMO**, depois do backfill (ver "Ligar a ingestão da Gestão") |
 
 Regras:
 - `RENOVI_ENV=production` e `RENOVI_LOG_LEVEL=info` são fixos no workflow, não
   são secrets. `RENOVI_SESSION_COOKIE_SECURE` **não** é definido (default `true`;
   `false` é recusado pela config em produção).
+- Ingestão da Gestão (ADR-043): `RENOVI_WEB_BASE_URL=https://app.renovisaude.com.br`
+  (base do `invite_url`; **obrigatória** quando o token de integração está setado —
+  a config recusa subir sem ela) e `RENOVI_INVITE_TTL` (default `168h` = 7 dias) —
+  **não** são segredos. Só o pepper e o token de integração são secrets.
 - Neon: o endpoint **pooled** (`-pooler`) quebra as migrations (advisory lock do
   golang-migrate × transaction pooling). Na escala do piloto, endpoint direto
   para tudo (ADR-027).
@@ -102,6 +108,68 @@ Regras:
   com `connect ... port 22: Connection timed out`. **Não é allowlist de IP**: os
   outros sistemas da VPS deployam pelo mesmo caminho (o `renovi_saude_publica`
   também repete a 1ª conexão) e a 22 responde da máquina do dev (IP "quente").
+
+## Ligar a ingestão da Gestão (push, ADR-043)
+
+As rotas `/integration/gestao/*` nascem **desligadas** e só sobem quando as três
+variáveis estão presentes juntas (`RENOVI_GESTAO_INTEGRATION_TOKEN`,
+`RENOVI_CPF_PEPPER`, `RENOVI_WEB_BASE_URL`) — falta de qualquer uma responde 404 e
+loga o motivo. Isso torna a **ordem de ativação** a parte que importa.
+
+### Gerando os segredos
+
+Ambos são strings aleatórias fortes (32 bytes em base64url ≈ 43 chars):
+
+```bash
+# RENOVI_CPF_PEPPER — a MESMA string vai para a Renovi Gestão (combine o valor com
+# o time da Gestão e guarde nos secrets dos DOIS sistemas). Gere UMA vez:
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+
+# RENOVI_GESTAO_INTEGRATION_TOKEN — só nosso; a Gestão o manda no X-Integration-Token:
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+```
+
+- Guarde-os nos **secrets do environment `production`** (viram `.env.api`, chmod 600),
+  como os demais segredos da tabela acima. **Nunca** os comite nem os cole em chat/log.
+- O **pepper é rotação difícil**: mudar seu valor invalida todo `cpf_hmac` já gravado
+  (nosso e o da Gestão). Trate-o como chave de longa vida; se um dia rotacionar, é um
+  reprocessamento coordenado dos dois lados + novo backfill, não um simples swap.
+- O **token de integração é rotação simples** (manual, como o `RENOVI_ADMIN_TOKEN`):
+  gere um novo, atualize o secret e avise a Gestão. Ausente/errado respondem igual (401).
+
+### Ordem obrigatória (fecha a janela de conta duplicada)
+
+A detecção de `cpf_match` — não convidar quem **já tem** conta Renovi — depende de
+`patient_identity.cpf_hmac` estar preenchido. Essa coluna nasce `NULL`; o cadastro só
+passa a gravá-la depois que o pepper existe, e as linhas **antigas** só recebem valor
+pelo backfill. Se o token de integração for ligado antes disso, um push para alguém que
+já é paciente **não casa**, e nós cunhamos um convite de onboarding indevido (semente de
+conta duplicada quando a fatia de conclusão do onboarding entrar). Por isso:
+
+1. **Deploy** da versão com a migration `0016` aplicada (o pipeline roda as migrations
+   antes de trocar a API).
+2. **Setar `RENOVI_CPF_PEPPER`** (secret) e redeploy. A partir daqui, todo **cadastro
+   novo** já grava `cpf_hmac`.
+3. **Rodar o backfill** das linhas antigas (one-shot, idempotente, exige o pepper no
+   ambiente) — cobre quem se cadastrou antes do passo 2. O binário
+   (`cmd/backfill-cpf-hmac`) vai na imagem ao lado do `/migrate`:
+
+   ```bash
+   ssh renovi-prod
+   docker run --rm --env-file /opt/renovi-care/.env.api \
+     ghcr.io/torresnatela/renovi-care-api:<sha> /backfill-cpf-hmac
+   # -> "backfill concluído: N atualizada(s), K ignorada(s) por cpf inválido"
+   ```
+
+   Confira que zerou os pendentes:
+   `psql "<owner>" -c "SELECT count(*) FROM patient_identity WHERE cpf_hmac IS NULL"`
+   deve dar **0** (fora eventuais CPFs inválidos legados, que o backfill loga e pula).
+   Rode-o quantas vezes precisar: só toca linhas ainda `NULL`.
+4. **Só então setar `RENOVI_GESTAO_INTEGRATION_TOKEN`** (secret) e `RENOVI_WEB_BASE_URL`,
+   e redeploy. É esse passo que **abre** as rotas — fazê-lo por último garante que toda
+   pessoa já casa por `cpf_hmac` antes do primeiro push chegar.
+5. Entregar o token à Gestão e validar com `apps/api/docs/ingestion.http` (o `@cpfHmac`
+   de lá é calculado com o MESMO pepper de produção — recalcule).
 
 ## Rollback
 
@@ -135,6 +203,7 @@ curl -fsS http://127.0.0.1:8084/readyz
 | Mudança na borda "não pega" (site novo sem certificado, `SSL alert internal error`; config carregada não lista o domínio) | comparar inodes host×container (ver regra de convivência acima) — bind órfão por `mv` antigo | recriar o container caddy (`up -d --force-recreate --no-deps caddy`) e reconferir `docker exec renovi-caddy-1 grep app.renovisaude /etc/caddy/Caddyfile` |
 | Migration `dirty` no Neon | `cmd/migrate version` mostra `dirty=true`; causa típica: 0008 recusada pela política de senha do Neon | corrigir a causa, `psql "<owner>" -c "UPDATE schema_migrations SET version=<anterior>, dirty=false"` e rodar `migrate up` de novo |
 | VM sem recursos | `free -m`, `df -h`, `docker stats` — a VM tem 1 vCPU/4 GB compartilhados | limites: api 512m, web 128m; se sistêmico, avaliar upgrade do plano Hostinger |
+| Push da Gestão gera convite para quem JÁ tem conta Renovi | `cpf_match` não detectou: `patient_identity.cpf_hmac` estava `NULL` (backfill não rodou, ou pepper ligado depois da conta) — `psql "<owner>" -c "SELECT count(*) FROM patient_identity WHERE cpf_hmac IS NULL"` > 0 | rodar `/backfill-cpf-hmac` (ver "Ligar a ingestão da Gestão"); enquanto a conclusão de onboarding não existe, o convite indevido não cria conta, mas revise a ordem de ativação |
 
 ## LGPD e logs
 

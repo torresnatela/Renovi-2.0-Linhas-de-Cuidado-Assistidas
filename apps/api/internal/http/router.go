@@ -50,6 +50,17 @@ type Deps struct {
 	// AdminToken é o token estático exigido pelas rotas /admin (header
 	// X-Admin-Token). Só é usado quando CareAdmin != nil.
 	AdminToken string
+	// Ingestion monta /integration/gestao/* (push da Gestão, ADR-043). Nil desliga
+	// (sem RENOVI_GESTAO_INTEGRATION_TOKEN/CPF_PEPPER/WEB_BASE_URL). NÃO depende de
+	// Auth: autentica pelo token de integração, nunca pela sessão do paciente.
+	Ingestion *controllers.IngestionController
+	// GestaoIntegrationToken é o token estático exigido pelas rotas /integration
+	// (header X-Integration-Token). Só é usado quando Ingestion != nil.
+	GestaoIntegrationToken string
+	// Onboarding monta as rotas públicas /onboarding/{token} (conclusão do cadastro
+	// pelo convite da Gestão, ADR-044). Nil desliga (sem CPF_PEPPER). NÃO depende de
+	// Auth: o token do convite na URL é a credencial, não a sessão do paciente.
+	Onboarding *controllers.OnboardingController
 	// RegisterTimeout é o teto da rota de cadastro, que fala com a DAV de forma
 	// síncrona. Deve vir de config.DAVBudget() + folga; zero cai num default.
 	RegisterTimeout time.Duration
@@ -135,6 +146,20 @@ func NewRouter(d Deps) *chi.Mux {
 		// presente E agenda disponível — ver cmd/api/main.go).
 		if d.CareAdmin != nil {
 			mountCareAdmin(r, *d.CareAdmin, d.AdminToken)
+		}
+
+		// As rotas de integração da Gestão NÃO dependem de Auth: autenticam pelo
+		// token de integração (push, ADR-043), não pela sessão do paciente. Só
+		// sobem quando o main as montou (token + pepper + web base url presentes).
+		if d.Ingestion != nil {
+			mountIngestion(r, *d.Ingestion, d.GestaoIntegrationToken)
+		}
+
+		// A conclusão do onboarding (/onboarding/{token}) é PÚBLICA: o token do
+		// convite é a credencial, não a sessão. Não depende de Auth. Só sobe quando
+		// o main a montou (CPF_PEPPER presente, para verificar o CPF por HMAC).
+		if d.Onboarding != nil {
+			mountOnboarding(r, *d.Onboarding, d.RegisterTimeout)
 		}
 
 		// As rotas internas de teste só EXISTEM quando o main as montou
@@ -276,6 +301,43 @@ func mountCareAdmin(r chi.Router, c controllers.CareLineAdminController, adminTo
 			r.Post("/enrollments", c.CreateEnrollment)
 			r.Post("/enrollments/{enrollment_id}/renew", c.RenewEnrollment)
 			r.Post("/enrollments/{enrollment_id}/end", c.EndEnrollment)
+		})
+	})
+}
+
+// mountIngestion monta as rotas /integration/gestao/*, todas atrás do token de
+// integração. Timeout normal: são escritas rápidas no Postgres próprio (o Notifier
+// stub é local; não há saga lenta como a da DAV).
+func mountIngestion(r chi.Router, c controllers.IngestionController, integrationToken string) {
+	r.Group(func(r chi.Router) {
+		r.Use(controllers.RequireIntegrationToken(integrationToken))
+		r.Use(middleware.Timeout(defaultRouteTimeout))
+
+		r.Route("/integration/gestao", func(r chi.Router) {
+			r.Post("/contracts", c.RecordContract)
+			r.Post("/employees/{cpf_hmac}/resend-invite", c.ResendInvite)
+		})
+	})
+}
+
+// mountOnboarding monta as rotas públicas /onboarding/{token} (conclusão do cadastro
+// pelo convite). NÃO exige sessão nem token de integração: o token cru na URL é a
+// credencial. Rate limit por IP como o /auth/register — é rota pública e a conclusão
+// fala com a DAV. GET e decline usam o timeout normal; a conclusão usa o do cadastro
+// (a DAV é lenta), como o registerTimeout do /auth/register.
+func mountOnboarding(r chi.Router, c controllers.OnboardingController, completeTimeout time.Duration) {
+	r.Group(func(r chi.Router) {
+		r.Use(rateLimitByIP(20, 1.0/3.0))
+
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(defaultRouteTimeout))
+			r.Get("/onboarding/{token}", c.GetInfo)
+			r.Post("/onboarding/{token}/decline", c.Decline)
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(completeTimeout))
+			r.Post("/onboarding/{token}/complete", c.Complete)
 		})
 	})
 }

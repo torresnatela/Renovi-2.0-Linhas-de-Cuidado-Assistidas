@@ -88,6 +88,10 @@ migrate-up: ## Aplica as migrations pendentes no renovi_care
 migrate-down: ## Reverte 1 migration
 	cd $(API_DIR) && go run ./cmd/migrate down 1
 
+.PHONY: backfill-cpf-hmac
+backfill-cpf-hmac: ## Preenche patient_identity.cpf_hmac nas linhas antigas (exige RENOVI_CPF_PEPPER)
+	cd $(API_DIR) && go run ./cmd/backfill-cpf-hmac
+
 # ---------------------------------------------------------------------------
 # Docker Compose (dev local: Postgres + mocks dos bancos externos)
 # ---------------------------------------------------------------------------

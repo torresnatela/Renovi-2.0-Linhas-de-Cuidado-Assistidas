@@ -35,6 +35,19 @@ export interface RegisterRequest {
 }
 
 /**
+ * Pré-preenchimento do convite de onboarding (o que a Gestão já nos mandou). O CPF
+ * NÃO vem aqui: só o cpf_hmac existe do lado de cá — o paciente digita o CPF e a
+ * conclusão o confere por HMAC. `companies` alimenta o passo "você faz parte da
+ * empresa X?".
+ */
+export interface OnboardingInfo {
+  invite_name: string;
+  invite_email?: string;
+  invite_phone?: string;
+  companies: string[];
+}
+
+/**
  * Motivo máquina-legível de um erro ou de um veredito (RFC 7807 §3.2).
  *
  * Existe porque status HTTP não basta: "cedo demais" e "horário tomado" são os
@@ -103,6 +116,25 @@ export async function getHealth(): Promise<HealthStatus> {
 
 export const registerAccount = (body: RegisterRequest) =>
   request<Account>('/auth/register', { method: 'POST', body: JSON.stringify(body) });
+
+// ---------------------------------------------------------------------------
+// Onboarding via convite (Gestão) — rotas públicas /onboarding/{token}
+// ---------------------------------------------------------------------------
+
+/** Dados do convite para pré-preencher o cadastro. O token na URL é a credencial. */
+export const getOnboardingInfo = (token: string) =>
+  request<OnboardingInfo>(`/onboarding/${encodeURIComponent(token)}`);
+
+/** Conclui o cadastro pelo convite (cria a conta, fecha o vínculo e abre a sessão). */
+export const completeOnboarding = (token: string, body: RegisterRequest) =>
+  request<Account>(`/onboarding/${encodeURIComponent(token)}/complete`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+/** Recusa o vínculo com a empresa do convite (registra a recusa; não cria conta). */
+export const declineOnboarding = (token: string) =>
+  request<void>(`/onboarding/${encodeURIComponent(token)}/decline`, { method: 'POST' });
 
 export const login = (cpf: string, password: string) =>
   request<Account>('/auth/login', { method: 'POST', body: JSON.stringify({ cpf, password }) });

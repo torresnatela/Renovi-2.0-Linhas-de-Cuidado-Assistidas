@@ -10,6 +10,8 @@
 package cpf
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,6 +22,11 @@ import (
 // (a resposta HTTP é genérica).
 var ErrInvalid = errors.New("cpf inválido")
 
+// ErrNoPepper recusa um HMAC sem chave. Um HMAC de chave vazia é um digest
+// público (o espaço de CPF é pequeno e qualquer um o recalcula), então gravá-lo
+// derrotaria o propósito do pepper. Falhar é melhor que gravar hash reversível.
+var ErrNoPepper = errors.New("cpf: pepper vazio")
+
 // CPF é um CPF já validado: exatamente 11 dígitos, com os dois dígitos
 // verificadores conferidos. Guarde-o sem formatação — é assim que a DAV o
 // espera (pattern ^\d{3}\d{3}\d{3}\d{2}$) e é assim que ele vai para o banco.
@@ -27,6 +34,24 @@ type CPF string
 
 // String devolve os 11 dígitos, sem pontuação.
 func (c CPF) String() string { return string(c) }
+
+// HMAC devolve o HMAC-SHA256 dos 11 dígitos do CPF sob o pepper dado (32 bytes).
+//
+// É a chave pseudônima da pessoa na integração com a Gestão: o CPF em claro nunca
+// trafega nem sai de patient_identity, mas dois lados que compartilham o mesmo
+// pepper chegam ao mesmo digest e conseguem casar a pessoa (ADR-043).
+//
+// O pepper entra por parâmetro para manter o pacote puro (mesma regra do Parse):
+// quem tem o segredo é a camada de config, não este tipo. Pepper vazio é erro
+// (ErrNoPepper), não um HMAC sem chave.
+func (c CPF) HMAC(pepper []byte) ([]byte, error) {
+	if len(pepper) == 0 {
+		return nil, ErrNoPepper
+	}
+	mac := hmac.New(sha256.New, pepper)
+	mac.Write([]byte(c))
+	return mac.Sum(nil), nil
+}
 
 // formatting são os únicos caracteres que aceitamos e descartamos. Não usamos
 // "remova tudo que não for dígito" de propósito: isso transformaria "9481908984a"

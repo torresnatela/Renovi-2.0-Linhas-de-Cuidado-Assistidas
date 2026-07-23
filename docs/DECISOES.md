@@ -1133,3 +1133,105 @@ mesma jornada/motor/gate para um viewport estreito. A única peça de dado NOVA 
 nó sintético de check-in (puramente de apresentação, sem escrita), e a única cópia
 nova (microcopy do cadastro) corrige uma promessa falsa que já existia no mock, em
 vez de introduzir uma.
+
+## ADR-043 — Ingestão da Gestão é PUSH (a Gestão chama nossa API), não pull (2026-07-22)
+
+**Contexto:** o parceiro cadastra empresas/contratos/colaboradores na Renovi
+Gestão. Queríamos que, ao cadastrar um colaborador lá, o Renovi 2.0 **receba** esse
+vínculo, guarde a referência ao contrato e dispare o convite de onboarding. O
+`ARQUITETURA.md §3` e o `ADR-009` previam o inverso: nós **lermos** o banco da
+Gestão (somente leitura, via "Adapter Gestão") e a ativação ser **manual pelo
+admin**. A `Gestão` ainda nem estava conectada; só havia hooks pré-fiados
+(`enrollment.gestao_contract_id`, `enrollment_period.source` reservando `'gestao'`,
+`patient_account.verified_at`, `RENOVI_GESTAO_DATABASE_URL`).
+
+**Decisão:**
+- **Push, não pull.** A Gestão faz `POST /v1/integration/gestao/contracts` (upsert
+  idempotente por `contract_id`) e `POST .../employees/{cpf_hmac}/resend-invite`.
+  Isso **supera** o mecanismo de pull do `ARQUITETURA §3` e o "manual pelo admin"
+  do `ADR-009` — mas **mantém** a regra inegociável: **nunca escrevemos no banco da
+  Gestão**. Push = a Gestão escreve em NÓS; nós só lemos/gravamos no `renovi_care`.
+- **Autenticação máquina-a-máquina por token estático** (`X-Integration-Token`,
+  `RENOVI_GESTAO_INTEGRATION_TOKEN`), espelhando o `RequireAdminToken` (ADR-022):
+  comparação em tempo constante, ausente/errado respondem igual, nunca logado,
+  vazio DESLIGA as rotas.
+- **Chave da pessoa é `cpf_hmac`, não o CPF em claro.** A Gestão envia
+  `HMAC-SHA256(cpf, CPF_PEPPER)` (hex de 64 chars) com **pepper compartilhado**; o
+  CPF nunca trafega. Adicionamos `patient_identity.cpf_hmac` (coluna ao lado do CPF
+  em claro), populada no cadastro e por `cmd/backfill-cpf-hmac`, para casar a pessoa
+  contra um paciente existente. Trade-off aceito: gerir o mesmo pepper em dois
+  sistemas; e como o espaço de CPF é pequeno, um pepper vazado tornaria o hmac
+  reversível — por isso `cpf.HMAC` recusa pepper vazio e a config o exige em prod.
+- **Sem auto-vínculo no ingest.** Ao receber um contrato de um CPF que já tem
+  `patient_account`, apenas **detectamos** (para não convidar quem já tem conta) e
+  registramos o evento; **não** setamos `vinculado`. Fechar o vínculo de um paciente
+  preexistente exige o **consentimento** do titular (cpf_match, fatia futura). O
+  `gestao_employee_link.patient_id` só é preenchido quando o onboarding fecha.
+- **Convite é stub no piloto.** Porta `Notifier` (interface no consumidor, ADR-012)
+  + `adapters/notify.LogNotifier` que não entrega nada e **nunca loga a URL/token**.
+  O `invite_url` volta **na resposta** dos dois endpoints — o gestor o repassa por
+  WhatsApp. SMTP real fica para depois.
+- **Idempotência e travas no banco.** Upserts por chave da Gestão (`ON CONFLICT`);
+  uma trava parcial só por pessoa viva (`ux_gestao_employee_ativo WHERE status <>
+  'cancelado'`, no padrão de `ux_enrollment_viva`); um convite vivo por pessoa
+  (`ux_token_vivo`), com a corrida absorvida por SAVEPOINT + nome de constraint;
+  `desligado_exige_data` (espelha `cancelada_exige_data`, 0007); e um log
+  append-only `gestao_ingestion_event` (por privilégio, ADR-024), sem CPF em claro.
+- **Escopo desta fatia = fundação de ingestão (casos 1–2).** Conclusão do
+  onboarding (token → conta + fecha vínculo), cpf_match com consentimento
+  (casos 4–5), e-mail real e frontend são fatias seguintes.
+
+**Consequência:** a `Gestão` deixa de ser uma dependência de leitura e passa a ser
+um chamador. `ARQUITETURA §3/§5` e `ADR-009` ficam superados no ponto do mecanismo
+de ativação (não na regra "nunca escrever na Gestão"). O `RENOVI_GESTAO_DATABASE_URL`
+continua na config, mas não é mais o caminho da ativação. Migration `0016`
+(5 tabelas + `patient_identity.cpf_hmac`). Novos env: `RENOVI_CPF_PEPPER`,
+`RENOVI_GESTAO_INTEGRATION_TOKEN`, `RENOVI_INVITE_TTL` (7d), `RENOVI_WEB_BASE_URL`.
+
+## ADR-044 — Conclusão do onboarding pelo convite (token → conta → vínculo) (2026-07-22)
+
+**Contexto:** a fundação de ingestão (ADR-043) cunha o `onboarding_token` e devolve
+o `invite_url` (`{WEB_BASE_URL}/onboarding/<token>`), mas o link não levava a lugar
+nenhum: não havia como consumir o token, criar a conta e **fechar o vínculo** com a
+empresa. Esta fatia fecha o ciclo (casos de uso 1–3 da jornada do colaborador).
+
+**Decisão:**
+- **Três rotas PÚBLICAS `/onboarding/{token}`** — o token cru (base64url de 32 bytes)
+  na URL É a credencial (não há sessão nem token de integração): `GET` (pré-preenchimento),
+  `POST .../complete` (conclui) e `POST .../decline` (recusa). Rate limit por IP como o
+  `/auth/register`; `complete` herda o timeout do cadastro (fala com a DAV).
+- **Reusa a saga do cadastro (`AccountStore.Register`) inteira** — validação, política
+  de senha, vínculo DAV, enrollment universal (ADR-040). O `OnboardingStore` a consome
+  por interface declarada no consumidor (`accountRegistrar`, ADR-012). A criação da conta
+  (multi-TX + DAV lento) roda ANTES; o **fechamento do vínculo é UMA TX curta** ao final,
+  com retry idempotente: `CloseEmployeeLink` (patient_id + status='vinculado' +
+  link_method='convite' + linked_at, o CHECK `vinculado_completo` exige os três juntos) +
+  `accepted_at` nos contratos vivos + `MarkTokenUsed` + evento `onboarding_concluido`.
+- **CPF conferido por HMAC.** O convite só guarda o `cpf_hmac`; o paciente **digita** o
+  CPF (não dá para pré-preencher — o CPF em claro nunca esteve do nosso lado) e a
+  conclusão exige `HMAC(cpf) == cpf_hmac` do convite (comparação em tempo constante),
+  senão `CPF_MISMATCH` (400). Sem isto, um convite fecharia o vínculo para outra pessoa.
+- **CPF que já tem conta → recusa e manda logar (409 `ALREADY_HAS_ACCOUNT`).** O aceite
+  por usuário já cadastrado, com consentimento (casos 4/5), é a **próxima fatia**. Isso
+  mantém esta fatia no caminho do paciente novo e fecha a porta de account-takeover
+  (nunca criar sessão sem senha). Resíduo aceito e documentado: se a conta é criada mas
+  o fechamento do vínculo falha após os retries, um retry cai em 409 — a fatia do aceite
+  logado o resolve.
+- **Recusa registrada no vínculo (não só um beco no front).** No `decline` o
+  `gestao_employee_link` vira `status='recusado'` (novo valor, migration `0017`), o token
+  é revogado e gravamos `onboarding_recusado`. Não cria conta. O que fazer depois com um
+  vínculo recusado (re-convite, etc.) fica **deferido**.
+- **`accepted_at` no contrato é o registro do aceite do vínculo.** Não introduzimos nova
+  `finalidade` de consentimento LGPD nesta fatia (o checkbox de termos do wizard cobre o
+  processamento de dados; o aceite empresa×pessoa é `accepted_at`).
+- **Front:** rota pública `/onboarding/:token` (fora do shell), reusa os passos do
+  `/cadastro` semeados com o convite (nome/e-mail/telefone; CPF vazio) + um passo de
+  confirmação da empresa onde o **SIM é fácil** e o **NÃO exige dupla confirmação**.
+
+**Consequência:** o `invite_url` passa a levar a um fluxo completo (convite → conta
+ACTIVE → matrícula universal → vínculo fechado). Migration `0017` (status `recusado` +
+event types `onboarding_concluido`/`onboarding_recusado`). Novas rotas no OpenAPI
+(`getOnboarding`/`completeOnboarding`/`declineOnboarding`, schema `OnboardingInfo`). As
+rotas sobem quando o cadastro está montado e `RENOVI_CPF_PEPPER` presente. **Fora desta
+fatia:** aceite logado com consentimento (casos 4/5), e-mail SMTP real, matrícula
+automática em linha de cuidado a partir do contrato aceito.

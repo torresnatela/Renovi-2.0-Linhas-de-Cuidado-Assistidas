@@ -1,0 +1,97 @@
+### Roteiro manual da ingestão da Gestão (push, ADR-043)
+#
+# Arquivo REST Client (extensão "REST Client" do VS Code, ou o HTTP Client do
+# IntelliJ). Exercita as rotas /integration/gestao/* à mão, espelhando o teste de
+# integração `internal/models/gestao_ingestion_integration_test.go`.
+#
+# ---------------------------------------------------------------------------
+# Pré-requisitos
+# ---------------------------------------------------------------------------
+#   1. `make up` && `make migrate-up`   — Postgres renovi_care com a migration 0016.
+#   2. Suba a API COM a integração ligada (as três variáveis juntas):
+#
+#        RENOVI_GESTAO_INTEGRATION_TOKEN=dev-integration-token \
+#        RENOVI_CPF_PEPPER=dev-shared-pepper \
+#        RENOVI_WEB_BASE_URL=http://localhost:5173 \
+#        go -C apps/api run ./cmd/api
+#
+#   3. Calcule o cpf_hmac (o que a Gestão mandaria) com o MESMO pepper:
+#
+#        printf '%s' '94819089846' | openssl dgst -sha256 -hmac 'dev-shared-pepper' -r
+#        # -> cole os 64 chars de hex abaixo, em @cpfHmac.
+#
+# ---------------------------------------------------------------------------
+@baseUrl = http://localhost:8090/api/v1
+@token = dev-integration-token
+# cpf_hmac de HMAC-SHA256('94819089846', 'dev-shared-pepper') — recalcule se mudar o pepper:
+@cpfHmac = 73b1ae4ebdf25ea1f52c39ee411c9d26820d9fd5fc9f488e783d063a8a1a79ad
+
+### 1. Primeiro push (colaborador novo) -> person_status=pendente, invite_sent=true, invite_url presente
+POST {{baseUrl}}/integration/gestao/contracts
+X-Integration-Token: {{token}}
+Content-Type: application/json
+
+{
+  "contract_id": "C-1",
+  "status": "ativo",
+  "started_at": "2026-07-22T00:00:00Z",
+  "employee": { "id": "E-1", "cpf_hmac": "{{cpfHmac}}", "name": "Maria de Teste", "email": "maria@example.test" },
+  "company":  { "id": "CO-1", "display_name": "ACME" }
+}
+
+### 2. Re-push do mesmo contrato -> idempotente: invite_sent=false (já há convite vivo)
+POST {{baseUrl}}/integration/gestao/contracts
+X-Integration-Token: {{token}}
+Content-Type: application/json
+
+{
+  "contract_id": "C-1",
+  "status": "ativo",
+  "started_at": "2026-07-22T00:00:00Z",
+  "employee": { "id": "E-1", "cpf_hmac": "{{cpfHmac}}", "name": "Maria de Teste", "email": "maria@example.test" },
+  "company":  { "id": "CO-1", "display_name": "ACME" }
+}
+
+### 3. Transição de status -> afastado (contract_status=afastado, sem novo convite)
+POST {{baseUrl}}/integration/gestao/contracts
+X-Integration-Token: {{token}}
+Content-Type: application/json
+
+{
+  "contract_id": "C-1",
+  "status": "afastado",
+  "started_at": "2026-07-22T00:00:00Z",
+  "employee": { "id": "E-1", "cpf_hmac": "{{cpfHmac}}", "name": "Maria de Teste", "email": "maria@example.test" },
+  "company":  { "id": "CO-1", "display_name": "ACME" }
+}
+
+### 4. Transição -> desligado (contract_status=desligado; ended_at é gravado)
+POST {{baseUrl}}/integration/gestao/contracts
+X-Integration-Token: {{token}}
+Content-Type: application/json
+
+{
+  "contract_id": "C-1",
+  "status": "desligado",
+  "started_at": "2026-07-22T00:00:00Z",
+  "employee": { "id": "E-1", "cpf_hmac": "{{cpfHmac}}", "name": "Maria de Teste", "email": "maria@example.test" },
+  "company":  { "id": "CO-1", "display_name": "ACME" }
+}
+
+### 5. Reenviar convite -> revoga o vivo, cunha outro, devolve novo invite_url + expires_at
+POST {{baseUrl}}/integration/gestao/employees/{{cpfHmac}}/resend-invite
+X-Integration-Token: {{token}}
+
+### 6. Reenviar para cpf_hmac desconhecido -> 404
+POST {{baseUrl}}/integration/gestao/employees/0000000000000000000000000000000000000000000000000000000000000000/resend-invite
+X-Integration-Token: {{token}}
+
+### 7. Sem token / token errado -> 401 idêntico (INTEGRATION_TOKEN_INVALID)
+POST {{baseUrl}}/integration/gestao/contracts
+Content-Type: application/json
+
+{ "contract_id": "C-9", "status": "ativo", "employee": { "id": "E-9", "cpf_hmac": "{{cpfHmac}}", "name": "X" }, "company": { "id": "CO-9", "display_name": "Y" } }
+
+### 8. cpf_hmac malformado (não-hex) -> 400
+POST {{baseUrl}}/integration/gestao/employees/nao-e-hex/resend-invite
+X-Integration-Token: {{token}}
