@@ -74,6 +74,27 @@ func cpfHmacFor(t *testing.T, cpfStr string) []byte {
 	return h
 }
 
+// seedPatientCPF insere uma conta com o status dado e com cpf EM CLARO e cpf_hmac
+// COERENTES (ambos do mesmo CPF) — diferente do seedPatientWithHmac, que usa um cpf
+// dummy com um cpf_hmac arbitrário. É o que a conclusão consulta (FindAccountByCPF).
+func seedPatientCPF(t *testing.T, ctx context.Context, pool *pgxpool.Pool, cpfStr, status string) {
+	t.Helper()
+	c, err := cpf.Parse(cpfStr)
+	require.NoError(t, err)
+	h, err := c.HMAC([]byte(testPepper))
+	require.NoError(t, err)
+	id := uuid.Must(uuid.NewV7())
+	_, err = pool.Exec(ctx, `
+		INSERT INTO patient_account (id, full_name, email, phone, birth_date, password_hash, status)
+		VALUES ($1, 'Paciente', $2, '11999999999', '1990-01-01', 'hash', $3)`,
+		id, id.String()+"@example.test", status)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO patient_identity (account_id, cpf, cpf_hmac) VALUES ($1, $2, $3)`,
+		id, c.String(), h)
+	require.NoError(t, err)
+}
+
 // mintInvite roda a ingestão (que cunha o token) e devolve o token CRU extraído da
 // invite_url — o que chegaria na URL /onboarding/<token>.
 func mintInvite(t *testing.T, ctx context.Context, ing *models.GestaoIngestionStore, cpfHmac []byte) string {
@@ -162,17 +183,39 @@ func TestOnboardingComplete_CPFMismatch(t *testing.T) {
 	assert.Equal(t, 0, accounts, "nenhuma conta pode ser criada")
 }
 
-// CPF que já tem conta: recusa (409) e defere ao aceite logado (fatia futura).
+// CPF que já tem conta ATIVA: recusa (409) e defere ao aceite logado (fatia futura).
 func TestOnboardingComplete_JaTemConta(t *testing.T) {
 	ctx := context.Background()
 	ing, onb, pool := newOnboardingSetup(t)
 	hmacKey := cpfHmacFor(t, validCPF)
 	raw := mintInvite(t, ctx, ing, hmacKey)
-	seedPatientWithHmac(t, ctx, pool, hmacKey)
+	seedPatientCPF(t, ctx, pool, validCPF, "ACTIVE")
 
 	_, err := onb.Complete(ctx, raw, onboardingRegisterInput())
 	assert.ErrorIs(t, err, models.ErrAlreadyHasAccount)
 	assert.Equal(t, 1, liveTokenCount(t, ctx, pool, hmacKey), "o convite não é consumido")
+}
+
+// Retentativa após a DAV falhar no meio da conclusão: a tentativa anterior deixou um
+// stub PENDING_DAV (o reserve grava conta+identidade ANTES de falar com a DAV, então a
+// linha persiste mesmo quando a DAV não confirma). Um PENDING_DAV NÃO é "já tem conta"
+// — a conclusão deve seguir e fechar o vínculo, não travar em 409 e trancar o convidado.
+func TestOnboardingComplete_StubPendingDAVNaoTranca(t *testing.T) {
+	ctx := context.Background()
+	ing, onb, pool := newOnboardingSetup(t)
+	hmacKey := cpfHmacFor(t, validCPF)
+	raw := mintInvite(t, ctx, ing, hmacKey)
+	seedPatientCPF(t, ctx, pool, validCPF, "PENDING_DAV") // stub da tentativa que a DAV não confirmou
+
+	acc, err := onb.Complete(ctx, raw, onboardingRegisterInput())
+	require.NoError(t, err, "um stub PENDING_DAV não pode trancar a conclusão")
+	require.NotEqual(t, uuid.Nil, acc.ID)
+
+	var status string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status FROM gestao_employee_link WHERE cpf_hmac = $1`, hmacKey).Scan(&status))
+	assert.Equal(t, "vinculado", status, "o vínculo fecha na retentativa")
+	assert.Equal(t, 0, liveTokenCount(t, ctx, pool, hmacKey), "o convite é consumido")
 }
 
 func TestOnboardingComplete_TokenExpirado(t *testing.T) {

@@ -119,13 +119,20 @@ func (s *OnboardingStore) Complete(ctx context.Context, rawToken string, in Regi
 	}
 
 	// 2. O CPF digitado tem de ser o do convite (o convite só guarda o cpf_hmac).
-	if err := s.verifyCPF(in.CPF, emp.CpfHmac); err != nil {
+	parsed, err := cpf.Parse(in.CPF)
+	if err != nil {
+		return Account{}, ErrCPFMismatch
+	}
+	if err := s.verifyCPFHmac(parsed, emp.CpfHmac); err != nil {
 		return Account{}, err
 	}
 
-	// 3. CPF que já tem conta → recusa e manda logar. O aceite por usuário já cadastrado
-	// (com consentimento) é fatia futura (casos 4/5); aqui só o caminho do paciente novo.
-	exists, err := s.patientExists(ctx, emp.CpfHmac)
+	// 3. CPF que já tem conta ATIVA → recusa e defere ao consentimento (fatia futura,
+	// casos 4/5). Só ACTIVE conta: um stub PENDING_DAV — inclusive o que uma tentativa
+	// ANTERIOR desta própria conclusão deixou quando a DAV não confirmou (o reserve grava
+	// conta+identidade ANTES de falar com a DAV) — não é "já tem conta". Bloqueá-lo
+	// trancaria o convidado, pois o Register reaproveita o PENDING_DAV na retentativa.
+	exists, err := s.hasActiveAccount(ctx, parsed)
 	if err != nil {
 		return Account{}, err
 	}
@@ -248,16 +255,12 @@ func ensurePendente(status string) error {
 	}
 }
 
-// verifyCPF confere que o CPF digitado corresponde ao cpf_hmac do convite (comparação
-// em tempo constante). CPF malformado conta como não-correspondência.
-func (s *OnboardingStore) verifyCPF(rawCPF string, want []byte) error {
-	parsed, err := cpf.Parse(rawCPF)
+// verifyCPFHmac confere que o CPF (já validado) corresponde ao cpf_hmac do convite, em
+// tempo constante. pepper ausente é erro de config (a rota só sobe com pepper).
+func (s *OnboardingStore) verifyCPFHmac(c cpf.CPF, want []byte) error {
+	got, err := c.HMAC(s.pepper)
 	if err != nil {
-		return ErrCPFMismatch
-	}
-	got, err := parsed.HMAC(s.pepper)
-	if err != nil {
-		return fmt.Errorf("verificar cpf do convite: %w", err) // pepper ausente: erro de config
+		return fmt.Errorf("verificar cpf do convite: %w", err)
 	}
 	if !hmac.Equal(got, want) {
 		return ErrCPFMismatch
@@ -265,15 +268,19 @@ func (s *OnboardingStore) verifyCPF(rawCPF string, want []byte) error {
 	return nil
 }
 
-func (s *OnboardingStore) patientExists(ctx context.Context, cpfHmac []byte) (bool, error) {
-	_, err := s.q.FindIdentityByCPFHmac(ctx, cpfHmac)
+// hasActiveAccount diz se JÁ existe conta ATIVA para este CPF (o convidado a digitou e
+// ela já foi conferida contra o convite). Chave é o CPF em claro, o que pega inclusive
+// contas ACTIVE cujo cpf_hmac ainda seja NULL (pré-backfill). PENDING_DAV NÃO conta —
+// é um cadastro que a DAV não confirmou, e a conclusão deve poder reaproveitá-lo.
+func (s *OnboardingStore) hasActiveAccount(ctx context.Context, c cpf.CPF) (bool, error) {
+	row, err := s.q.FindAccountByCPF(ctx, c.String())
 	switch {
 	case err == nil:
-		return true, nil
+		return row.Status == statusActive, nil
 	case errors.Is(err, pgx.ErrNoRows):
 		return false, nil
 	default:
-		return false, fmt.Errorf("detectar paciente por cpf_hmac: %w", err)
+		return false, fmt.Errorf("detectar conta ativa por cpf: %w", err)
 	}
 }
 
